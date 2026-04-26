@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+const API_BASE = "http://localhost:8100";
+
 function uniqueEmail(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}@example.com`;
 }
@@ -39,23 +41,45 @@ function chapterEditor(page: Page) {
   return page.locator("[aria-label='章节正文'] [contenteditable='true']");
 }
 
+async function elementWidth(locator: ReturnType<Page["getByTestId"]>) {
+  const box = await locator.boundingBox();
+  if (!box) throw new Error("Expected element to have a bounding box");
+  return box.width;
+}
+
+async function dragSeparator(page: Page, name: string, deltaX: number) {
+  const separator = page.getByRole("separator", { name });
+  await expect(separator).toBeVisible();
+  const box = await separator.boundingBox();
+  if (!box) throw new Error(`Expected separator "${name}" to have a bounding box`);
+  const startX = box.x + box.width / 2;
+  const startY = box.y + box.height / 2;
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(startX + deltaX, startY, { steps: 12 });
+  await page.mouse.up();
+}
+
 async function grantPoints(page: Page) {
-  await page.evaluate(async () => {
-    const products = await fetch("http://localhost:8100/billing/products", {
+  await page.evaluate(async (apiBase) => {
+    const csrf = await fetch(`${apiBase}/csrf`, {
+      credentials: "include"
+    }).then((response) => response.json() as Promise<{ csrf_token: string }>);
+    const products = await fetch(`${apiBase}/billing/products`, {
       credentials: "include"
     }).then((response) => response.json());
-    const order = await fetch("http://localhost:8100/billing/orders", {
+    const order = await fetch(`${apiBase}/billing/orders`, {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf.csrf_token },
       body: JSON.stringify({ product_type: "topup_pack", product_id: products.topup_packs[0].id })
     }).then((response) => response.json());
-    await fetch(`http://localhost:8100/billing/orders/${order.id}/simulate-paid`, {
+    await fetch(`${apiBase}/billing/orders/${order.id}/simulate-paid`, {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json" }
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf.csrf_token }
     });
-  });
+  }, API_BASE);
 }
 
 test("landing page presents the product and primary actions", async ({ page }) => {
@@ -69,6 +93,56 @@ test("user can log in and create a fully described work", async ({ page }) => {
   await login(page);
   await createWork(page);
   await expect(page.getByLabel("章节标题")).toBeVisible();
+});
+
+test("workspace panels resize, stay usable, and restore the saved layout", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await login(page);
+  await createWork(page);
+  await grantPoints(page);
+
+  const sidebar = page.getByTestId("workspace-sidebar-panel");
+  const editor = page.getByTestId("workspace-editor-panel");
+  const chat = page.getByTestId("workspace-chat-panel");
+  await expect(sidebar).toBeVisible();
+  await expect(editor).toBeVisible();
+  await expect(chat).toBeVisible();
+  await expect(chapterEditor(page)).toBeVisible();
+  await expect(page.getByLabel("AI 对话输入")).toBeVisible();
+
+  const sidebarBefore = await elementWidth(sidebar);
+  await dragSeparator(page, "调整目录与正文宽度", 90);
+  await expect.poll(() => elementWidth(sidebar)).toBeGreaterThan(sidebarBefore + 40);
+  await page.getByRole("button", { name: "章节", exact: true }).click();
+  await expect(page.getByRole("button", { name: /1\. 第一章/ })).toBeVisible();
+
+  const chatBefore = await elementWidth(chat);
+  await dragSeparator(page, "调整正文与对话宽度", -130);
+  await expect.poll(() => elementWidth(chat)).toBeGreaterThan(chatBefore + 60);
+  const chatAfterResize = await elementWidth(chat);
+  await chatEditor(page).fill("帮我构思后续情节");
+  await expect(chatEditor(page)).toContainText("帮我构思后续情节");
+  await expect(page.getByRole("button", { name: "发送消息" })).toBeEnabled();
+
+  await page.reload();
+  await expect(page.getByLabel("AI 对话输入")).toBeVisible();
+  await expect.poll(() => elementWidth(page.getByTestId("workspace-chat-panel"))).toBeGreaterThan(chatAfterResize - 24);
+
+  await dragSeparator(page, "调整正文与对话宽度", 1000);
+  await expect(chapterEditor(page)).toBeVisible();
+  await expect(page.getByLabel("AI 对话输入")).toBeVisible();
+  await expect.poll(() => elementWidth(page.getByTestId("workspace-editor-panel"))).toBeGreaterThan(240);
+  await expect.poll(() => elementWidth(page.getByTestId("workspace-chat-panel"))).toBeGreaterThan(160);
+
+  await page.setViewportSize({ width: 820, height: 720 });
+  await expect(sidebar).toBeVisible();
+  await expect(editor).toBeVisible();
+  await expect(chat).toBeVisible();
+  await expect(chapterEditor(page)).toBeVisible();
+  await expect(page.getByLabel("AI 对话输入")).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1))
+    .toBe(true);
 });
 
 test("workspace chat restores a session and streams an AI reply", async ({ page }) => {

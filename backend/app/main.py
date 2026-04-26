@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import router, seed_defaults
+from app.api.routes import csrf_protect, router, seed_defaults
 from app.core.config import get_settings
 from app.core.database import SessionLocal, init_database
 
@@ -25,8 +25,9 @@ def create_app() -> FastAPI:
         allow_origins=settings.cors_origin_list,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type", "Authorization"],
+        allow_headers=["Content-Type", "Authorization", "X-CSRF-Token"],
     )
+    app.middleware("http")(csrf_protect)
     app.include_router(router)
     return app
 

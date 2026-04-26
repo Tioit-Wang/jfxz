@@ -88,9 +88,13 @@ async function expectPagination(page: Page) {
 
 async function logout(page: Page) {
   await page.evaluate(async (apiBase) => {
+    const csrf = await fetch(`${apiBase}/csrf`, {
+      credentials: "include",
+    }).then((response) => response.json() as Promise<{ csrf_token: string }>);
     await fetch(`${apiBase}/auth/logout`, {
       credentials: "include",
       method: "POST",
+      headers: { "X-CSRF-Token": csrf.csrf_token },
     });
   }, API_BASE);
 }
@@ -128,14 +132,28 @@ async function seedBusinessData(page: Page) {
 
   const data = await page.evaluate(
     async ({ apiBase, workTitle, sessionTitle }) => {
+      let csrfToken = "";
+
+      async function csrf() {
+        if (csrfToken) return csrfToken;
+        const response = await fetch(`${apiBase}/csrf`, {
+          credentials: "include",
+        });
+        csrfToken = ((await response.json()) as { csrf_token: string }).csrf_token;
+        return csrfToken;
+      }
+
       async function request<T>(path: string, init: RequestInit = {}) {
+        const method = (init.method || "GET").toString().toUpperCase();
+        const headers = new Headers(init.headers);
+        headers.set("Content-Type", "application/json");
+        if (method !== "GET") {
+          headers.set("X-CSRF-Token", await csrf());
+        }
         const response = await fetch(`${apiBase}${path}`, {
           ...init,
           credentials: "include",
-          headers: {
-            "Content-Type": "application/json",
-            ...(init.headers || {}),
-          },
+          headers,
         });
         if (!response.ok) {
           throw new Error(`${path} failed with ${response.status}: ${await response.text()}`);

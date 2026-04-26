@@ -14,6 +14,28 @@ function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), { status });
 }
 
+function csrfResponse(token = "csrf-token"): Response {
+  return jsonResponse({ csrf_token: token });
+}
+
+function apiCalls(fetcher: { mock: { calls: Array<Parameters<typeof fetch>> } }) {
+  return fetcher.mock.calls.filter((call) => !String(call[0]).endsWith("/csrf"));
+}
+
+function queuedFetcher(...responses: Response[]) {
+  const queue = [...responses];
+  return vi.fn<typeof fetch>(async (input) => {
+    if (String(input).endsWith("/csrf")) {
+      return csrfResponse();
+    }
+    const response = queue.shift();
+    if (!response) {
+      throw new Error(`Unexpected fetch call: ${String(input)}`);
+    }
+    return response;
+  });
+}
+
 describe("api client", () => {
   it("normalizes urls and maps api shapes", () => {
     expect(normalizeBaseUrl("http://api///")).toBe("http://api");
@@ -437,6 +459,45 @@ describe("api client", () => {
     await expect(client.listWorks()).rejects.toMatchObject(new ApiError("nope", 403));
     expect((fetcher.mock.calls[0][1]?.headers as Headers).get("Authorization")).toBeNull();
     expect(fetcher.mock.calls[0][1]?.credentials).toBe("include");
+  });
+
+  it("sends csrf tokens for writes but not reads", async () => {
+    const fetcher = queuedFetcher(
+      jsonResponse([]),
+      jsonResponse({ id: "w1", title: "新作", short_intro: "", synopsis: "", genre_tags: [], background_rules: "" })
+    );
+    const client = new ApiClient("http://api", fetcher);
+
+    await expect(client.listWorks()).resolves.toEqual([]);
+    await expect(client.createWork("新作")).resolves.toMatchObject({ id: "w1" });
+
+    const calls = apiCalls(fetcher);
+    expect((calls[0][1]?.headers as Headers).get("X-CSRF-Token")).toBeNull();
+    expect((calls[1][1]?.headers as Headers).get("X-CSRF-Token")).toBe("csrf-token");
+  });
+
+  it("fetches and refreshes csrf tokens when needed", async () => {
+    document.cookie = "jfxz_csrf=; Max-Age=0; path=/";
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/csrf") && fetcher.mock.calls.filter((call) => String(call[0]).endsWith("/csrf")).length === 1) {
+        return csrfResponse("stale-token");
+      }
+      if (url.endsWith("/csrf")) {
+        return csrfResponse("fresh-token");
+      }
+      if (url.endsWith("/works") && fetcher.mock.calls.filter((call) => String(call[0]).endsWith("/works")).length === 1) {
+        return new Response("invalid csrf token", { status: 403 });
+      }
+      return jsonResponse({ id: "w1", title: "新作", short_intro: "", synopsis: "", genre_tags: [], background_rules: "" });
+    });
+    const client = new ApiClient("http://api", fetcher);
+
+    await expect(client.createWork("新作")).resolves.toMatchObject({ id: "w1" });
+
+    const writeCalls = fetcher.mock.calls.filter((call) => String(call[0]).endsWith("/works"));
+    expect((writeCalls[0][1]?.headers as Headers).get("X-CSRF-Token")).toBe("stale-token");
+    expect((writeCalls[1][1]?.headers as Headers).get("X-CSRF-Token")).toBe("fresh-token");
   });
 
   it("calls auth and admin endpoints with cookie credentials", async () => {

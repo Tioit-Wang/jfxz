@@ -1,4 +1,7 @@
+import hashlib
+import hmac
 import json
+import secrets
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -9,7 +12,7 @@ import httpx
 from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, EmailStr, Field, ValidationError
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,9 +50,11 @@ router = APIRouter()
 REFERENCE_LIMIT = 20
 USER_COOKIE = "jfxz_session"
 ADMIN_COOKIE = "jfxz_admin_session"
+CSRF_COOKIE = "jfxz_csrf"
 SECRET_MASK = "******"
 MAX_LOGIN_FAILURES = 5
 LOGIN_LOCK_SECONDS = 15 * 60
+UNSAFE_METHODS = {"POST", "PATCH", "DELETE"}
 _login_failures: dict[tuple[str, str, str], list[datetime]] = {}
 
 
@@ -176,6 +181,75 @@ def public_config(config: GlobalConfig) -> dict[str, Any]:
     return data
 
 
+def csrf_signature(nonce: str, secret: str) -> str:
+    return hmac.new(secret.encode("utf-8"), nonce.encode("ascii"), hashlib.sha256).hexdigest()
+
+
+def issue_csrf_token() -> str:
+    nonce = secrets.token_urlsafe(32)
+    return f"{nonce}.{csrf_signature(nonce, get_settings().jwt_secret)}"
+
+
+def valid_csrf_token(token: str) -> bool:
+    parts = token.split(".")
+    if len(parts) != 2:
+        return False
+    nonce, signature = parts
+    if not nonce or not signature:
+        return False
+    expected = csrf_signature(nonce, get_settings().jwt_secret)
+    return hmac.compare_digest(signature, expected)
+
+
+def set_csrf_cookie(response: Response) -> str:
+    token = issue_csrf_token()
+    response.set_cookie(
+        CSRF_COOKIE,
+        token,
+        max_age=get_settings().user_session_seconds,
+        httponly=False,
+        secure=get_settings().is_production,
+        samesite="lax",
+        path="/",
+    )
+    return token
+
+
+def clear_csrf_cookie(response: Response) -> None:
+    response.delete_cookie(CSRF_COOKIE, path="/", httponly=False, samesite="lax", secure=get_settings().is_production)
+
+
+def request_origin_allowed(request: Request) -> bool:
+    origin = request.headers.get("origin")
+    if not origin:
+        return True
+    return origin in get_settings().cors_origin_list
+
+
+def request_needs_csrf(request: Request) -> bool:
+    if request.method not in UNSAFE_METHODS:
+        return False
+    if request.url.path == "/csrf":
+        return False
+    authorization = request.headers.get("authorization", "")
+    if authorization.startswith("Bearer ") and not get_settings().is_production:
+        return False
+    return bool(request.headers.get("origin"))
+
+
+async def csrf_protect(request: Request, call_next: Any) -> Response:
+    if request.method in UNSAFE_METHODS and not request_origin_allowed(request):
+        return JSONResponse(status_code=403, content={"detail": "origin not allowed"})
+    if request_needs_csrf(request):
+        header_token = request.headers.get("x-csrf-token")
+        cookie_token = request.cookies.get(CSRF_COOKIE)
+        if not header_token or not cookie_token or not hmac.compare_digest(header_token, cookie_token):
+            return JSONResponse(status_code=403, content={"detail": "invalid csrf token"})
+        if not valid_csrf_token(header_token):
+            return JSONResponse(status_code=403, content={"detail": "invalid csrf token"})
+    return await call_next(request)
+
+
 async def one(session: AsyncSession, statement: Select[Any]) -> Any:
     result = await session.execute(statement)
     return result.scalar_one_or_none()
@@ -196,10 +270,11 @@ async def must_get_in_work(session: AsyncSession, model: type[Any], item_id: str
 
 
 def client_ip(request: Request) -> str:
+    remote_host = request.client.host if request.client else "unknown"
     forwarded_for = request.headers.get("x-forwarded-for")
-    if forwarded_for:
+    if forwarded_for and remote_host in get_settings().trusted_proxy_ip_set:
         return forwarded_for.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    return remote_host
 
 
 def login_key(request: Request, email: str, scope: str) -> tuple[str, str, str]:
@@ -329,6 +404,25 @@ async def ensure_point_account(session: AsyncSession, user_id: str) -> PointAcco
     return account
 
 
+async def consume_point(session: AsyncSession, user_id: str) -> str:
+    await ensure_point_account(session, user_id)
+    monthly = await session.execute(
+        update(PointAccount)
+        .where(PointAccount.user_id == user_id, PointAccount.monthly_points_balance >= 1)
+        .values(monthly_points_balance=PointAccount.monthly_points_balance - 1)
+    )
+    if monthly.rowcount:
+        return "monthly"
+    topup = await session.execute(
+        update(PointAccount)
+        .where(PointAccount.user_id == user_id, PointAccount.topup_points_balance >= 1)
+        .values(topup_points_balance=PointAccount.topup_points_balance - 1)
+    )
+    if topup.rowcount:
+        return "topup"
+    raise HTTPException(status_code=402, detail="points not enough")
+
+
 async def owned_work(session: AsyncSession, user_id: str, work_id: str) -> Work:
     work = await session.get(Work, work_id)
     if work is None or work.user_id != user_id:
@@ -428,7 +522,13 @@ def auth_response(response: Response, user: User, token_type: str) -> dict[str, 
     clear_session_cookie(response, USER_COOKIE if token_type == "admin" else ADMIN_COOKIE)
     token = issue_token(user.id, user.role, settings.jwt_secret, token_type=token_type, ttl_seconds=ttl)
     set_session_cookie(response, cookie_name, token, ttl)
+    set_csrf_cookie(response)
     return {"user": public(user)}
+
+
+@router.get("/csrf")
+async def csrf(response: Response) -> dict[str, str]:
+    return {"csrf_token": set_csrf_cookie(response)}
 
 
 @router.post("/auth/register")
@@ -522,6 +622,7 @@ async def admin_login(
 async def logout(response: Response) -> dict[str, bool]:
     clear_session_cookie(response, USER_COOKIE)
     clear_session_cookie(response, ADMIN_COOKIE)
+    clear_csrf_cookie(response)
     return {"ok": True}
 
 
@@ -937,12 +1038,7 @@ async def analyze_chapter(
     if account.monthly_points_balance + account.topup_points_balance < 1:
         raise HTTPException(status_code=402, detail="points not enough")
     suggestions = await request_deepseek_analysis(text)
-    if account.monthly_points_balance > 0:
-        account.monthly_points_balance -= 1
-        bucket = "monthly"
-    else:
-        account.topup_points_balance -= 1
-        bucket = "topup"
+    bucket = await consume_point(session, user.id)
     session.add(
         PointTransaction(
             user_id=user.id,
@@ -1208,15 +1304,7 @@ async def send_chat_message(
     chat = await must_get(session, ChatSession, session_id)
     if chat.user_id != user.id:
         raise HTTPException(status_code=404, detail="session not found")
-    account = await ensure_point_account(session, user.id)
-    if account.monthly_points_balance + account.topup_points_balance < 1:
-        raise HTTPException(status_code=402, detail="points not enough")
-    if account.monthly_points_balance > 0:
-        account.monthly_points_balance -= 1
-        bucket = "monthly"
-    else:
-        account.topup_points_balance -= 1
-        bucket = "topup"
+    bucket = await consume_point(session, user.id)
     session.add(
         PointTransaction(
             user_id=user.id,
@@ -1333,12 +1421,19 @@ async def create_order(
 
 
 async def grant_order(session: AsyncSession, order: BillingOrder) -> None:
-    if order.status == "paid":
+    paid_at = now()
+    marked_paid = await session.execute(
+        update(BillingOrder)
+        .where(BillingOrder.id == order.id, BillingOrder.status != "paid")
+        .values(status="paid", paid_at=paid_at)
+    )
+    if not marked_paid.rowcount:
+        await session.refresh(order)
         return
     _name, _amount, monthly, topup, expire_days = await product_snapshot(session, order.product_type, order.product_id)
     account = await ensure_point_account(session, order.user_id)
     order.status = "paid"
-    order.paid_at = now()
+    order.paid_at = paid_at
     if monthly:
         account.monthly_points_balance += monthly
         session.add(
@@ -1429,7 +1524,8 @@ async def get_order(
 async def simulate_paid(
     order_id: str, user: User = Depends(current_user), session: AsyncSession = Depends(get_session)
 ) -> dict[str, Any]:
-    if get_settings().env not in {"development", "test"}:
+    settings = get_settings()
+    if settings.is_production or not settings.enable_payment_simulator:
         raise HTTPException(status_code=404, detail="not found")
     order = await must_get(session, BillingOrder, order_id)
     if order.user_id != user.id:

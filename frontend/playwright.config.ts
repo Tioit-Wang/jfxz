@@ -15,6 +15,7 @@ export default defineConfig({
       env: {
         JFXZ_DATABASE_URL: "sqlite+aiosqlite:///./e2e.db",
         JFXZ_ENV: "test",
+        JFXZ_ENABLE_PAYMENT_SIMULATOR: "true",
         JFXZ_BOOTSTRAP_ADMIN_EMAIL: "admin@example.com",
         JFXZ_BOOTSTRAP_ADMIN_PASSWORD: "admin123"
       },

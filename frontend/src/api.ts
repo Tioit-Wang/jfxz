@@ -292,6 +292,17 @@ export function defaultApiBaseUrl(): string {
   return "http://127.0.0.1:8000";
 }
 
+function csrfCookieToken(): string | null {
+  if (typeof document === "undefined") {
+    return null;
+  }
+  const cookie = document.cookie
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith("jfxz_csrf="));
+  return cookie ? decodeURIComponent(cookie.slice("jfxz_csrf=".length)) : null;
+}
+
 export function mapWork(work: ApiWork): Work {
   return {
     id: work.id,
@@ -434,6 +445,8 @@ function mapChatMessage(message: {
 }
 
 export class ApiClient {
+  private csrfToken: string | null = null;
+
   constructor(
     private readonly baseUrl = defaultApiBaseUrl(),
     private readonly fetcher: Fetcher = (...args) => fetch(...args)
@@ -948,9 +961,38 @@ export class ApiClient {
     return (await response.json()) as T;
   }
 
-  private async rawRequest(path: string, init: RequestInit = {}): Promise<Response> {
+  private async fetchCsrfToken(forceRefresh = false): Promise<string> {
+    if (this.csrfToken && !forceRefresh) {
+      return this.csrfToken;
+    }
+    const cookieToken = csrfCookieToken();
+    if (cookieToken && !forceRefresh) {
+      this.csrfToken = cookieToken;
+      return this.csrfToken;
+    }
+    const response = await this.fetcher(`${normalizeBaseUrl(this.baseUrl)}/csrf`, {
+      cache: "no-store",
+      credentials: "include"
+    });
+    if (!response.ok) {
+      throw new ApiError(await response.text(), response.status);
+    }
+    const data = (await response.json()) as { csrf_token?: string };
+    if (!data.csrf_token) {
+      throw new ApiError("missing csrf token", response.status);
+    }
+    this.csrfToken = data.csrf_token;
+    return this.csrfToken;
+  }
+
+  private async rawRequest(path: string, init: RequestInit = {}, retriedCsrf = false): Promise<Response> {
     const headers = new Headers(init.headers);
     headers.set("Content-Type", "application/json");
+    const method = (init.method ?? "GET").toUpperCase();
+    const needsCsrf = method !== "GET" && method !== "HEAD" && method !== "OPTIONS";
+    if (needsCsrf) {
+      headers.set("X-CSRF-Token", await this.fetchCsrfToken(retriedCsrf));
+    }
     const response = await this.fetcher(`${normalizeBaseUrl(this.baseUrl)}${path}`, {
       ...init,
       headers,
@@ -958,7 +1000,12 @@ export class ApiClient {
       credentials: "include"
     });
     if (!response.ok) {
-      throw new ApiError(await response.text(), response.status);
+      const message = await response.text();
+      if (needsCsrf && response.status === 403 && !retriedCsrf && message.toLowerCase().includes("csrf")) {
+        this.csrfToken = null;
+        return this.rawRequest(path, init, true);
+      }
+      throw new ApiError(message, response.status);
     }
     return response;
   }

@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator
 
 os.environ["JFXZ_DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 os.environ["JFXZ_ENV"] = "test"
+os.environ["JFXZ_ENABLE_PAYMENT_SIMULATOR"] = "true"
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient

@@ -473,6 +473,50 @@ async def test_auth_contract_rejects_takeover_and_migrates_legacy_hash(client: A
     assert (await session.get(User, user_id)).email == "takeover@example.com"
 
 
+async def test_csrf_origin_and_token_contract(client: AsyncClient) -> None:
+    origin = "http://localhost:3000"
+    payload = {"email": "csrf@example.com", "nickname": "Csrf", "password": "user12345"}
+
+    assert (await client.post("/csrf", headers={"Origin": origin})).status_code == 405
+    assert (await client.post("/auth/register", headers={"Origin": origin}, json=payload)).status_code == 403
+    assert routes_module.valid_csrf_token("broken") is False
+    assert routes_module.valid_csrf_token(".signature") is False
+
+    token = (await client.get("/csrf", headers={"Origin": origin})).json()["csrf_token"]
+    response = await client.post(
+        "/auth/register",
+        headers={"Origin": origin, "X-CSRF-Token": token},
+        json=payload,
+    )
+    assert response.status_code == 200
+    token = client.cookies.get("jfxz_csrf")
+    assert token
+
+    assert (await client.patch("/me", headers={"Origin": origin}, json={"nickname": "Blocked"})).status_code == 403
+    assert (
+        await client.patch(
+            "/me",
+            headers={"Origin": "https://evil.test", "X-CSRF-Token": token},
+            json={"nickname": "Blocked"},
+        )
+    ).status_code == 403
+    assert (
+        await client.patch(
+            "/me",
+            headers={"Origin": origin, "X-CSRF-Token": token},
+            json={"nickname": "Allowed"},
+        )
+    ).json()["nickname"] == "Allowed"
+    client.cookies.set("jfxz_csrf", "bad.token")
+    assert (
+        await client.patch(
+            "/me",
+            headers={"Origin": origin, "X-CSRF-Token": "bad.token"},
+            json={"nickname": "Blocked"},
+        )
+    ).status_code == 403
+
+
 async def test_login_lockout_logout_cookie_and_duplicate_register(client: AsyncClient) -> None:
     payload = {"email": "lockout@example.com", "nickname": "Lock", "password": "correct123"}
     assert (await client.post("/auth/register", json=payload)).status_code == 200
@@ -485,7 +529,8 @@ async def test_login_lockout_logout_cookie_and_duplicate_register(client: AsyncC
     assert (
         await client.post("/auth/login", json={"email": "lockout@example.com", "password": "correct123"})
     ).status_code == 429
-    assert (await client.post("/auth/logout")).json() == {"ok": True}
+    csrf = (await client.get("/csrf")).json()["csrf_token"]
+    assert (await client.post("/auth/logout", headers={"X-CSRF-Token": csrf})).json() == {"ok": True}
 
 
 async def test_admin_login_replaces_existing_user_cookie(client: AsyncClient) -> None:
@@ -568,7 +613,7 @@ def test_create_admin_cli_prints_password_and_exits_on_duplicate(
     assert str(exited.value) == "email already exists: cli@example.com"
 
 
-def test_settings_and_token_validation_edges() -> None:
+def test_settings_and_token_validation_edges(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = Settings(env="DEVELOPMENT", cors_origins="http://a.test, http://b.test")
     assert settings.env == "development"
     assert settings.cors_origin_list == ["http://a.test", "http://b.test"]
@@ -589,7 +634,13 @@ def test_settings_and_token_validation_edges() -> None:
     assert read_token(signed_test_token(json.dumps(missing_subject).encode(), "secret"), "secret") is None
     assert password_needs_rehash("not-a-real-hash") is True
     assert verify_password("pw", "not-a-real-hash") is False
-    request = type("RequestStub", (), {"headers": {"x-forwarded-for": "203.0.113.1, 10.0.0.1"}, "client": None})()
+    request = type(
+        "RequestStub",
+        (),
+        {"headers": {"x-forwarded-for": "203.0.113.1, 10.0.0.1"}, "client": type("ClientStub", (), {"host": "10.0.0.10"})()},
+    )()
+    assert client_ip(request) == "10.0.0.10"
+    monkeypatch.setattr(routes_module, "get_settings", lambda: Settings(env="test", trusted_proxy_ips="10.0.0.10"))
     assert client_ip(request) == "203.0.113.1"
 
 
@@ -678,7 +729,16 @@ async def test_payment_confirmation_guards_and_prod_simulation_gate(
         await confirm_verified_payment(session, payment, {"trade_status": "WAIT_BUYER_PAY"}, "ALI-1")
     assert status_error.value.status_code == 400
 
-    monkeypatch.setattr(routes_module, "get_settings", lambda: Settings(env="production", jwt_secret="x" * 32))
+    monkeypatch.setattr(routes_module, "get_settings", lambda: Settings(env="test", enable_payment_simulator=False))
+    with pytest.raises(HTTPException) as disabled_error:
+        await simulate_paid(order["id"], user, session)
+    assert disabled_error.value.status_code == 404
+
+    monkeypatch.setattr(
+        routes_module,
+        "get_settings",
+        lambda: Settings(env="production", jwt_secret="x" * 32, enable_payment_simulator=True),
+    )
     with pytest.raises(HTTPException) as prod_error:
         await simulate_paid(order["id"], user, session)
     assert prod_error.value.status_code == 404

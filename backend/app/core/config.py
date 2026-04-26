@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     cors_origins: str = "http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:3100,http://localhost:3100"
     user_session_seconds: int = 60 * 60 * 24
     admin_session_seconds: int = 60 * 60 * 2
+    enable_payment_simulator: bool = False
+    trusted_proxy_ips: str = ""
     bootstrap_admin_email: str | None = None
     bootstrap_admin_password: str | None = None
     deepseek_api_key: str | None = None
@@ -42,9 +44,14 @@ class Settings(BaseSettings):
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
+    @property
+    def trusted_proxy_ip_set(self) -> set[str]:
+        return {ip.strip() for ip in self.trusted_proxy_ips.split(",") if ip.strip()}
+
     @model_validator(mode="after")
     def validate_security_settings(self) -> "Settings":
         if self.is_production:
+            self.enable_payment_simulator = False
             if self.jwt_secret == "dev-secret" or len(self.jwt_secret.encode("utf-8")) < 32:
                 raise ValueError("JFXZ_JWT_SECRET must be at least 32 bytes in production")
             if "*" in self.cors_origin_list:

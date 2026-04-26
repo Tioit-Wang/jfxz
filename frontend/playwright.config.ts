@@ -10,7 +10,8 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: "python -m uvicorn app.main:app --host 127.0.0.1 --port 8100",
+      command:
+        "python -c \"from pathlib import Path; [Path(name).unlink(missing_ok=True) for name in ('e2e.db', 'e2e.db-shm', 'e2e.db-wal')]\" && python -m uvicorn app.main:app --host 127.0.0.1 --port 8100",
       cwd: "../backend",
       env: {
         JFXZ_DATABASE_URL: "sqlite+aiosqlite:///./e2e.db",
@@ -19,7 +20,7 @@ export default defineConfig({
         JFXZ_BOOTSTRAP_ADMIN_EMAIL: "admin@example.com",
         JFXZ_BOOTSTRAP_ADMIN_PASSWORD: "admin123"
       },
-      reuseExistingServer: true,
+      reuseExistingServer: false,
       timeout: 120_000,
       url: "http://127.0.0.1:8100/health"
     },

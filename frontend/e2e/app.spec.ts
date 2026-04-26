@@ -62,22 +62,28 @@ async function dragSeparator(page: Page, name: string, deltaX: number) {
 
 async function grantPoints(page: Page) {
   await page.evaluate(async (apiBase) => {
-    const csrf = await fetch(`${apiBase}/csrf`, {
-      credentials: "include"
-    }).then((response) => response.json() as Promise<{ csrf_token: string }>);
+    const csrf = document.cookie
+      .split(";")
+      .map((part) => part.trim())
+      .find((part) => part.startsWith("jfxz_csrf="))
+      ?.slice("jfxz_csrf=".length);
+    if (!csrf) {
+      throw new Error("missing csrf cookie");
+    }
+    const csrfToken = decodeURIComponent(csrf);
     const products = await fetch(`${apiBase}/billing/products`, {
       credentials: "include"
     }).then((response) => response.json());
     const order = await fetch(`${apiBase}/billing/orders`, {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf.csrf_token },
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
       body: JSON.stringify({ product_type: "topup_pack", product_id: products.topup_packs[0].id })
     }).then((response) => response.json());
     await fetch(`${apiBase}/billing/orders/${order.id}/simulate-paid`, {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf.csrf_token }
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken }
     });
   }, API_BASE);
 }

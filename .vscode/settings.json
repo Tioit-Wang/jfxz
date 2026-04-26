@@ -1,0 +1,36 @@
+{
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/.pytest_cache": true,
+    "**/.ruff_cache": true,
+    "**/.mypy_cache": true,
+    "**/*.pyc": true,
+    "**/*.tsbuildinfo": true,
+    "**/*.log": true,
+    "**/*.db": true,
+    ".chrome-mcp-profile": true,
+    ".runtime-logs": true,
+    "backend/.coverage": true,
+    "backend/.env.local": true,
+    "frontend/.env.local": true,
+    "frontend/.next": true,
+    "frontend/coverage": true,
+    "frontend/node_modules": true,
+    "frontend/playwright-report": true,
+    "frontend/test-results": true,
+  },
+  "search.exclude": {
+    "**/__pycache__": true,
+    "**/.pytest_cache": true,
+    "**/.ruff_cache": true,
+    "**/coverage": true,
+    "**/node_modules": true,
+    "**/playwright-report": true,
+    "**/test-results": true,
+    ".chrome-mcp-profile": true,
+    ".runtime-logs": true,
+    "frontend/.next": true
+  },
+  "python.defaultInterpreterPath": "${workspaceFolder}/backend/.venv/Scripts/python.exe",
+  "typescript.tsdk": "frontend/node_modules/typescript/lib"
+}

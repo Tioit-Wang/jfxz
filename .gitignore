@@ -1,0 +1,61 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+
+# Build output
+.next/
+frontend/.next/
+out/
+dist/
+build/
+
+# Test and coverage output
+coverage/
+frontend/coverage/
+test-results/
+frontend/test-results/
+playwright-report/
+frontend/playwright-report/
+blob-report/
+frontend/blob-report/
+.coverage
+coverage.xml
+htmlcov/
+
+# Python caches and virtual environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyre/
+.venv/
+venv/
+env/
+*.egg-info/
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Local environment files
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Local databases and logs
+*.db
+*.sqlite
+*.sqlite3
+*.log
+.runtime-logs/
+.chrome-mcp-profile/
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json

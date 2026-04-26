@@ -29,6 +29,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useGroupRef, usePanelRef, type Layout } from "react-resizable-panels";
 import {
   ApiClient,
   ApiError,
@@ -62,6 +63,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -87,6 +89,7 @@ type PendingAction = {
 };
 
 const RECENT_REF_KEY = "jfxz-recent-references";
+const WORKSPACE_LAYOUT_PANEL_IDS = ["workspace-sidebar", "workspace-editor", "workspace-chat"] as const;
 const testPaymentEnabled = process.env.NEXT_PUBLIC_ENABLE_TEST_PAYMENT === "true";
 const quickPrompts = ["帮我构思后续情节", "帮我补充作品信息"];
 const settingTypes = [
@@ -126,6 +129,26 @@ function dedupeReferences(items: ChatReference[]): ChatReference[] {
     seen.add(key);
     return true;
   });
+}
+
+function workspaceLayoutKey(bookId: string): string {
+  return `jfxz-workspace-layout:v1:${bookId}`;
+}
+
+function parseWorkspaceLayout(value: string | null): Layout | undefined {
+  if (!value) return undefined;
+  try {
+    const layout = JSON.parse(value) as Partial<Record<(typeof WORKSPACE_LAYOUT_PANEL_IDS)[number], unknown>>;
+    const valid = WORKSPACE_LAYOUT_PANEL_IDS.every((id) => typeof layout[id] === "number" && Number.isFinite(layout[id]));
+    return valid ? (layout as Layout) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readWorkspaceLayout(bookId: string): Layout | undefined {
+  if (typeof window === "undefined") return undefined;
+  return parseWorkspaceLayout(window.localStorage.getItem(workspaceLayoutKey(bookId)));
 }
 
 function truncate(value: string, length = 120): string {
@@ -175,6 +198,11 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const router = useRouter();
   const client = useMemo(() => new ApiClient(), []);
   const chatInputRef = useRef<ChatMentionInputHandle | null>(null);
+  const workspaceGroupRef = useGroupRef();
+  const workspaceSidebarRef = usePanelRef();
+  const workspaceEditorRef = usePanelRef();
+  const workspaceChatRef = usePanelRef();
+  const workspaceLayoutReadyRef = useRef(false);
   const bootstrapStartedRef = useRef<string | null>(null);
   const [work, setWork] = useState<Work | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
@@ -239,6 +267,8 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const [billingProducts, setBillingProducts] = useState<BillingProducts>({ plans: [], topupPacks: [] });
   const [billingOrder, setBillingOrder] = useState<BillingOrder | null>(null);
   const [billingStatus, setBillingStatus] = useState<"idle" | "loading" | "creating" | "paid" | "error">("idle");
+  const [workspaceDefaultLayout, setWorkspaceDefaultLayout] = useState<Layout | undefined>(() => readWorkspaceLayout(bookId));
+  const [workspaceLayoutLoaded, setWorkspaceLayoutLoaded] = useState(false);
 
   const count = useMemo(() => wordCount(content), [content]);
   const todayCount = useMemo(() => chapters.reduce((sum, chapter) => sum + wordCount(chapter.content), 0), [chapters]);
@@ -340,6 +370,33 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       setRecentReferences(JSON.parse(saved));
     }
   }, [bookId]);
+
+  useEffect(() => {
+    workspaceLayoutReadyRef.current = false;
+    setWorkspaceLayoutLoaded(false);
+    const savedLayout = readWorkspaceLayout(bookId);
+    setWorkspaceDefaultLayout(savedLayout);
+    setWorkspaceLayoutLoaded(true);
+    const timer = window.setTimeout(() => {
+      if (savedLayout) {
+        workspaceGroupRef.current?.setLayout(savedLayout);
+        workspaceSidebarRef.current?.resize(`${savedLayout["workspace-sidebar"]}%`);
+        workspaceEditorRef.current?.resize(`${savedLayout["workspace-editor"]}%`);
+        workspaceChatRef.current?.resize(`${savedLayout["workspace-chat"]}%`);
+      }
+      workspaceLayoutReadyRef.current = true;
+    }, 100);
+    return () => window.clearTimeout(timer);
+  }, [bookId, workspaceChatRef, workspaceEditorRef, workspaceGroupRef, workspaceSidebarRef]);
+
+  const saveWorkspaceLayout = useCallback(
+    (layout: Layout) => {
+      if (!workspaceLayoutReadyRef.current) return;
+      const serializableLayout = layout instanceof Map ? Object.fromEntries(layout) : layout;
+      window.localStorage.setItem(workspaceLayoutKey(bookId), JSON.stringify(serializableLayout));
+    },
+    [bookId]
+  );
 
   useEffect(() => {
     async function loadWorkspace() {
@@ -1048,7 +1105,25 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background font-sans text-foreground">
-      <aside className="z-10 flex w-[280px] shrink-0 flex-col border-r border-border bg-card shadow-[2px_0_8px_rgba(0,0,0,0.02)]">
+      {workspaceLayoutLoaded ? (
+      <ResizablePanelGroup
+        defaultLayout={workspaceDefaultLayout}
+        groupRef={workspaceGroupRef}
+        id={workspaceLayoutKey(bookId)}
+        key={`${bookId}:${workspaceDefaultLayout ? JSON.stringify(workspaceDefaultLayout) : "default"}`}
+        className="min-h-0"
+        onLayoutChanged={saveWorkspaceLayout}
+        orientation="horizontal"
+      >
+        <ResizablePanel
+          id="workspace-sidebar"
+          defaultSize={`${workspaceDefaultLayout?.["workspace-sidebar"] ?? 18}%`}
+          minSize="160px"
+          maxSize="30%"
+          panelRef={workspaceSidebarRef}
+          className="min-h-0 min-w-0"
+        >
+      <aside data-testid="workspace-sidebar-panel" className="z-10 flex h-full min-h-0 min-w-0 flex-col border-r border-border bg-card shadow-[2px_0_8px_rgba(0,0,0,0.02)]">
         <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border bg-background px-4">
           <div className="flex min-w-0 items-center gap-3">
             <Button asChild variant="ghost" size="icon" className="size-8" aria-label="返回作品列表">
@@ -1371,8 +1446,18 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
           </button>
         </div>
       </aside>
+        </ResizablePanel>
 
-      <main className="relative z-0 flex min-w-[500px] flex-1 flex-col overflow-hidden bg-background">
+        <ResizableHandle withHandle aria-label="调整目录与正文宽度" className="z-30" />
+
+        <ResizablePanel
+          id="workspace-editor"
+          defaultSize={`${workspaceDefaultLayout?.["workspace-editor"] ?? 56}%`}
+          minSize="360px"
+          panelRef={workspaceEditorRef}
+          className="min-h-0 min-w-0"
+        >
+      <main data-testid="workspace-editor-panel" className="relative z-0 flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background">
         <div className="z-10 flex h-14 shrink-0 items-center justify-between border-b border-border bg-background px-6">
           <div className="flex items-center gap-4">
             <div className="flex select-none items-center gap-1.5 text-xs text-gray-400">
@@ -1399,8 +1484,8 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
           </button>
         </div>
 
-        <div className="flex w-full flex-1 justify-center overflow-y-auto">
-          <div className="flex min-h-full w-full max-w-3xl flex-col px-10 py-12">
+        <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto">
+          <div className="flex min-h-full w-full max-w-3xl min-w-0 flex-col px-4 py-12 md:px-10">
             {activeChapter ? (
               <>
                 <input
@@ -1464,8 +1549,19 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
           <div>今日字数: {todayCount}</div>
         </div>
       </main>
+        </ResizablePanel>
 
-      <aside className="relative z-20 flex w-[380px] shrink-0 flex-col border-l border-gray-200 bg-white shadow-[-2px_0_12px_rgba(0,0,0,0.03)]">
+        <ResizableHandle withHandle aria-label="调整正文与对话宽度" className="z-30" />
+
+        <ResizablePanel
+          id="workspace-chat"
+          defaultSize={`${workspaceDefaultLayout?.["workspace-chat"] ?? 26}%`}
+          minSize="240px"
+          maxSize="38%"
+          panelRef={workspaceChatRef}
+          className="min-h-0 min-w-0"
+        >
+      <aside data-testid="workspace-chat-panel" className="relative z-20 flex h-full min-h-0 min-w-0 flex-col border-l border-gray-200 bg-white shadow-[-2px_0_12px_rgba(0,0,0,0.03)]">
         <div className="flex h-14 items-center justify-between border-b border-gray-100 p-4">
           <div className="min-w-0">
             <h2 className="truncate text-sm font-semibold text-gray-900">{activeSession?.title || "新的对话"}</h2>
@@ -1739,6 +1835,9 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
           </div>
         )}
       </aside>
+        </ResizablePanel>
+      </ResizablePanelGroup>
+      ) : null}
 
       <Dialog open={summaryModalOpen} onOpenChange={setSummaryModalOpen}>
         <DialogContent className="sm:max-w-lg">

@@ -8,6 +8,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 const titles: Record<string, string> = {
   "/admin": "后台概览",
   "/admin/users": "用户管理",
+  "/admin/models": "模型管理",
   "/admin/products": "套餐与加油包",
   "/admin/orders": "订单管理",
   "/admin/subscriptions": "订阅管理",

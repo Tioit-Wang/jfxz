@@ -33,6 +33,7 @@ import { useGroupRef, usePanelRef, type Layout } from "react-resizable-panels";
 import {
   ApiClient,
   ApiError,
+  type AiModelOption,
   type ApiSuggestion,
   type BillingOrder,
   type BillingProducts,
@@ -47,6 +48,7 @@ import {
 import { userLoginPath } from "@/auth";
 import { ChapterPlainTextEditor } from "@/components/ChapterPlainTextEditor";
 import { ChatMentionInput, type ChatMentionInputHandle } from "@/components/ChatMentionInput";
+import { ModelPicker } from "@/components/ModelPicker";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -67,6 +69,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { formatToken } from "@/lib/format";
 import { applySuggestion, type Chapter, type Work, wordCount } from "@/domain";
 
 type WorkspaceClientProps = {
@@ -89,6 +92,7 @@ type PendingAction = {
 };
 
 const RECENT_REF_KEY = "jfxz-recent-references";
+const CHAT_MODEL_KEY = "jfxz-chat-model";
 const WORKSPACE_LAYOUT_PANEL_IDS = ["workspace-sidebar", "workspace-editor", "workspace-chat"] as const;
 const testPaymentEnabled = process.env.NEXT_PUBLIC_ENABLE_TEST_PAYMENT === "true";
 const quickPrompts = ["帮我构思后续情节", "帮我补充作品信息"];
@@ -133,6 +137,10 @@ function dedupeReferences(items: ChatReference[]): ChatReference[] {
 
 function workspaceLayoutKey(bookId: string): string {
   return `jfxz-workspace-layout:v1:${bookId}`;
+}
+
+function chatModelKey(bookId: string): string {
+  return `${CHAT_MODEL_KEY}:${bookId}`;
 }
 
 function parseWorkspaceLayout(value: string | null): Layout | undefined {
@@ -237,6 +245,9 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const [pendingReferences, setPendingReferences] = useState<ChatReference[]>([]);
   const [chatMentions, setChatMentions] = useState<ChatMention[]>([]);
   const [recentReferences, setRecentReferences] = useState<ChatReference[]>([]);
+  const [aiModels, setAiModels] = useState<AiModelOption[]>([]);
+  const [selectedModelId, setSelectedModelId] = useState("");
+  const [modelStatus, setModelStatus] = useState<"loading" | "ready" | "error">("loading");
   const [actionNotice, setActionNotice] = useState("");
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
 
@@ -275,6 +286,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const statusMeta = formatStatus(status);
   const StatusIcon = statusMeta.icon;
   const activeSession = sessions.find((session) => session.id === activeSessionId);
+  const selectedModel = aiModels.find((model) => model.id === selectedModelId);
   const activeCharacter = useMemo(
     () => characters.find((item) => item.id === activeCharacterId) ?? characters[0],
     [activeCharacterId, characters]
@@ -355,21 +367,59 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const loadMessages = useCallback(
     async (sessionId: string) => {
       setChatStatus("loading");
-      const page = await client.listChatMessages(sessionId, 30);
-      setMessages(page.messages);
-      setHasMoreMessages(page.hasMore);
-      setNextBefore(page.nextBefore);
-      setChatStatus("ready");
+      try {
+        const page = await client.listChatMessages(sessionId, 30);
+        setMessages(page.messages);
+        setHasMoreMessages(page.hasMore);
+        setNextBefore(page.nextBefore);
+        setChatStatus("ready");
+      } catch {
+        setChatStatus("error");
+      }
     },
     [client]
   );
 
   useEffect(() => {
-    const saved = window.localStorage.getItem(`${RECENT_REF_KEY}:${bookId}`);
-    if (saved) {
-      setRecentReferences(JSON.parse(saved));
+    try {
+      const saved = window.localStorage.getItem(`${RECENT_REF_KEY}:${bookId}`);
+      if (saved) {
+        setRecentReferences(JSON.parse(saved));
+      }
+    } catch {
+      window.localStorage.removeItem(`${RECENT_REF_KEY}:${bookId}`);
     }
   }, [bookId]);
+
+  useEffect(() => {
+    let active = true;
+    setModelStatus("loading");
+    client
+      .listAiModels()
+      .then((models) => {
+        if (!active) return;
+        const saved = window.localStorage.getItem(chatModelKey(bookId));
+        const nextModelId = models.find((model) => model.id === saved)?.id ?? models[0]?.id ?? "";
+        setAiModels(models);
+        setSelectedModelId(nextModelId);
+        if (saved && !models.find((model) => model.id === saved)) {
+          window.localStorage.removeItem(chatModelKey(bookId));
+        }
+        if (nextModelId) {
+          window.localStorage.setItem(chatModelKey(bookId), nextModelId);
+        }
+        setModelStatus("ready");
+      })
+      .catch(() => {
+        if (!active) return;
+        setAiModels([]);
+        setSelectedModelId("");
+        setModelStatus("error");
+      });
+    return () => {
+      active = false;
+    };
+  }, [bookId, client]);
 
   useEffect(() => {
     workspaceLayoutReadyRef.current = false;
@@ -725,9 +775,15 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     setNextBefore(page.nextBefore);
   }
 
+  function selectChatModel(modelId: string) {
+    if (modelId === "__none") return;
+    setSelectedModelId(modelId);
+    window.localStorage.setItem(chatModelKey(bookId), modelId);
+  }
+
   async function sendMessage() {
     const message = chatInput;
-    if (!message.trim() || chatStatus === "streaming") return;
+    if (!message.trim() || chatStatus === "streaming" || !selectedModelId) return;
     let sessionId = activeSessionId;
     if (!sessionId) {
       const session = await client.createChatSession(bookId);
@@ -761,11 +817,18 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     setChatStatus("streaming");
     window.setTimeout(() => chatInputRef.current?.focus(), 0);
     try {
-      const final = await client.streamChatMessage(sessionId, message, references, chatMentions, (chunk) => {
-        setMessages((items) =>
-          items.map((item) => (item.id === assistantId ? { ...item, content: `${item.content}${chunk}` } : item))
-        );
-      });
+      const final = await client.streamChatMessage(
+        sessionId,
+        message,
+        references,
+        chatMentions,
+        (chunk) => {
+          setMessages((items) =>
+            items.map((item) => (item.id === assistantId ? { ...item, content: `${item.content}${chunk}` } : item))
+          );
+        },
+        selectedModelId
+      );
       setMessages((items) => items.map((item) => (item.id === assistantId ? final : item)));
       setSessions((items) =>
         items.map((session) =>
@@ -1718,49 +1781,64 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
               ))}
             </div>
 
-            <div className="relative border-t border-border bg-card p-4">
-              <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
-                {quickPrompts.map((prompt) => (
-                  <button
-                    key={prompt}
-                    className="shrink-0 rounded-full border border-border bg-background px-3 py-1.5 text-xs text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
-                    onClick={() => {
-                      setChatInput(prompt);
-                      setChatMentions([]);
-                      chatInputRef.current?.setText(prompt);
-                    }}
-                  >
-                    {prompt}
-                  </button>
-                ))}
-              </div>
-              {pendingReferences.length ? (
-                <div className="mb-3 space-y-2">
-                  {pendingReferences.map((ref) => (
-                    <div key={referenceKey(ref)} className="animate-pop rounded-lg border border-border bg-muted p-3 text-xs leading-5 text-muted-foreground">
-                      <div className="flex items-start justify-between gap-2">
-                        <span className={cn("rounded border px-1.5 py-0.5", referenceTone(ref.type))}>{ref.name}</span>
-                        <button onClick={() => setPendingReferences((items) => items.filter((item) => referenceKey(item) !== referenceKey(ref)))} aria-label="移除引用">
-                          <X size={14} />
-                        </button>
-                      </div>
-                      <p className="mt-2">{ref.summary || ref.issue || ref.quote}</p>
-                    </div>
-                  ))}
+            <div className="mx-4 mb-4 rounded-2xl border border-gray-100 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+              {/* Model selector bar */}
+              <div className="flex items-center justify-between px-4 py-2">
+                <div className="flex min-w-0 items-center gap-1.5 text-xs text-gray-400">
+                  <Zap size={12} className="shrink-0 text-gray-300" />
+                  {modelStatus === "loading" ? (
+                    <span className="text-gray-300">模型加载中...</span>
+                  ) : modelStatus === "error" ? (
+                    <>
+                      <span className="text-red-500">模型列表加载失败</span>
+                      <button
+                        type="button"
+                        className="ml-1 underline hover:no-underline"
+                        onClick={() => {
+                          setModelStatus("loading");
+                          client.listAiModels()
+                            .then((models) => {
+                              const nextModelId = models[0]?.id ?? "";
+                              setAiModels(models);
+                              setSelectedModelId(nextModelId);
+                              if (nextModelId) window.localStorage.setItem(chatModelKey(bookId), nextModelId);
+                              setModelStatus(nextModelId ? "ready" : "error");
+                            })
+                            .catch(() => setModelStatus("error"));
+                        }}
+                      >
+                        重试
+                      </button>
+                    </>
+                  ) : !selectedModel ? (
+                    <span className="text-gray-300">暂无可用模型</span>
+                  ) : (
+                    <ModelPicker
+                      models={aiModels}
+                      selectedId={selectedModelId}
+                      onSelect={selectChatModel}
+                    />
+                  )}
                 </div>
-              ) : null}
+              </div>
+
+              {/* Input area */}
               <ChatMentionInput
                 ref={chatInputRef}
                 valueText={chatInput}
                 mentions={chatMentions}
                 items={allReferenceItems}
                 recentItems={recentReferences}
-                disabled={chatStatus === "streaming"}
+                pendingReferences={pendingReferences}
+                disabled={chatStatus === "streaming" || modelStatus !== "ready" || !selectedModelId}
                 onChange={(text, mentions) => {
                   setChatInput(text);
                   setChatMentions(mentions);
                 }}
                 onSelectReference={(reference) => rememberReferences([reference])}
+                onRemoveReference={(reference) =>
+                  setPendingReferences((items) => items.filter((item) => referenceKey(item) !== referenceKey(reference)))
+                }
                 onSubmit={() => void sendMessage()}
               />
             </div>

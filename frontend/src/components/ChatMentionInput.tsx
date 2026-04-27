@@ -26,10 +26,11 @@ type ChatMentionInputProps = {
   mentions: ChatMention[];
   items: ChatReference[];
   recentItems: ChatReference[];
+  pendingReferences?: ChatReference[];
   disabled?: boolean;
-  placeholder?: string;
   onChange: (text: string, mentions: ChatMention[]) => void;
   onSelectReference: (reference: ChatReference) => void;
+  onRemoveReference?: (reference: ChatReference) => void;
   onSubmit: () => void;
 };
 
@@ -45,6 +46,13 @@ function dedupeReferences(items: ChatReference[]): ChatReference[] {
     seen.add(key);
     return true;
   });
+}
+
+function referenceTagStyle(type: ChatReference["type"]): string {
+  if (type === "chapter") return "bg-blue-50 text-blue-600 border-blue-100";
+  if (type === "character") return "bg-amber-50 text-amber-700 border-amber-100";
+  if (type === "setting") return "bg-emerald-50 text-emerald-600 border-emerald-100";
+  return "bg-gray-50 text-gray-600 border-gray-100";
 }
 
 function referenceTone(type: ChatReference["type"]): string {
@@ -132,10 +140,11 @@ export const ChatMentionInput = forwardRef<ChatMentionInputHandle, ChatMentionIn
       mentions,
       items,
       recentItems,
+      pendingReferences = [],
       disabled = false,
-      placeholder = "@章节 或 @角色 后输入你的问题...",
       onChange,
       onSelectReference,
+      onRemoveReference,
       onSubmit
     },
     ref
@@ -168,6 +177,10 @@ export const ChatMentionInput = forwardRef<ChatMentionInputHandle, ChatMentionIn
       ]);
     }, [items, mention.query, recentItems]);
 
+    const placeholderText = useMemo(() => {
+      return "输入 @ 引用章节、角色或设定 · Shift+Enter 换行";
+    }, []);
+
     mentionRef.current = mention;
     mentionOptionsRef.current = mentionOptions;
     onSubmitRef.current = onSubmit;
@@ -190,7 +203,7 @@ export const ChatMentionInput = forwardRef<ChatMentionInputHandle, ChatMentionIn
       editorProps: {
         attributes: {
           class:
-            "min-h-[68px] max-h-32 overflow-y-auto whitespace-pre-wrap break-words px-3 py-3 pr-12 text-sm text-foreground outline-none"
+            "min-h-[104px] max-h-[144px] overflow-y-auto whitespace-pre-wrap break-words px-3 py-3 text-sm text-foreground outline-none scrollbar-none"
         },
         handleKeyDown: (_view, event) => {
           const currentMention = mentionRef.current;
@@ -293,6 +306,7 @@ export const ChatMentionInput = forwardRef<ChatMentionInputHandle, ChatMentionIn
 
     useEffect(() => {
       if (!editor) return;
+      if (editor.isFocused) return;
       const current = editor.getText({ blockSeparator: "\n" });
       if (current === valueText) return;
       editor.commands.setContent(valueText ? textDoc(valueText) : emptyDoc(), { emitUpdate: false });
@@ -327,7 +341,8 @@ export const ChatMentionInput = forwardRef<ChatMentionInputHandle, ChatMentionIn
     );
 
     return (
-      <div className="relative rounded-xl border border-input bg-background shadow-sm transition-all focus-within:border-ring focus-within:ring-1 focus-within:ring-ring">
+      <div className="relative">
+        {/* Mention suggestion popup */}
         {mention.open && mentionOptions.length ? (
           <div className="absolute bottom-full left-0 right-0 z-20 mb-2 max-h-64 overflow-y-auto rounded-xl border border-border bg-popover p-2 shadow-soft">
             {mentionOptions.map((item, index) => (
@@ -366,31 +381,57 @@ export const ChatMentionInput = forwardRef<ChatMentionInputHandle, ChatMentionIn
           </div>
         ) : null}
 
-        {editor?.isEmpty ? (
-          <span className="pointer-events-none absolute left-3 top-3 text-sm text-muted-foreground">{placeholder}</span>
+        {/* Pending reference tags inside input */}
+        {pendingReferences.length ? (
+          <div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto px-3 pt-3">
+            {pendingReferences.map((ref) => (
+              <span
+                key={referenceKey(ref)}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors",
+                  referenceTagStyle(ref.type)
+                )}
+              >
+                {ref.name}
+                {onRemoveReference ? (
+                  <button
+                    className="ml-0.5 rounded-full p-0.5 transition-colors hover:bg-black/10"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => onRemoveReference(ref)}
+                    aria-label={`移除 ${ref.name}`}
+                  >
+                    <X size={10} />
+                  </button>
+                ) : null}
+              </span>
+            ))}
+          </div>
         ) : null}
-        <EditorContent editor={editor} aria-label="AI 对话输入" />
-        <div className="absolute bottom-2 right-2">
+
+        {/* Editor wrapper - placeholder positioned relative to this */}
+        <div className="relative">
+          {editor?.isEmpty ? (
+            <span className="pointer-events-none absolute left-3 top-3 text-sm text-gray-300">
+              {pendingReferences.length ? "输入你的问题..." : placeholderText}
+            </span>
+          ) : null}
+          <EditorContent editor={editor} aria-label="AI 对话输入" />
+        </div>
+
+        {/* Send button */}
+        <div className="flex justify-end px-3 pb-3 pt-2">
           <button
-            className="rounded-lg bg-primary p-2 text-primary-foreground opacity-90 transition-colors hover:bg-primary/90 hover:opacity-100 disabled:bg-muted disabled:text-muted-foreground disabled:opacity-80"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-gray-900 px-4 py-2 text-xs font-medium text-white shadow-sm transition-all hover:bg-gray-800 hover:shadow-md disabled:bg-gray-100 disabled:text-gray-300 disabled:shadow-none"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={onSubmit}
             disabled={disabled}
             aria-label="发送消息"
+            type="button"
           >
-            {disabled ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send size={14} />}
+            {disabled ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send size={13} />}
+            发送
           </button>
         </div>
-        <button
-          className="absolute bottom-2 right-11 rounded-lg p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-          onClick={() => {
-            editor?.commands.clearContent();
-            onChange("", []);
-          }}
-          aria-label="清空输入"
-          type="button"
-        >
-          <X size={14} />
-        </button>
       </div>
     );
   }

@@ -195,6 +195,55 @@ export type AdminProductInput = {
   sortOrder?: number | null;
 };
 
+export type AiModelOption = {
+  id: string;
+  display_name: string;
+  description: string | null;
+  logic_score: number;
+  prose_score: number;
+  knowledge_score: number;
+  max_context_tokens: number;
+  max_output_tokens: number;
+  output_multiplier: string;
+  temperature: string;
+  status: "active" | "inactive";
+  sort_order: number | null;
+};
+
+export type AdminAiModel = AiModelOption & {
+  provider_model_id: string;
+  cache_hit_input_multiplier: string;
+  cache_miss_input_multiplier: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AdminAiModelInput = {
+  displayName: string;
+  providerModelId: string;
+  description?: string | null;
+  logicScore: number;
+  proseScore: number;
+  knowledgeScore: number;
+  maxContextTokens: number;
+  maxOutputTokens: number;
+  temperature: string;
+  cacheHitInputMultiplier: string;
+  cacheMissInputMultiplier: string;
+  outputMultiplier: string;
+  status: "active" | "inactive";
+  sortOrder?: number | null;
+};
+
+export type AdminModelListParams = AdminListParams & {
+  logicMin?: number;
+  logicMax?: number;
+  contextMin?: number;
+  contextMax?: number;
+  outputMin?: number;
+  outputMax?: number;
+};
+
 export type AdminConfigValue = {
   string_value?: string | null;
   integer_value?: number | null;
@@ -419,6 +468,25 @@ function productPayload(input: AdminProductInput): Record<string, unknown> {
     bundled_topup_points: input.bundledTopupPoints ?? 0,
     points: input.points ?? 0,
     expire_days: input.expireDays ?? 30,
+    status: input.status,
+    sort_order: input.sortOrder ?? null
+  };
+}
+
+function aiModelPayload(input: AdminAiModelInput): Record<string, unknown> {
+  return {
+    display_name: input.displayName,
+    provider_model_id: input.providerModelId,
+    description: input.description ?? null,
+    logic_score: input.logicScore,
+    prose_score: input.proseScore,
+    knowledge_score: input.knowledgeScore,
+    max_context_tokens: input.maxContextTokens,
+    max_output_tokens: input.maxOutputTokens,
+    temperature: input.temperature,
+    cache_hit_input_multiplier: input.cacheHitInputMultiplier,
+    cache_miss_input_multiplier: input.cacheMissInputMultiplier,
+    output_multiplier: input.outputMultiplier,
     status: input.status,
     sort_order: input.sortOrder ?? null
   };
@@ -757,6 +825,21 @@ export class ApiClient {
     return search.toString() ? `?${search}` : "";
   }
 
+  private modelListQuery(params: AdminModelListParams = {}): string {
+    const search = new URLSearchParams(this.listQuery(params).replace(/^\?/, ""));
+    if (params.logicMin) search.set("logic_min", String(params.logicMin));
+    if (params.logicMax) search.set("logic_max", String(params.logicMax));
+    if (params.contextMin) search.set("context_min", String(params.contextMin));
+    if (params.contextMax) search.set("context_max", String(params.contextMax));
+    if (params.outputMin) search.set("output_min", String(params.outputMin));
+    if (params.outputMax) search.set("output_max", String(params.outputMax));
+    return search.toString() ? `?${search}` : "";
+  }
+
+  async listAiModels(): Promise<AiModelOption[]> {
+    return this.request<AiModelOption[]>("/ai/models");
+  }
+
   async listAdminUsers(params: string | AdminListParams = {}): Promise<Paginated<ApiUser>> {
     const normalized = typeof params === "string" ? { q: params } : params;
     return this.request<Paginated<ApiUser>>(`/admin/users${this.listQuery(normalized)}`);
@@ -775,6 +858,24 @@ export class ApiClient {
     return this.request<ApiUser>(`/admin/users/${userId}`, {
       method: "PATCH",
       body: JSON.stringify(input)
+    });
+  }
+
+  async listAdminModels(params: AdminModelListParams = {}): Promise<Paginated<AdminAiModel>> {
+    return this.request<Paginated<AdminAiModel>>(`/admin/models${this.modelListQuery(params)}`);
+  }
+
+  async createAdminModel(input: AdminAiModelInput): Promise<AdminAiModel> {
+    return this.request<AdminAiModel>("/admin/models", {
+      method: "POST",
+      body: JSON.stringify(aiModelPayload(input))
+    });
+  }
+
+  async updateAdminModel(modelId: string, input: AdminAiModelInput): Promise<AdminAiModel> {
+    return this.request<AdminAiModel>(`/admin/models/${modelId}`, {
+      method: "PATCH",
+      body: JSON.stringify(aiModelPayload(input))
     });
   }
 
@@ -908,11 +1009,12 @@ export class ApiClient {
     message: string,
     references: ChatReference[],
     mentions: ChatMention[],
-    onChunk: (chunk: string) => void
+    onChunk: (chunk: string) => void,
+    modelId?: string
   ): Promise<ChatMessage> {
     const response = await this.rawRequest(`/chat-sessions/${sessionId}/messages`, {
       method: "POST",
-      body: JSON.stringify({ message, references, mentions })
+      body: JSON.stringify({ message, references, mentions, ...(modelId ? { model_id: modelId } : {}) })
     });
     if (!response.body) {
       throw new ApiError("stream body unavailable", response.status);

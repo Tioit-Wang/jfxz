@@ -5,7 +5,7 @@ import secrets
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 import httpx
@@ -27,6 +27,7 @@ from app.core.security import (
 )
 from app.models import (
     AgentSession,
+    AiModel,
     BillingOrder,
     Chapter,
     Character,
@@ -100,6 +101,7 @@ class ChapterIn(BaseModel):
 
 class ChatIn(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
+    model_id: str | None = Field(default=None, max_length=100)
     mentions: list[dict[str, Any]] = Field(default_factory=list, max_length=REFERENCE_LIMIT)
     references: list[dict[str, Any]] = Field(default_factory=list, max_length=REFERENCE_LIMIT)
 
@@ -131,6 +133,23 @@ class ProductIn(BaseModel):
     points: int = 0
     expire_days: int = 30
     status: str = "active"
+    sort_order: int | None = None
+
+
+class AiModelIn(BaseModel):
+    display_name: str = Field(min_length=1, max_length=100)
+    provider_model_id: str = Field(min_length=1, max_length=100)
+    description: str | None = Field(default=None, max_length=4000)
+    logic_score: int = Field(ge=1, le=5)
+    prose_score: int = Field(ge=1, le=5)
+    knowledge_score: int = Field(ge=1, le=5)
+    max_context_tokens: int = Field(gt=0)
+    max_output_tokens: int = Field(gt=0)
+    temperature: Decimal = Field(default=Decimal("0.70"), ge=Decimal("0"), le=Decimal("2"))
+    cache_hit_input_multiplier: Decimal = Field(ge=Decimal("0"))
+    cache_miss_input_multiplier: Decimal = Field(ge=Decimal("0"))
+    output_multiplier: Decimal = Field(ge=Decimal("0"))
+    status: Literal["active", "inactive"] = "active"
     sort_order: int | None = None
 
 
@@ -171,6 +190,14 @@ def public(model: Any) -> dict[str, Any]:
     data = {column.name: getattr(model, column.name) for column in model.__table__.columns}
     if "password_hash" in data:
         del data["password_hash"]
+    return data
+
+
+def public_ai_model(model: AiModel) -> dict[str, Any]:
+    data = public(model)
+    data.pop("provider_model_id", None)
+    data.pop("cache_hit_input_multiplier", None)
+    data.pop("cache_miss_input_multiplier", None)
     return data
 
 
@@ -423,6 +450,22 @@ async def consume_point(session: AsyncSession, user_id: str) -> str:
     raise HTTPException(status_code=402, detail="points not enough")
 
 
+async def resolve_active_ai_model(session: AsyncSession, model_id: str | None) -> AiModel:
+    statement = select(AiModel).where(AiModel.status == "active")
+    if model_id:
+        model = await session.get(AiModel, model_id)
+        if model is None or model.status != "active":
+            raise HTTPException(status_code=400, detail="model unavailable")
+        return model
+    result = await session.execute(
+        statement.order_by(AiModel.sort_order.is_(None), AiModel.sort_order, AiModel.created_at.desc())
+    )
+    model = result.scalars().first()
+    if model is None:
+        raise HTTPException(status_code=503, detail="no active model configured")
+    return model
+
+
 async def owned_work(session: AsyncSession, user_id: str, work_id: str) -> Work:
     work = await session.get(Work, work_id)
     if work is None or work.user_id != user_id:
@@ -465,28 +508,67 @@ async def seed_defaults(session: AsyncSession) -> None:
             )
         )
 
-    keys = [
-        ("enabled", "boolean"),
-        ("app_id", "string"),
-        ("app_private_key", "secret"),
-        ("alipay_public_key", "secret"),
-        ("notify_url", "string"),
-        ("seller_id", "string"),
-        ("timeout_express", "string"),
-        ("extra_options", "json"),
+    config_seeds = [
+        ("payment.alipay_f2f", "enabled", "boolean", "alipay f2f enabled", False),
+        ("payment.alipay_f2f", "app_id", "string", "alipay f2f app_id", True),
+        ("payment.alipay_f2f", "app_private_key", "secret", "alipay f2f app_private_key", True),
+        ("payment.alipay_f2f", "alipay_public_key", "secret", "alipay f2f alipay_public_key", True),
+        ("payment.alipay_f2f", "notify_url", "string", "alipay f2f notify_url", True),
+        ("payment.alipay_f2f", "seller_id", "string", "alipay f2f seller_id", True),
+        ("payment.alipay_f2f", "timeout_express", "string", "alipay f2f timeout_express", True),
+        ("payment.alipay_f2f", "extra_options", "json", "alipay f2f extra_options", True),
+        ("ai.editor_check", "model_id", "string", "editor check ai model id", False),
     ]
-    existing_configs = await one(session, select(func.count(GlobalConfig.id)))
-    if not existing_configs:
+    for group, key, value_type, description, is_required in config_seeds:
+        existing_config = await one(
+            session,
+            select(GlobalConfig).where(GlobalConfig.config_group == group, GlobalConfig.config_key == key),
+        )
+        if existing_config is None:
+            session.add(
+                GlobalConfig(
+                    config_group=group,
+                    config_key=key,
+                    value_type=value_type,
+                    is_required=is_required,
+                    description=description,
+                )
+            )
+
+    existing_models = await one(session, select(func.count(AiModel.id)))
+    if not existing_models:
         session.add_all(
             [
-            GlobalConfig(
-                config_group="payment.alipay_f2f",
-                config_key=key,
-                value_type=value_type,
-                is_required=key != "enabled",
-                description=f"alipay f2f {key}",
-            )
-            for key, value_type in keys
+                AiModel(
+                    display_name="DeepSeek-v4-flash",
+                    provider_model_id="deepseek-v4-flash",
+                    description="快速响应，适合日常对话和轻量编辑检查。",
+                    logic_score=3,
+                    prose_score=3,
+                    knowledge_score=3,
+                    max_context_tokens=1000000,
+                    max_output_tokens=384000,
+                    temperature=Decimal("0.70"),
+                    cache_hit_input_multiplier=Decimal("0.11"),
+                    cache_miss_input_multiplier=Decimal("0.11"),
+                    output_multiplier=Decimal("0.22"),
+                    sort_order=1,
+                ),
+                AiModel(
+                    display_name="DeepSeek-v4-pro",
+                    provider_model_id="deepseek-v4-pro",
+                    description="更强的结构、推理和长文本处理能力。",
+                    logic_score=5,
+                    prose_score=4,
+                    knowledge_score=4,
+                    max_context_tokens=1000000,
+                    max_output_tokens=384000,
+                    temperature=Decimal("0.70"),
+                    cache_hit_input_multiplier=Decimal("0.02"),
+                    cache_miss_input_multiplier=Decimal("1.32"),
+                    output_multiplier=Decimal("2.64"),
+                    sort_order=2,
+                ),
             ]
         )
     if (
@@ -514,6 +596,16 @@ async def seed_defaults(session: AsyncSession) -> None:
 @router.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok", "service": "jfxz"}
+
+
+@router.get("/ai/models")
+async def active_ai_models(session: AsyncSession = Depends(get_session)) -> list[dict[str, Any]]:
+    result = await session.execute(
+        select(AiModel)
+        .where(AiModel.status == "active")
+        .order_by(AiModel.sort_order.is_(None), AiModel.sort_order, AiModel.created_at.desc())
+    )
+    return [public_ai_model(item) for item in result.scalars()]
 
 
 def auth_response(response: Response, user: User, token_type: str) -> dict[str, Any]:
@@ -1305,6 +1397,7 @@ async def send_chat_message(
     chat = await must_get(session, ChatSession, session_id)
     if chat.user_id != user.id:
         raise HTTPException(status_code=404, detail="session not found")
+    await resolve_active_ai_model(session, payload.model_id)
     bucket = await consume_point(session, user.id)
     session.add(
         PointTransaction(
@@ -1590,6 +1683,91 @@ async def admin_patch_user(
         user.nickname = payload.nickname
     await session.commit()
     return public(user)
+
+
+@router.get("/admin/models")
+async def admin_models(
+    q: Annotated[str | None, Query(max_length=100)] = None,
+    status: Annotated[str | None, Query(max_length=20)] = None,
+    logic_min: Annotated[int | None, Query(ge=1, le=5)] = None,
+    logic_max: Annotated[int | None, Query(ge=1, le=5)] = None,
+    context_min: Annotated[int | None, Query(gt=0)] = None,
+    context_max: Annotated[int | None, Query(gt=0)] = None,
+    output_min: Annotated[int | None, Query(gt=0)] = None,
+    output_max: Annotated[int | None, Query(gt=0)] = None,
+    _admin: User = Depends(current_admin),
+    session: AsyncSession = Depends(get_session),
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> dict[str, Any]:
+    statement = select(AiModel)
+    if q:
+        like = f"%{q}%"
+        statement = statement.where(
+            or_(
+                AiModel.display_name.ilike(like),
+                AiModel.provider_model_id.ilike(like),
+                AiModel.description.ilike(like),
+            )
+        )
+    if status:
+        if status not in {"active", "inactive"}:
+            raise HTTPException(status_code=400, detail="status must be active or inactive")
+        statement = statement.where(AiModel.status == status)
+    if logic_min is not None:
+        statement = statement.where(AiModel.logic_score >= logic_min)
+    if logic_max is not None:
+        statement = statement.where(AiModel.logic_score <= logic_max)
+    if context_min is not None:
+        statement = statement.where(AiModel.max_context_tokens >= context_min)
+    if context_max is not None:
+        statement = statement.where(AiModel.max_context_tokens <= context_max)
+    if output_min is not None:
+        statement = statement.where(AiModel.max_output_tokens >= output_min)
+    if output_max is not None:
+        statement = statement.where(AiModel.max_output_tokens <= output_max)
+    rows, total = await paginated(
+        session,
+        statement.order_by(AiModel.sort_order.is_(None), AiModel.sort_order, AiModel.created_at.desc()),
+        page,
+        page_size,
+    )
+    return page_response([public(row[0]) for row in rows], total, page, page_size)
+
+
+@router.post("/admin/models")
+async def admin_create_model(
+    payload: AiModelIn,
+    _admin: User = Depends(current_admin),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    existing = await one(session, select(AiModel).where(AiModel.provider_model_id == payload.provider_model_id))
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="provider model id already exists")
+    item = AiModel(**payload.model_dump())
+    session.add(item)
+    await session.commit()
+    return public(item)
+
+
+@router.patch("/admin/models/{model_id}")
+async def admin_update_model(
+    model_id: str,
+    payload: AiModelIn,
+    _admin: User = Depends(current_admin),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    item = await must_get(session, AiModel, model_id)
+    existing = await one(
+        session,
+        select(AiModel).where(AiModel.provider_model_id == payload.provider_model_id, AiModel.id != item.id),
+    )
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="provider model id already exists")
+    for key, value in payload.model_dump().items():
+        setattr(item, key, value)
+    await session.commit()
+    return public(item)
 
 
 @router.get("/admin/products")

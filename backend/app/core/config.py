@@ -4,7 +4,6 @@ from pathlib import Path
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 REPO_ROOT = BACKEND_DIR.parent
 SHARED_ENV_FILES = (REPO_ROOT / ".env", REPO_ROOT / ".env.local")

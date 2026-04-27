@@ -61,14 +61,22 @@ async def async_main(email: str) -> tuple[User, str]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Create an admin account with a generated password.")
-    parser.add_argument("email", help="Admin email address")
+    parser.add_argument("email", nargs="?", help="Admin email address")
+    parser.add_argument("--email", dest="email_option", help="Admin email address")
     return parser
 
 
 def main() -> None:
-    args = build_parser().parse_args()
+    parser = build_parser()
+    args = parser.parse_args()
+    if args.email and args.email_option:
+        parser.error("email can be provided either positionally or with --email, not both")
+    email = args.email_option or args.email
+    if email is None:
+        parser.error("email is required")
+
     try:
-        user, password = asyncio.run(async_main(args.email))
+        user, password = asyncio.run(async_main(email))
     except AdminEmailExistsError as exc:
         raise SystemExit(str(exc)) from exc
 

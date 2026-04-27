@@ -49,3 +49,6 @@ target-version = "py313"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 ignore = ["B008", "E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"app/scripts/create_admin.py" = ["E402"]

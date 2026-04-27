@@ -131,6 +131,26 @@ class AgentSession(Base):
     runs: Mapped[list[dict]] = mapped_column(JSON, default=list)
 
 
+class AiModel(Base, TimestampMixin):
+    __tablename__ = "ai_models"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    display_name: Mapped[str] = mapped_column(String(100))
+    provider_model_id: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    logic_score: Mapped[int] = mapped_column(Integer)
+    prose_score: Mapped[int] = mapped_column(Integer)
+    knowledge_score: Mapped[int] = mapped_column(Integer)
+    max_context_tokens: Mapped[int] = mapped_column(Integer)
+    max_output_tokens: Mapped[int] = mapped_column(Integer)
+    temperature: Mapped[Decimal] = mapped_column(Numeric(3, 2), default=Decimal("0.70"))
+    cache_hit_input_multiplier: Mapped[Decimal] = mapped_column(Numeric(8, 2))
+    cache_miss_input_multiplier: Mapped[Decimal] = mapped_column(Numeric(8, 2))
+    output_multiplier: Mapped[Decimal] = mapped_column(Numeric(8, 2))
+    status: Mapped[str] = mapped_column(String(20), default="active", index=True)
+    sort_order: Mapped[int | None] = mapped_column(Integer, index=True)
+
+
 class Plan(Base, TimestampMixin):
     __tablename__ = "plans"
 

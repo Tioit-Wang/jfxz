@@ -64,15 +64,44 @@ function asNumber(value: unknown): number {
 }
 
 function formPayload(form: ProductForm): AdminProductInput {
-  return {
+  const base = {
     name: form.name,
     priceAmount: form.priceAmount,
-    monthlyPoints: Number(form.monthlyPoints || 0),
-    bundledTopupPoints: Number(form.bundledTopupPoints || 0),
-    points: Number(form.points || 0),
-    expireDays: Number(form.expireDays || 30),
     status: form.status,
     sortOrder: form.sortOrder === "" ? null : Number(form.sortOrder)
+  };
+  if (form.kind === "plans") {
+    return {
+      ...base,
+      monthlyPoints: Number(form.monthlyPoints || 0),
+      bundledTopupPoints: Number(form.bundledTopupPoints || 0),
+    };
+  }
+  return {
+    ...base,
+    points: Number(form.points || 0),
+    expireDays: Number(form.expireDays || 30),
+  };
+}
+
+function rowStatusPayload(kind: AdminProductKind, row: ProductRow, status: string): AdminProductInput {
+  const base = {
+    name: row.name,
+    priceAmount: asString(row.price_amount),
+    status,
+    sortOrder: row.sort_order == null ? null : Number(row.sort_order),
+  };
+  if (kind === "plans") {
+    return {
+      ...base,
+      monthlyPoints: asNumber(row.monthly_points),
+      bundledTopupPoints: asNumber(row.bundled_topup_points),
+    };
+  }
+  return {
+    ...base,
+    points: asNumber(row.points),
+    expireDays: asNumber(row.expire_days || 30),
   };
 }
 
@@ -82,6 +111,7 @@ export default function AdminProductsPage() {
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState<ProductForm | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ kind: AdminProductKind; row: ProductRow } | null>(null);
+  const [statusTarget, setStatusTarget] = useState<{ kind: AdminProductKind; row: ProductRow } | null>(null);
   const [activeKind, setActiveKind] = useState<AdminProductKind>("plans");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -128,10 +158,50 @@ export default function AdminProductsPage() {
     });
   }
 
+  async function toggleStatus() {
+    if (!statusTarget) return;
+    const newStatus = statusTarget.row.status === "active" ? "inactive" : "active";
+    try {
+      await client.updateAdminProduct(statusTarget.kind, statusTarget.row.id, rowStatusPayload(statusTarget.kind, statusTarget.row, newStatus));
+      await load(statusTarget.kind, page);
+      toast.success(`商品已${newStatus === "active" ? "启用" : "停用"}`);
+    } catch {
+      toast.error("状态更新失败");
+    } finally {
+      setStatusTarget(null);
+    }
+  }
+
   async function save() {
     if (!form?.name.trim()) {
       toast.error("请填写商品名称");
       return;
+    }
+    const priceNum = Number(form.priceAmount);
+    if (isNaN(priceNum) || priceNum < 0) {
+      toast.error("请输入有效的价格（大于等于 0）");
+      return;
+    }
+    if (form.kind === "plans") {
+      if (form.monthlyPoints === "" || form.bundledTopupPoints === "") {
+        toast.error("请填写所有积分字段");
+        return;
+      }
+      if (isNaN(Number(form.monthlyPoints)) || Number(form.monthlyPoints) < 0 ||
+          isNaN(Number(form.bundledTopupPoints)) || Number(form.bundledTopupPoints) < 0) {
+        toast.error("积分数量不能为负数");
+        return;
+      }
+    } else {
+      if (form.points === "" || form.expireDays === "") {
+        toast.error("请填写所有积分字段");
+        return;
+      }
+      if (isNaN(Number(form.points)) || Number(form.points) < 0 ||
+          isNaN(Number(form.expireDays)) || Number(form.expireDays) < 0) {
+        toast.error("积分数量和有效期不能为负数");
+        return;
+      }
     }
     try {
       const savedKind = form.kind;
@@ -162,6 +232,7 @@ export default function AdminProductsPage() {
   function resetFilters() {
     setQuery("");
     setStatusFilter("all");
+    setPage(1);
   }
 
   function renderRows(kind: AdminProductKind, rows: ProductRow[]) {
@@ -202,7 +273,7 @@ export default function AdminProductsPage() {
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-2">
                     <Button size="sm" variant="outline" onClick={() => edit(kind, row)}>编辑</Button>
-                    <Button size="sm" variant="secondary" onClick={() => edit(kind, { ...row, status: row.status === "active" ? "inactive" : "active" })}>
+                    <Button size="sm" variant="secondary" onClick={() => setStatusTarget({ kind, row })}>
                       {row.status === "active" ? "停用" : "启用"}
                     </Button>
                     <Button size="sm" variant="destructive" onClick={() => setDeleteTarget({ kind, row })}>
@@ -297,17 +368,17 @@ export default function AdminProductsPage() {
           </DialogHeader>
           {form ? (
             <FieldGroup>
-              <Field><FieldLabel>名称</FieldLabel><Input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></Field>
-              <Field><FieldLabel>价格</FieldLabel><Input value={form.priceAmount} onChange={(event) => setForm({ ...form, priceAmount: event.target.value })} /></Field>
+              <Field><FieldLabel htmlFor="product-name">名称</FieldLabel><Input id="product-name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></Field>
+              <Field><FieldLabel htmlFor="product-price">价格</FieldLabel><Input id="product-price" value={form.priceAmount} onChange={(event) => setForm({ ...form, priceAmount: event.target.value })} /></Field>
               {form.kind === "plans" ? (
                 <>
-                  <Field><FieldLabel>月度积分</FieldLabel><Input inputMode="numeric" value={form.monthlyPoints} onChange={(event) => setForm({ ...form, monthlyPoints: event.target.value })} /></Field>
-                  <Field><FieldLabel>附带加油包积分</FieldLabel><Input inputMode="numeric" value={form.bundledTopupPoints} onChange={(event) => setForm({ ...form, bundledTopupPoints: event.target.value })} /></Field>
+                  <Field><FieldLabel htmlFor="product-monthly-points">月度积分</FieldLabel><Input id="product-monthly-points" inputMode="numeric" value={form.monthlyPoints} onChange={(event) => setForm({ ...form, monthlyPoints: event.target.value })} /></Field>
+                  <Field><FieldLabel htmlFor="product-bundled-topup-points">附带加油包积分</FieldLabel><Input id="product-bundled-topup-points" inputMode="numeric" value={form.bundledTopupPoints} onChange={(event) => setForm({ ...form, bundledTopupPoints: event.target.value })} /></Field>
                 </>
               ) : (
                 <>
-                  <Field><FieldLabel>积分数量</FieldLabel><Input inputMode="numeric" value={form.points} onChange={(event) => setForm({ ...form, points: event.target.value })} /></Field>
-                  <Field><FieldLabel>有效期天数</FieldLabel><Input inputMode="numeric" value={form.expireDays} onChange={(event) => setForm({ ...form, expireDays: event.target.value })} /></Field>
+                  <Field><FieldLabel htmlFor="product-points">积分数量</FieldLabel><Input id="product-points" inputMode="numeric" value={form.points} onChange={(event) => setForm({ ...form, points: event.target.value })} /></Field>
+                  <Field><FieldLabel htmlFor="product-expire-days">有效期天数</FieldLabel><Input id="product-expire-days" inputMode="numeric" value={form.expireDays} onChange={(event) => setForm({ ...form, expireDays: event.target.value })} /></Field>
                 </>
               )}
               <Field>
@@ -335,6 +406,21 @@ export default function AdminProductsPage() {
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction onClick={() => void remove()}>确认</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!statusTarget} onOpenChange={(open) => !open && setStatusTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认更新商品状态？</AlertDialogTitle>
+            <AlertDialogDescription>
+              将“{statusTarget?.row.name}”设置为{statusTarget?.row.status === "active" ? "停用" : "启用"}。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void toggleStatus()}>确认</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

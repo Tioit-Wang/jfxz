@@ -473,6 +473,7 @@ async def seed_defaults(session: AsyncSession) -> None:
         ("notify_url", "string"),
         ("seller_id", "string"),
         ("timeout_express", "string"),
+        ("extra_options", "json"),
     ]
     existing_configs = await one(session, select(func.count(GlobalConfig.id)))
     if not existing_configs:
@@ -1581,6 +1582,9 @@ async def admin_patch_user(
 ) -> dict[str, Any]:
     user = await must_get(session, User, user_id)
     if payload.status is not None:
+        VALID_STATUSES = {"active", "disabled"}
+        if payload.status not in VALID_STATUSES:
+            raise HTTPException(status_code=400, detail="status must be active or disabled")
         user.status = payload.status
     if payload.nickname is not None:
         user.nickname = payload.nickname
@@ -1787,8 +1791,8 @@ async def admin_sessions(
 ) -> dict[str, Any]:
     statement = (
         select(ChatSession, User.email, Work.title)
-        .join(User, User.id == ChatSession.user_id)
-        .join(Work, Work.id == ChatSession.work_id)
+        .outerjoin(User, User.id == ChatSession.user_id)
+        .outerjoin(Work, Work.id == ChatSession.work_id)
     )
     if q:
         like = f"%{q}%"

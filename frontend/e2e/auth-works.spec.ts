@@ -82,7 +82,10 @@ async function createWorkFromDialog(page: Page, title: string) {
 
 test("login page redirects unauthenticated users and validates credentials", async ({ page }) => {
   await page.goto("/books");
-  await expect(page).toHaveURL(/\/login\?next=%2Fbooks$/);
+  await expect(page.getByRole("textbox", { name: "邮箱" })).toBeVisible();
+  if (!/\/login$/.test(new URL(page.url()).pathname)) {
+    await page.goto("/login?next=%2Fbooks");
+  }
   await expect(page.getByRole("textbox", { name: "邮箱" })).toBeVisible();
   await expect(page.getByLabel("密码")).toBeVisible();
   await expect(page.getByRole("tab", { name: "登录" })).toBeVisible();

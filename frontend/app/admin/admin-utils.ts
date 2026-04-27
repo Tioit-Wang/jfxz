@@ -17,5 +17,7 @@ export function formatDate(value?: string | null): string {
 }
 
 export function money(value: unknown, currency = "CNY"): string {
-  return `${String(value ?? "0.00")} ${currency}`;
+  const num = Number(value ?? 0);
+  if (currency === "CNY") return `¥${num.toFixed(2)}`;
+  return `${num.toFixed(2)} ${currency}`;
 }

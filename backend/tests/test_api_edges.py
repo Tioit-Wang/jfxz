@@ -1069,6 +1069,19 @@ async def test_direct_billing_and_admin_routes(session: AsyncSession) -> None:
     assert (await admin_session_detail(chat["id"], admin, session))["agent"]["runs"] == []
     assert (await admin_sessions("会话作品", admin, session))["items"][0]["work_title"] == "会话作品"
 
+    orphan_chat = ChatSession(
+        user_id=user.id,
+        work_id="missing-work-id",
+        agno_session_id="missing-work-session",
+        title="缺失作品会话",
+    )
+    session.add(orphan_chat)
+    await session.commit()
+    orphan_items = (await admin_sessions(None, admin, session))["items"]
+    orphan_item = next(item for item in orphan_items if item["id"] == orphan_chat.id)
+    assert orphan_item["user_email"] == user.email
+    assert orphan_item["work_title"] is None
+
     configs = await admin_configs(None, admin, session)
     config_id = configs["items"][0]["id"]
     assert (
@@ -1419,6 +1432,21 @@ async def test_billing_and_admin_remaining_error_branches(session: AsyncSession)
     assert (await admin_patch_user(user.id, UserPatch(status="disabled"), admin, session))["status"] == "disabled"
     assert (await admin_patch_user(user.id, UserPatch(nickname="Only Name"), admin, session))["nickname"] == "Only Name"
     assert (await admin_patch_user(user.id, UserPatch(), admin, session))["email"] == user.email
+
+    # 非法 status 值应返回 400
+    with pytest.raises(HTTPException) as exc_invalid:
+        await admin_patch_user(user.id, UserPatch(status="invalid_status"), admin, session)
+    assert exc_invalid.value.status_code == 400
+    assert "status must be active or disabled" in exc_invalid.value.detail
+
+    with pytest.raises(HTTPException) as exc_deleted:
+        await admin_patch_user(user.id, UserPatch(status="deleted"), admin, session)
+    assert exc_deleted.value.status_code == 400
+
+    # 合法 status 值应正常工作
+    assert (await admin_patch_user(user.id, UserPatch(status="disabled"), admin, session))["status"] == "disabled"
+    assert (await admin_patch_user(user.id, UserPatch(status="active"), admin, session))["status"] == "active"
+
     with pytest.raises(HTTPException) as bad_kind:
         await admin_products(admin, session, kind="bad-kind")
     assert bad_kind.value.status_code == 400
@@ -1439,6 +1467,29 @@ async def test_billing_and_admin_remaining_error_branches(session: AsyncSession)
     await session.refresh(secret)
     assert masked["string_value"] == "******"
     assert secret.string_value == "real-secret"
+
+
+async def test_admin_subscription_detail_missing_plan_returns_404(session: AsyncSession) -> None:
+    """订阅关联的 Plan 被删除后，admin_subscription_detail 应返回 404"""
+    user = await create_user_account(session, "sub-missing-plan@example.com", "user12345")
+    plan = Plan(name="瞬逝套餐", price_amount=10.00, monthly_points=100)
+    session.add(plan)
+    await session.flush()
+    sub = UserSubscription(
+        user_id=user.id, plan_id=plan.id, start_at=datetime.now(UTC), end_at=datetime.now(UTC) + timedelta(days=30)
+    )
+    session.add(sub)
+    await session.commit()
+
+    detail = await admin_subscription_detail(sub.id, _admin=user, session=session)
+    assert detail["plan"]["name"] == "瞬逝套餐"
+
+    await session.delete(plan)
+    await session.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        await admin_subscription_detail(sub.id, _admin=user, session=session)
+    assert exc.value.status_code == 404
 
 
 async def test_init_database_auto_create_disabled(monkeypatch: pytest.MonkeyPatch) -> None:

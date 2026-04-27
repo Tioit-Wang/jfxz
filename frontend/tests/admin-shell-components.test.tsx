@@ -1,6 +1,7 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AdminProfileProvider } from "../src/components/admin-profile-context";
 import { AppSidebar } from "../src/components/app-sidebar";
 import { SiteHeader } from "../src/components/site-header";
 import { SidebarProvider } from "../src/components/ui/sidebar";
@@ -43,6 +44,32 @@ describe("admin block shell components", () => {
     expect(screen.getByRole("link", { name: /用户/ })).toBeVisible();
     expect(screen.getByRole("link", { name: /套餐与加油包/ })).toBeVisible();
     expect(screen.getByRole("heading", { name: "用户管理" })).toBeVisible();
+  });
+
+  it("renders the current admin email from context", () => {
+    render(
+      <TooltipProvider>
+        <SidebarProvider>
+          <AdminProfileProvider
+            profile={{
+              user: {
+                id: "admin-id",
+                email: "real-admin@example.com",
+                nickname: "Admin",
+                role: "admin",
+                status: "active",
+              },
+              points: { monthlyPoints: 0, topupPoints: 0, totalPoints: 0 },
+              subscription: null,
+            }}
+          >
+            <SiteHeader />
+          </AdminProfileProvider>
+        </SidebarProvider>
+      </TooltipProvider>
+    );
+
+    expect(screen.getByText("real-admin@example.com")).toBeVisible();
   });
 
   it("logs out from the sidebar footer", async () => {

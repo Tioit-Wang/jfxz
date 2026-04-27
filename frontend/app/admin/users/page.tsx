@@ -23,7 +23,7 @@ export default function AdminUsersPage() {
   const [target, setTarget] = useState<ApiUser | null>(null);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
-  const pageSize = 10;
+  const pageSize = 20;
 
   async function load(q = query, nextPage = page) {
     setLoading(true);
@@ -145,12 +145,14 @@ export default function AdminUsersPage() {
                 <span className="text-muted-foreground">状态</span><StatusBadge status={detail.user.status} />
               </div>
               <div className="grid grid-cols-2 gap-3 rounded-lg border p-4">
-                <span className="text-muted-foreground">当前订阅</span><span>{detail.subscription?.id ?? "无"}</span>
+                <span className="text-muted-foreground">当前订阅</span><span>{detail.subscription ? detail.subscription.id : "无订阅"}</span>
                 <span className="text-muted-foreground">月度积分</span><span>{detail.points.monthlyPoints}</span>
                 <span className="text-muted-foreground">加油包积分</span><span>{detail.points.topupPoints}</span>
                 <span className="text-muted-foreground">总积分</span><span>{detail.points.totalPoints}</span>
               </div>
-              <p className="text-xs text-muted-foreground">订阅结束：{formatDate(detail.subscription?.end_at)}</p>
+              {detail.subscription ? (
+                <p className="text-xs text-muted-foreground">订阅结束：{formatDate(detail.subscription.end_at)}</p>
+              ) : null}
             </div>
           ) : null}
         </SheetContent>

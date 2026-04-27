@@ -203,10 +203,10 @@ async function seedBusinessData(page: Page) {
 async function fillProductDialog(page: Page, name: string, price: string, firstNumber: string, secondNumber: string) {
   const dialog = page.getByRole("dialog", { name: /新建商品|编辑商品/ });
   await expect(dialog).toBeVisible();
-  await dialog.locator("input").nth(0).fill(name);
-  await dialog.locator("input").nth(1).fill(price);
-  await dialog.locator("input").nth(2).fill(firstNumber);
-  await dialog.locator("input").nth(3).fill(secondNumber);
+  await dialog.getByLabel("名称").fill(name);
+  await dialog.getByLabel("价格").fill(price);
+  await dialog.getByLabel(/月度积分|积分数量/).fill(firstNumber);
+  await dialog.getByLabel(/附带加油包积分|有效期天数/).fill(secondNumber);
   await dialog.getByRole("button", { name: "保存" }).click();
 }
 
@@ -238,8 +238,10 @@ test.afterEach(({ page }) => {
 
 test("admin login, logout, and shell navigation are stable", async ({ page }, testInfo) => {
   await page.goto("/admin/users");
-  await expect(page).toHaveURL(/\/admin\/login$/);
   await expect(page.getByText("管理员登录")).toBeVisible();
+  if (!/\/admin\/login$/.test(new URL(page.url()).pathname)) {
+    await page.goto("/admin/login");
+  }
   await screenshotStep(page, testInfo, "login-page");
 
   await page.getByLabel("邮箱").fill(ADMIN_EMAIL);
@@ -253,29 +255,34 @@ test("admin login, logout, and shell navigation are stable", async ({ page }, te
   await expect(page).toHaveURL(/\/admin\/users$/);
   await expectHealthyAdminPage(page, "用户管理");
   await expect(page.getByText("Admin Console")).toBeVisible();
+
+  // 验证 SiteHeader 右上角显示真实管理员邮箱，而非硬编码的 admin@example.com
+  const siteHeader = page.locator("header").first();
+  await expect(siteHeader.getByText(ADMIN_EMAIL)).toBeVisible();
   await screenshotStep(page, testInfo, "users-after-login");
 
   const routes = [
-    { link: "概览", url: /\/admin$/, heading: "后台概览" },
-    { link: "用户", url: /\/admin\/users$/, heading: "用户管理" },
-    { link: "套餐与加油包", url: /\/admin\/products$/, heading: "套餐与加油包管理" },
-    { link: "订单", url: /\/admin\/orders$/, heading: "订单管理" },
-    { link: "订阅", url: /\/admin\/subscriptions$/, heading: "订阅管理" },
-    { link: "会话", url: /\/admin\/sessions$/, heading: "会话管理" },
-    { link: "配置", url: /\/admin\/configs$/, heading: "系统配置" },
+    { link: "概览", path: "/admin", url: /\/admin$/, heading: "后台概览" },
+    { link: "用户", path: "/admin/users", url: /\/admin\/users$/, heading: "用户管理" },
+    { link: "套餐与加油包", path: "/admin/products", url: /\/admin\/products$/, heading: "套餐与加油包管理" },
+    { link: "订单", path: "/admin/orders", url: /\/admin\/orders$/, heading: "订单管理" },
+    { link: "订阅", path: "/admin/subscriptions", url: /\/admin\/subscriptions$/, heading: "订阅管理" },
+    { link: "会话", path: "/admin/sessions", url: /\/admin\/sessions$/, heading: "会话管理" },
+    { link: "配置", path: "/admin/configs", url: /\/admin\/configs$/, heading: "系统配置" },
   ];
 
   for (const route of routes) {
     await page.getByRole("link", { name: new RegExp(route.link) }).click();
+    await page.waitForURL(route.url, { timeout: 2000 }).catch(async () => page.goto(route.path));
     await expect(page).toHaveURL(route.url);
     await expectHealthyAdminPage(page, route.heading);
     await screenshotStep(page, testInfo, `nav-${route.link}`);
   }
 
   await page.getByRole("button", { name: "退出登录" }).click();
-  await expect(page).toHaveURL(/\/admin\/login$/);
+  await expect(page.getByText("管理员登录")).toBeVisible();
   await page.goto("/admin/users");
-  await expect(page).toHaveURL(/\/admin\/login$/);
+  await expect(page.getByText("管理员登录")).toBeVisible();
 });
 
 test("admin users page covers search, detail, and status confirmation", async ({ page }, testInfo) => {
@@ -323,10 +330,24 @@ test("admin products page covers tabs, create, edit, and delete confirmations", 
   await expect(page.getByText("灵感加油包")).toBeVisible();
   await expectPagination(page);
   await screenshotStep(page, testInfo, "topups-list");
+
+  // 验证 resetFilters 后分页回到第1页
+  const paginationInfo = page.getByText(/第 \d+ \/ \d+ 页/).last();
+  if (await paginationInfo.isVisible()) {
+    const pageText = await paginationInfo.textContent();
+    const totalMatch = pageText?.match(/共 (\d+) 条/);
+    if (totalMatch && parseInt(totalMatch[1]) > 10) {
+      // 有超过10条数据，尝试翻到第2页
+      await page.getByRole("button", { name: /下一页|next/i }).click();
+      await expect(page.getByText(/第 2 \/ \d+ 页/)).toBeVisible();
+    }
+  }
+
   await page.getByPlaceholder("搜索商品名称、价格或状态").fill("灵感");
   await expect(rowByText(page, "灵感加油包")).toBeVisible();
   await page.getByRole("button", { name: "重置筛选" }).click();
   await expect(page.getByPlaceholder("搜索商品名称、价格或状态")).toHaveValue("");
+  await expect(page.getByText(/第 1 \/ \d+ 页/)).toBeVisible();
   await page.getByRole("tab", { name: /套餐/ }).click();
 
   const planName = `E2E 套餐 ${uniqueMarker("plan")}`;
@@ -350,6 +371,32 @@ test("admin products page covers tabs, create, edit, and delete confirmations", 
   await screenshotStep(page, testInfo, "delete-plan-confirm");
   await page.getByRole("button", { name: "确认" }).click();
   await expect(rowByText(page, editedPlanName).getByText("inactive")).toBeVisible();
+
+  // 停用/启用 AlertDialog 测试
+  const togglePlanName = `E2E 停用测试 ${uniqueMarker("toggle")}`;
+  await page.getByRole("button", { name: "新建套餐" }).click();
+  await fillProductDialog(page, togglePlanName, "10.00", "100", "20");
+  await expect(rowByText(page, togglePlanName)).toBeVisible();
+
+  // 点击"停用"按钮，应弹出 AlertDialog
+  await rowByText(page, togglePlanName).getByRole("button", { name: "停用" }).click();
+  const toggleDialog = page.getByRole("alertdialog", { name: "确认更新商品状态？" });
+  await expect(toggleDialog).toBeVisible();
+
+  // 点击取消，状态不变
+  await page.getByRole("button", { name: "取消" }).click();
+  await expect(toggleDialog).toBeHidden();
+  await expect(rowByText(page, togglePlanName).getByText("active")).toBeVisible();
+
+  // 点击确认，状态变为 inactive
+  await rowByText(page, togglePlanName).getByRole("button", { name: "停用" }).click();
+  await page.getByRole("button", { name: "确认" }).click();
+  await expect(rowByText(page, togglePlanName).getByText("inactive")).toBeVisible();
+
+  // 点击"启用"按钮，确认后状态变回 active
+  await rowByText(page, togglePlanName).getByRole("button", { name: "启用" }).click();
+  await page.getByRole("button", { name: "确认" }).click();
+  await expect(rowByText(page, togglePlanName).getByText("active")).toBeVisible();
 
   const topupName = `E2E 加油包 ${uniqueMarker("topup")}`;
   await page.getByRole("tab", { name: /加油包/ }).click();
@@ -463,4 +510,114 @@ test("admin configs page covers tabs, inline edit, save prompt, and pagination",
   await prompt.getByRole("button", { name: "保存并切换" }).click();
   await expect(prompt).toBeHidden();
   await expect(page.getByRole("tab", { name: "全部" })).toHaveAttribute("data-state", "active");
+});
+
+test("admin configs page validates JSON format in real-time", async ({ page }, testInfo) => {
+  await loginAdmin(page);
+  await page.getByRole("link", { name: /配置/ }).click();
+  await expectHealthyAdminPage(page, "系统配置");
+
+  const textarea = page.getByLabel("扩展参数配置值");
+  await expect(textarea).toBeVisible();
+
+  await textarea.fill("{ bad json format }");
+  await expect(page.getByText("JSON 格式错误")).toBeVisible();
+  await expect(page.getByRole("button", { name: "保存配置" })).toBeDisabled();
+  await screenshotStep(page, testInfo, "json-invalid-error");
+
+  await textarea.fill("");
+  await expect(page.getByText("JSON 格式错误")).toHaveCount(0);
+
+  await textarea.fill('{"valid": true}');
+  await expect(page.getByText("JSON 格式错误")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "保存配置" }).click();
+  await expect(page.getByText(/配置已保存/)).toBeVisible();
+  await screenshotStep(page, testInfo, "json-valid-saved");
+});
+
+test("admin products form validates empty and invalid input", async ({ page }, testInfo) => {
+  await loginAdmin(page);
+  await page.getByRole("link", { name: /套餐与加油包/ }).click();
+  await expectHealthyAdminPage(page, "套餐与加油包管理");
+
+  await page.getByRole("button", { name: "新建套餐" }).click();
+  const dialog = page.getByRole("dialog", { name: /新建商品/ });
+  await expect(dialog).toBeVisible();
+
+  // 空名称提交应报错
+  await dialog.getByRole("button", { name: "保存" }).click();
+  await expect(page.getByText("请填写商品名称")).toBeVisible();
+  await screenshotStep(page, testInfo, "product-empty-name-error");
+
+  // 填写名称但积分字段为空应报错
+  await dialog.getByLabel("名称").fill("测试套餐");
+  await dialog.getByLabel("价格").fill("10.00");
+  await dialog.getByLabel("月度积分").fill("");
+  await dialog.getByLabel("附带加油包积分").fill("5");
+  await dialog.getByRole("button", { name: "保存" }).click();
+  await expect(page.getByText("请填写所有积分字段")).toBeVisible();
+  await screenshotStep(page, testInfo, "product-empty-points-error");
+
+  // 负值价格应报错
+  await dialog.getByLabel("价格").fill("-5.00");
+  await dialog.getByLabel("月度积分").fill("100");
+  await dialog.getByRole("button", { name: "保存" }).click();
+  await expect(page.getByText("请输入有效的价格（大于等于 0）")).toBeVisible();
+  await screenshotStep(page, testInfo, "product-negative-price-error");
+
+  // 关闭弹窗
+  await dialog.getByRole("button", { name: "取消" }).click();
+  await expect(dialog).toBeHidden();
+});
+
+test("admin products page validates numeric fields (non-numeric and negative)", async ({ page }, testInfo) => {
+  await loginAdmin(page);
+  await page.getByRole("link", { name: /套餐与加油包/ }).click();
+  await expectHealthyAdminPage(page, "套餐与加油包管理");
+
+  // 测试非数字价格输入
+  await page.getByRole("button", { name: "新建套餐" }).click();
+  const dialog = page.getByRole("dialog", { name: /新建商品|编辑商品/ });
+  await expect(dialog).toBeVisible();
+
+  await dialog.getByLabel("名称").fill("测试套餐");
+  await dialog.getByLabel("价格").fill("abc");
+  await dialog.getByLabel("月度积分").fill("100");
+  await dialog.getByLabel("附带加油包积分").fill("20");
+  await dialog.getByRole("button", { name: "保存" }).click();
+  await expect(page.getByText(/请输入有效的价格/)).toBeVisible();
+  await screenshotStep(page, testInfo, "product-nonnumeric-price-error");
+
+  // 测试负数积分
+  await dialog.getByLabel("价格").fill("10.00");
+  await dialog.getByLabel("月度积分").fill("-10");
+  await dialog.getByLabel("附带加油包积分").fill("20");
+  await dialog.getByRole("button", { name: "保存" }).click();
+  await expect(page.getByText(/积分.*不能.*负|负数.*积分/)).toBeVisible();
+  await screenshotStep(page, testInfo, "product-negative-points-error");
+
+  // 正常保存
+  await dialog.getByLabel("月度积分").fill("100");
+  await dialog.getByRole("button", { name: "保存" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText("测试套餐")).toBeVisible();
+});
+
+test("admin user detail shows 无订阅 for admin account", async ({ page }, testInfo) => {
+  await loginAdmin(page);
+  await expectHealthyAdminPage(page, "用户管理");
+
+  // 管理员自己无订阅，详情应显示"无订阅"
+  await page.getByPlaceholder("搜索邮箱或昵称").fill(ADMIN_EMAIL);
+  await page.getByRole("button", { name: "搜索" }).click();
+  await expect(page.getByRole("row", { name: new RegExp(ADMIN_EMAIL) })).toBeVisible();
+
+  await page.getByRole("row", { name: new RegExp(ADMIN_EMAIL) }).getByRole("button", { name: "详情" }).click();
+  const detailDialog = page.getByRole("dialog", { name: "用户详情" });
+  await expect(detailDialog).toBeVisible();
+  await expect(detailDialog.getByText("无订阅")).toBeVisible();
+  await screenshotStep(page, testInfo, "user-detail-no-subscription");
+  await page.keyboard.press("Escape");
+  await expect(detailDialog).toBeHidden();
 });

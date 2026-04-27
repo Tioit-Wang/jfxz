@@ -34,7 +34,8 @@ const labelMap: Record<string, string> = {
   alipay_public_key: "支付宝公钥",
   notify_url: "支付回调地址",
   seller_id: "商户 ID",
-  timeout_express: "订单超时时间"
+  timeout_express: "订单超时时间",
+  extra_options: "扩展参数"
 };
 
 function configLabel(config: AdminConfig) {
@@ -60,7 +61,9 @@ function payloadFor(config: AdminConfig, value: DraftValue): AdminConfigValue {
   const text = String(value);
   if (config.value_type === "integer") return { integer_value: Number(text) };
   if (config.value_type === "decimal") return { decimal_value: text };
-  if (config.value_type === "json") return { json_value: JSON.parse(text || "{}") as Record<string, unknown> };
+  if (config.value_type === "json") {
+    return { json_value: JSON.parse(text || "{}") as Record<string, unknown> };
+  }
   return { string_value: text };
 }
 
@@ -72,6 +75,7 @@ export default function AdminConfigsPage() {
   const [pendingGroup, setPendingGroup] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, DraftValue>>({});
   const [dirtyIds, setDirtyIds] = useState<Set<string>>(new Set());
+  const [jsonErrors, setJsonErrors] = useState<Record<string, string>>({});
   const [reveal, setReveal] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -79,7 +83,7 @@ export default function AdminConfigsPage() {
   const [total, setTotal] = useState(0);
   const pageSize = 10;
 
-  const visibleDirtyIds = configs.filter((item) => dirtyIds.has(item.id)).map((item) => item.id);
+  const visibleDirtyIds = configs.filter((item) => dirtyIds.has(item.id) && !jsonErrors[item.id]).map((item) => item.id);
   const hasDirty = dirtyIds.size > 0;
 
   async function load(group = activeGroup, nextPage = page) {
@@ -114,12 +118,28 @@ export default function AdminConfigsPage() {
   }, [activeGroup]);
 
   function updateDraft(config: AdminConfig, value: DraftValue) {
+    if (config.value_type === "json") {
+      try {
+        JSON.parse(String(value) || "{}");
+        setJsonErrors((current) => {
+          const next = { ...current };
+          delete next[config.id];
+          return next;
+        });
+      } catch {
+        setJsonErrors((current) => ({ ...current, [config.id]: "JSON 格式错误" }));
+      }
+    }
     setDrafts((current) => ({ ...current, [config.id]: value }));
     setDirtyIds((current) => new Set(current).add(config.id));
   }
 
   async function saveDirty(ids = visibleDirtyIds) {
-    if (!ids.length) return true;
+    if (ids.length === 0) return true;
+    if (ids.some((id) => jsonErrors[id])) {
+      toast.error("存在格式错误的字段，请修正后再保存");
+      return false;
+    }
     setSaving(true);
     try {
       for (const id of ids) {
@@ -163,6 +183,7 @@ export default function AdminConfigsPage() {
   function discardAndSwitch() {
     if (!pendingGroup) return;
     setDirtyIds(new Set());
+    setJsonErrors({});
     setDrafts(Object.fromEntries(configs.map((item) => [item.id, configValue(item)])));
     setActiveGroup(pendingGroup);
     setPendingGroup(null);
@@ -184,11 +205,16 @@ export default function AdminConfigsPage() {
     }
     if (config.value_type === "json") {
       return (
-        <Textarea
-          aria-label={`${configLabel(config)}配置值`}
-          value={String(value)}
-          onChange={(event) => updateDraft(config, event.target.value)}
-        />
+        <div className="flex flex-col gap-1">
+          <Textarea
+            aria-label={`${configLabel(config)}配置值`}
+            value={String(value)}
+            onChange={(event) => updateDraft(config, event.target.value)}
+          />
+          {jsonErrors[config.id] ? (
+            <span className="text-xs text-destructive">{jsonErrors[config.id]}</span>
+          ) : null}
+        </div>
       );
     }
     return (
@@ -219,44 +245,46 @@ export default function AdminConfigsPage() {
       <AdminHeading title="系统配置" description="按分组维护全局配置，支持在列表中直接编辑并统一保存。" />
       <AdminPanel title="配置项" description="顶部切换分组，修改后使用底部按钮保存。">
         {loading ? <Skeleton className="h-44 w-full" /> : (
-          <Tabs value={activeGroup} onValueChange={requestGroupChange} className="flex flex-col gap-4">
-            <div className="overflow-x-auto">
-              <TabsList>
-                {groups.map((group) => (
-                  <TabsTrigger key={group} value={group}>{groupLabel(group)}</TabsTrigger>
-                ))}
-              </TabsList>
-            </div>
-            {groups.map((group) => (
-              <TabsContent key={group} value={group} className="mt-0">
-                {!configs.length ? (
-                  <Empty>
-                    <EmptyHeader>
-                      <EmptyTitle>没有配置项</EmptyTitle>
-                      <EmptyDescription>当前分组下没有可编辑配置。</EmptyDescription>
-                    </EmptyHeader>
-                  </Empty>
-                ) : (
-                  <div className="flex flex-col gap-3">
-                    {configs.map((config) => (
-                      <div key={config.id} className="grid gap-3 rounded-md border p-4 lg:grid-cols-[minmax(220px,0.8fr)_minmax(320px,1fr)] lg:items-center">
-                        <div className="flex min-w-0 flex-col gap-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="font-medium">{configLabel(config)}</span>
-                            <Badge variant="outline">{config.value_type}</Badge>
-                            {config.is_required ? <Badge variant="secondary">必填</Badge> : null}
-                            {dirtyIds.has(config.id) ? <Badge>未保存</Badge> : null}
+          <>
+            <Tabs value={activeGroup} onValueChange={requestGroupChange} className="flex flex-col gap-4">
+              <div className="overflow-x-auto">
+                <TabsList>
+                  {groups.map((group) => (
+                    <TabsTrigger key={group} value={group}>{groupLabel(group)}</TabsTrigger>
+                  ))}
+                </TabsList>
+              </div>
+              {groups.map((group) => (
+                <TabsContent key={group} value={group} className="mt-0">
+                  {!configs.length ? (
+                    <Empty>
+                      <EmptyHeader>
+                        <EmptyTitle>没有配置项</EmptyTitle>
+                        <EmptyDescription>当前分组下没有可编辑配置。</EmptyDescription>
+                      </EmptyHeader>
+                    </Empty>
+                  ) : (
+                    <div className="flex flex-col gap-3">
+                      {configs.map((config) => (
+                        <div key={config.id} className="grid gap-3 rounded-md border p-4 lg:grid-cols-[minmax(220px,0.8fr)_minmax(320px,1fr)] lg:items-center">
+                          <div className="flex min-w-0 flex-col gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-medium">{configLabel(config)}</span>
+                              <Badge variant="outline">{config.value_type}</Badge>
+                              {config.is_required ? <Badge variant="secondary">必填</Badge> : null}
+                              {dirtyIds.has(config.id) ? <Badge>未保存</Badge> : null}
+                            </div>
+                            <span className="text-xs text-muted-foreground">{config.config_group}.{config.config_key}</span>
+                            {config.description ? <span className="text-sm text-muted-foreground">{config.description}</span> : null}
                           </div>
-                          <span className="text-xs text-muted-foreground">{config.config_group}.{config.config_key}</span>
-                          {config.description ? <span className="text-sm text-muted-foreground">{config.description}</span> : null}
+                          {renderControl(config)}
                         </div>
-                        {renderControl(config)}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </TabsContent>
-            ))}
+                      ))}
+                    </div>
+                  )}
+                </TabsContent>
+              ))}
+            </Tabs>
             <div className="sticky bottom-0 flex flex-col gap-4 border-t bg-background/95 pt-4 backdrop-blur md:flex-row md:items-center md:justify-between">
               <AdminPagination page={page} pageSize={pageSize} total={total} onPageChange={(nextPage) => void load(activeGroup, nextPage)} />
               <Button disabled={saving || visibleDirtyIds.length === 0} onClick={() => void saveDirty()}>
@@ -264,7 +292,7 @@ export default function AdminConfigsPage() {
                 保存配置
               </Button>
             </div>
-          </Tabs>
+          </>
         )}
       </AdminPanel>
 

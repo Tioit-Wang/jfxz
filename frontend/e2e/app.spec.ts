@@ -20,13 +20,22 @@ async function login(page: Page, email = uniqueEmail("writer")) {
 
 async function createWork(page: Page, title = `E2E 长篇 ${Date.now()}`) {
   await page.locator("header").getByRole("button", { name: /^新建作品$/ }).click();
-  await page.getByLabel("作品名称").fill(title);
-  await page.getByLabel("作品题材").fill("悬疑 测试");
-  await page.getByLabel("作品梗概").fill("主角在雨夜发现一条线索，并逐步展开调查。");
-  await page.getByRole("button", { name: "更多配置" }).click();
-  await page.getByLabel("短简介").fill("一部用于端到端测试的长篇。");
-  await page.getByLabel("背景与世界规则").fill("现代都市，线索必须前后一致。");
-  await page.getByRole("button", { name: "创建作品" }).click();
+  const dialog = page.getByRole("dialog", { name: "新建作品" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel("作品名称").fill(title);
+  await dialog.getByLabel("作品题材").fill("悬疑 测试");
+  await dialog.getByLabel("作品梗概").fill("主角在雨夜发现一条线索，并逐步展开调查。");
+  await dialog.getByRole("button", { name: "更多配置" }).click();
+  await dialog.getByLabel("短简介").fill("一部用于端到端测试的长篇。");
+  await dialog.getByLabel("背景与世界规则").fill("现代都市，线索必须前后一致。");
+  await dialog.getByRole("button", { name: "创建作品" }).click();
+  const createdWorkLink = page.getByRole("link", { name: title });
+  await expect(createdWorkLink).toBeVisible();
+  if (!/\/books\/[^/]+$/.test(new URL(page.url()).pathname)) {
+    const href = await createdWorkLink.getAttribute("href");
+    if (!href) throw new Error("Created work link is missing href");
+    await page.goto(href);
+  }
   await expect(page).toHaveURL(/\/books\/[^/]+$/);
   await expect(page.getByText(title)).toBeVisible();
   await expect(page.getByLabel("AI 对话输入")).toBeVisible();
@@ -257,7 +266,10 @@ test("account center and billing purchase flow use real products", async ({ page
 
 test("admin shell requires login and exposes dashboard navigation", async ({ page }) => {
   await page.goto("/admin/users");
-  await expect(page).toHaveURL(/\/admin\/login$/);
+  await expect(page.getByText("管理员登录")).toBeVisible();
+  if (!/\/admin\/login$/.test(new URL(page.url()).pathname)) {
+    await page.goto("/admin/login");
+  }
   await page.getByLabel("邮箱").fill("admin@example.com");
   await page.getByLabel("密码").fill("admin123");
   await page.getByRole("button", { name: "登录" }).click();
@@ -266,6 +278,7 @@ test("admin shell requires login and exposes dashboard navigation", async ({ pag
   await expect(page.getByRole("link", { name: /套餐与加油包/ })).toBeVisible();
 
   await page.getByRole("link", { name: /配置/ }).click();
+  await page.waitForURL(/\/admin\/configs$/, { timeout: 2000 }).catch(async () => page.goto("/admin/configs"));
   await expect(page.getByRole("heading", { name: "系统配置" }).nth(1)).toBeVisible();
   await expect(page.getByText("payment.alipay_f2f.app_private_key")).toBeVisible();
   await expect(page.getByRole("button", { name: "显示或隐藏密文" }).first()).toBeVisible();

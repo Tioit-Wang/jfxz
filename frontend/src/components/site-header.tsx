@@ -1,6 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
+import { useAdminProfile } from "@/components/admin-profile-context";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -17,7 +18,14 @@ const titles: Record<string, string> = {
 
 export function SiteHeader() {
   const pathname = usePathname();
-  const title = titles[pathname] ?? "管理后台";
+  const profile = useAdminProfile();
+  const email = profile?.user?.email ?? "admin@example.com";
+  const title =
+    titles[pathname] ??
+    Object.entries(titles)
+      .sort(([left], [right]) => right.length - left.length)
+      .find(([path]) => pathname.startsWith(path + "/"))?.[1] ??
+    "管理后台";
 
   return (
     <header className="sticky top-0 z-10 flex h-[var(--header-height)] shrink-0 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur">
@@ -28,7 +36,7 @@ export function SiteHeader() {
           <span className="text-xs text-muted-foreground">Admin Console</span>
           <h1 className="truncate text-sm font-medium">{title}</h1>
         </div>
-        <Badge variant="outline" className="hidden sm:inline-flex">admin@example.com</Badge>
+        <Badge variant="outline" className="hidden sm:inline-flex">{email}</Badge>
       </div>
     </header>
   );

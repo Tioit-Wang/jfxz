@@ -118,7 +118,7 @@ export default function AdminSessionsPage() {
             <div className="flex flex-col gap-4 overflow-y-auto text-sm">
               <div className="grid grid-cols-2 gap-3 rounded-lg border p-4">
                 <span className="text-muted-foreground">标题</span><span>{detail.session.title}</span>
-                <span className="text-muted-foreground">Agent Session</span><span className="truncate">{detail.session.agno_session_id}</span>
+                <span className="text-muted-foreground">Agent Session</span><span className="truncate whitespace-nowrap">{detail.session.agno_session_id}</span>
                 <span className="text-muted-foreground">来源</span><span>{detail.session.source_type}</span>
                 <span className="text-muted-foreground">最近活跃</span><span>{formatDate(detail.session.last_active_at)}</span>
               </div>

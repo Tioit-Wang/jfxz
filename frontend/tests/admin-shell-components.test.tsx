@@ -42,8 +42,9 @@ describe("admin block shell components", () => {
 
     expect(screen.getByText("金番写作")).toBeVisible();
     expect(screen.getByRole("link", { name: /用户/ })).toBeVisible();
+    expect(screen.getByRole("link", { name: /模型/ })).toBeVisible();
     expect(screen.getByRole("link", { name: /套餐与加油包/ })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "用户管理" })).toBeVisible();
+    expect(screen.getByText("用户管理")).toBeVisible();
   });
 
   it("renders the current admin email from context", () => {

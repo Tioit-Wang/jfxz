@@ -210,6 +210,30 @@ async function fillProductDialog(page: Page, name: string, price: string, firstN
   await dialog.getByRole("button", { name: "保存" }).click();
 }
 
+async function fillModelDialog(page: Page, name: string, providerId: string) {
+  const dialog = page.getByRole("dialog", { name: /新建模型|编辑模型/ });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel("模型名称").fill(name);
+  await dialog.getByLabel("平台调用 ID").fill(providerId);
+  await dialog.getByLabel("模型描述").fill("E2E 模型描述");
+  await dialog.getByLabel("逻辑评分").fill("4");
+  await dialog.getByLabel("文笔评分").fill("3");
+  await dialog.getByLabel("知识面评分").fill("5");
+  await dialog.getByLabel("最大上下文").fill("32000");
+  await dialog.getByLabel("最大输出").fill("2048");
+  await dialog.getByLabel("temperature").fill("0.80");
+  await dialog.getByLabel("命中成本").fill("1");
+  await dialog.getByLabel("未命中成本").fill("2");
+  await dialog.getByLabel("输出成本").fill("3");
+  await dialog.getByLabel("加价率 %").fill("10");
+  await dialog.getByRole("button", { name: "生成倍率" }).click();
+  await expect(dialog.getByLabel("缓存命中输入倍率")).toHaveValue("0.11");
+  await expect(dialog.getByLabel("缓存未命中输入倍率")).toHaveValue("0.22");
+  await expect(dialog.getByLabel("输出倍率")).toHaveValue("0.33");
+  await dialog.getByLabel("排序值").fill("9");
+  await dialog.getByRole("button", { name: "保存" }).click();
+}
+
 test.beforeEach(({ page }) => {
   const issues: string[] = [];
   diagnostics.set(page, issues);
@@ -263,6 +287,7 @@ test("admin login, logout, and shell navigation are stable", async ({ page }, te
   const routes = [
     { link: "概览", path: "/admin", url: /\/admin$/, heading: "后台概览" },
     { link: "用户", path: "/admin/users", url: /\/admin\/users$/, heading: "用户管理" },
+    { link: "模型", path: "/admin/models", url: /\/admin\/models$/, heading: "模型管理" },
     { link: "套餐与加油包", path: "/admin/products", url: /\/admin\/products$/, heading: "套餐与加油包管理" },
     { link: "订单", path: "/admin/orders", url: /\/admin\/orders$/, heading: "订单管理" },
     { link: "订阅", path: "/admin/subscriptions", url: /\/admin\/subscriptions$/, heading: "订阅管理" },
@@ -271,7 +296,7 @@ test("admin login, logout, and shell navigation are stable", async ({ page }, te
   ];
 
   for (const route of routes) {
-    await page.getByRole("link", { name: new RegExp(route.link) }).click();
+    await page.getByRole("link", { name: route.link, exact: true }).click();
     await page.waitForURL(route.url, { timeout: 2000 }).catch(async () => page.goto(route.path));
     await expect(page).toHaveURL(route.url);
     await expectHealthyAdminPage(page, route.heading);
@@ -411,6 +436,61 @@ test("admin products page covers tabs, create, edit, and delete confirmations", 
   await expect(rowByText(page, topupName).getByText("inactive")).toBeVisible();
 });
 
+test("admin models page covers create, edit, filters, and status confirmation", async ({ page }, testInfo) => {
+  await loginAdmin(page);
+  await page.getByRole("link", { name: /模型/ }).click();
+  await expectHealthyAdminPage(page, "模型管理");
+  await expect(rowByText(page, "DeepSeek-v4-flash")).toBeVisible();
+  await expectPagination(page);
+  await screenshotStep(page, testInfo, "models-list");
+
+  await page.getByRole("button", { name: "新建模型" }).click();
+  const dialog = page.getByRole("dialog", { name: /新建模型/ });
+  await dialog.getByRole("button", { name: "保存" }).click();
+  await expect(page.getByText("请填写模型名称")).toBeVisible();
+  await dialog.getByLabel("模型名称").fill("非法模型");
+  await dialog.getByLabel("平台调用 ID").fill(`bad-${uniqueMarker("model")}`);
+  await dialog.getByLabel("逻辑评分").fill("6");
+  await dialog.getByRole("button", { name: "保存" }).click();
+  await expect(page.getByText("评分必须是 1-5 的整数")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+
+  const modelName = `E2E 模型 ${uniqueMarker("model")}`;
+  const providerId = `e2e-model-${uniqueMarker("provider")}`;
+  await page.getByRole("button", { name: "新建模型" }).click();
+  await fillModelDialog(page, modelName, providerId);
+  await expect(rowByText(page, modelName)).toBeVisible();
+
+  const editedName = `${modelName} 改`;
+  await rowByText(page, modelName).getByRole("button", { name: "编辑" }).click();
+  await fillModelDialog(page, editedName, providerId);
+  await expect(rowByText(page, editedName)).toBeVisible();
+  await screenshotStep(page, testInfo, "edited-model");
+
+  await page.getByPlaceholder("搜索模型名称或调用 ID").fill(editedName);
+  await expect(rowByText(page, editedName)).toBeVisible();
+  await page.getByLabel("筛选模型状态").click();
+  await page.getByRole("option", { name: "active", exact: true }).click();
+  await expect(rowByText(page, editedName)).toBeVisible();
+  await page.getByRole("button", { name: "重置筛选" }).click();
+
+  await rowByText(page, editedName).getByRole("button", { name: "停用" }).click();
+  const statusDialog = page.getByRole("alertdialog", { name: "确认更新模型状态？" });
+  await expect(statusDialog).toBeVisible();
+  await screenshotStep(page, testInfo, "model-status-confirm");
+  await statusDialog.getByRole("button", { name: "取消" }).click();
+  await expect(rowByText(page, editedName).getByText("active")).toBeVisible();
+
+  await rowByText(page, editedName).getByRole("button", { name: "停用" }).click();
+  await statusDialog.getByRole("button", { name: "确认" }).click();
+  await expect(rowByText(page, editedName).getByText("inactive")).toBeVisible();
+
+  await rowByText(page, editedName).getByRole("button", { name: "启用" }).click();
+  await statusDialog.getByRole("button", { name: "确认" }).click();
+  await expect(rowByText(page, editedName).getByText("active")).toBeVisible();
+});
+
 test("admin orders and subscriptions pages expose paid purchase details", async ({ page }, testInfo) => {
   const seeded = await seedBusinessData(page);
   await loginAdmin(page);
@@ -487,8 +567,16 @@ test("admin configs page covers tabs, inline edit, save prompt, and pagination",
   await expectHealthyAdminPage(page, "系统配置");
   await expect(page.getByRole("tab", { name: "全部" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "支付宝当面付" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "AI 检查" })).toBeVisible();
   await expectPagination(page);
   await screenshotStep(page, testInfo, "configs-all");
+
+  await page.getByRole("tab", { name: "AI 检查" }).click();
+  await page.getByLabel("编辑器检查模型配置值").click();
+  await page.getByRole("option", { name: "DeepSeek-v4-flash" }).click();
+  await page.getByRole("button", { name: "保存配置" }).click();
+  await expect(page.getByText(/配置已保存/)).toBeVisible();
+  await screenshotStep(page, testInfo, "configs-ai-model");
 
   await page.getByRole("tab", { name: "支付宝当面付" }).click();
   await expect(page.getByText("应用私钥")).toBeVisible();

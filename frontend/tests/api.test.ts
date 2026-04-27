@@ -385,12 +385,17 @@ describe("api client", () => {
     const client = new ApiClient("http://api", fetcher);
     const chunks: string[] = [];
 
-    await expect(client.streamChatMessage("s1", "hi", [], [], (chunk) => chunks.push(chunk))).resolves.toMatchObject({
+    await expect(client.streamChatMessage("s1", "hi", [], [], (chunk) => chunks.push(chunk), "model-1")).resolves.toMatchObject({
       id: "a1",
       content: "你好"
     });
     expect(chunks).toEqual(["你", "好"]);
-    expect(JSON.parse(fetcher.mock.calls[0][1]?.body as string)).toEqual({ message: "hi", references: [], mentions: [] });
+    expect(JSON.parse(fetcher.mock.calls[0][1]?.body as string)).toEqual({
+      message: "hi",
+      references: [],
+      mentions: [],
+      model_id: "model-1"
+    });
   });
 
   it("handles chat pagination, empty sse events, and missing stream bodies", async () => {
@@ -678,6 +683,97 @@ describe("api client", () => {
       expect(call[1]?.credentials).toBe("include");
       expect((call[1]?.headers as Headers).get("Authorization")).toBeNull();
     }
+  });
+
+  it("calls ai model endpoints with filters and payload mapping", async () => {
+    const model = {
+      id: "model-1",
+      display_name: "DeepSeek-v4-flash",
+      provider_model_id: "deepseek-v4-flash",
+      description: "快速",
+      logic_score: 3,
+      prose_score: 3,
+      knowledge_score: 3,
+      max_context_tokens: 64000,
+      max_output_tokens: 4096,
+      temperature: "0.70",
+      cache_hit_input_multiplier: "0.11",
+      cache_miss_input_multiplier: "0.11",
+      output_multiplier: "0.22",
+      status: "active",
+      sort_order: 1,
+      created_at: "now",
+      updated_at: "now"
+    };
+    const publicModel = {
+      id: model.id,
+      display_name: model.display_name,
+      description: model.description,
+      logic_score: model.logic_score,
+      prose_score: model.prose_score,
+      knowledge_score: model.knowledge_score,
+      max_context_tokens: model.max_context_tokens,
+      max_output_tokens: model.max_output_tokens,
+      temperature: model.temperature,
+      status: model.status,
+      sort_order: model.sort_order
+    };
+    const input = {
+      displayName: "测试模型",
+      providerModelId: "test-model",
+      description: "描述",
+      logicScore: 4,
+      proseScore: 3,
+      knowledgeScore: 5,
+      maxContextTokens: 32000,
+      maxOutputTokens: 2048,
+      temperature: "0.80",
+      cacheHitInputMultiplier: "0.10",
+      cacheMissInputMultiplier: "0.20",
+      outputMultiplier: "0.30",
+      status: "active" as const,
+      sortOrder: 9
+    };
+    const fetcher = queuedFetcher(
+      jsonResponse([publicModel]),
+      jsonResponse({ items: [model], total: 1, page: 1, page_size: 10 }),
+      jsonResponse({ ...model, id: "model-2", display_name: "测试模型" }),
+      jsonResponse({ ...model, display_name: "测试模型改" })
+    );
+    const client = new ApiClient("http://api", fetcher);
+
+    await expect(client.listAiModels()).resolves.toMatchObject([{ id: "model-1", display_name: "DeepSeek-v4-flash" }]);
+    await expect(
+      client.listAdminModels({
+        q: "DeepSeek",
+        status: "active",
+        logicMin: 3,
+        logicMax: 5,
+        contextMin: 1000,
+        contextMax: 100000,
+        outputMin: 100,
+        outputMax: 9000,
+        page: 1,
+        pageSize: 10
+      })
+    ).resolves.toMatchObject({ total: 1 });
+    await expect(client.createAdminModel(input)).resolves.toMatchObject({ id: "model-2" });
+    await expect(client.updateAdminModel("model-2", { ...input, displayName: "测试模型改" })).resolves.toMatchObject({
+      display_name: "测试模型改"
+    });
+
+    const calls = apiCalls(fetcher);
+    expect(calls.map((call) => call[0])).toEqual([
+      "http://api/ai/models",
+      "http://api/admin/models?q=DeepSeek&status=active&page=1&page_size=10&logic_min=3&logic_max=5&context_min=1000&context_max=100000&output_min=100&output_max=9000",
+      "http://api/admin/models",
+      "http://api/admin/models/model-2"
+    ]);
+    expect(JSON.parse(calls[2][1]?.body as string)).toMatchObject({
+      display_name: "测试模型",
+      provider_model_id: "test-model",
+      cache_hit_input_multiplier: "0.10"
+    });
   });
 
   it("uses environment and browser-host default base urls", async () => {

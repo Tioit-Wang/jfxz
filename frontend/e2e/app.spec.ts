@@ -163,6 +163,14 @@ test("workspace chat restores a session and streams an AI reply", async ({ page 
   await login(page);
   await createWork(page);
   await grantPoints(page);
+  await expect(page.getByLabel("选择对话模型")).toBeVisible();
+  await expect(page.getByLabel("选择对话模型")).toContainText("DeepSeek-v4-flash");
+  await page.getByLabel("选择对话模型").click();
+  await page.getByRole("option", { name: /DeepSeek-v4-pro/ }).click();
+  await expect(page.getByLabel("选择对话模型")).toContainText("DeepSeek-v4-pro");
+  await page.reload();
+  await expect(page.getByLabel("AI 对话输入")).toBeVisible();
+  await expect(page.getByLabel("选择对话模型")).toContainText("DeepSeek-v4-pro");
   await chatEditor(page).fill("@");
   await expect(page.getByRole("button", { name: /第一章 第 1 章 chapter/ })).toBeVisible();
   await chatEditor(page).fill("帮我构思后续情节");

@@ -236,6 +236,42 @@ async def test_billing_chat_and_admin(client: AsyncClient) -> None:
     assert (await client.get("/admin/users/" + paid["user_id"], headers=admin)).json()["points"][
         "monthly_points_balance"
     ] > 0
+    public_models = (await client.get("/ai/models", headers=headers)).json()
+    assert [item["display_name"] for item in public_models] == ["DeepSeek-v4-flash", "DeepSeek-v4-pro"]
+    assert "provider_model_id" not in public_models[0]
+    models_page = (await client.get("/admin/models?q=DeepSeek&status=active", headers=admin)).json()
+    assert models_page["total"] == 2
+    new_model_payload = {
+        "display_name": "测试模型",
+        "provider_model_id": "test-model",
+        "description": "用于后台测试",
+        "logic_score": 4,
+        "prose_score": 3,
+        "knowledge_score": 5,
+        "max_context_tokens": 32000,
+        "max_output_tokens": 2048,
+        "temperature": "0.80",
+        "cache_hit_input_multiplier": "0.10",
+        "cache_miss_input_multiplier": "0.20",
+        "output_multiplier": "0.30",
+        "status": "inactive",
+        "sort_order": 9,
+    }
+    created_model = (await client.post("/admin/models", headers=admin, json=new_model_payload)).json()
+    assert created_model["provider_model_id"] == "test-model"
+    new_model_payload["status"] = "active"
+    updated_model = (
+        await client.patch(f"/admin/models/{created_model['id']}", headers=admin, json=new_model_payload)
+    ).json()
+    assert updated_model["status"] == "active"
+    filtered_models = (
+        await client.get(
+            "/admin/models?logic_min=4&logic_max=4"
+            "&context_min=30000&context_max=33000&output_min=2000&output_max=2100&page=1&page_size=10",
+            headers=admin,
+        )
+    ).json()
+    assert filtered_models["items"][0]["id"] == created_model["id"]
     assert (await client.get("/admin/products", headers=admin)).json()["plans"]
     new_plan = (
         await client.post(

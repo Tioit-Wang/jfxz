@@ -12,12 +12,13 @@ import pytest
 import pytest_asyncio
 from fastapi import HTTPException, Response
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import app.api.routes as routes_module
 from app.api.routes import (
     AdminLogin,
+    AiModelIn,
     AnalyzeIn,
     ChapterIn,
     ChatIn,
@@ -30,10 +31,13 @@ from app.api.routes import (
     RegisterIn,
     UserPatch,
     WorkIn,
+    active_ai_models,
     admin_configs,
+    admin_create_model,
     admin_create_product,
     admin_delete_product,
     admin_login,
+    admin_models,
     admin_order_detail,
     admin_orders,
     admin_patch_config,
@@ -43,6 +47,7 @@ from app.api.routes import (
     admin_sessions,
     admin_subscription_detail,
     admin_subscriptions,
+    admin_update_model,
     admin_update_product,
     admin_user_detail,
     admin_users,
@@ -108,6 +113,7 @@ from app.core.security import (
 from app.main import create_app
 from app.models import (
     AgentSession,
+    AiModel,
     Base,
     BillingOrder,
     Chapter,
@@ -182,6 +188,20 @@ def request_stub() -> object:
 async def test_direct_auth_helpers_and_seed_existing_user(session: AsyncSession) -> None:
     await seed_defaults(session)
     assert await must_get(session, User, (await session.execute(select(User.id))).scalars().first())
+    seeded_models = (await session.execute(select(AiModel).order_by(AiModel.sort_order))).scalars().all()
+    assert [model.provider_model_id for model in seeded_models] == ["deepseek-v4-flash", "deepseek-v4-pro"]
+    editor_config = (
+        await session.execute(
+            select(GlobalConfig).where(
+                GlobalConfig.config_group == "ai.editor_check",
+                GlobalConfig.config_key == "model_id",
+            )
+        )
+    ).scalar_one()
+    assert editor_config.value_type == "string"
+
+    await seed_defaults(session)
+    assert (await session.execute(select(func.count(AiModel.id)))).scalar_one() == 2
     with pytest.raises(HTTPException) as not_found:
         await must_get(session, User, "missing")
     assert not_found.value.status_code == 404
@@ -397,13 +417,64 @@ async def test_chat_helpers_and_error_branches(session: AsyncSession) -> None:
     account = await ensure_point_account(session, user.id)
     account.monthly_points_balance = 0
     account.topup_points_balance = 1
+    inactive_model = (await session.execute(select(AiModel).order_by(AiModel.sort_order.desc()))).scalars().first()
+    inactive_model.status = "inactive"
+    await session.commit()
+    before_transactions = await session.scalar(
+        select(func.count(PointTransaction.id)).where(PointTransaction.source_id == chat["id"])
+    )
+    with pytest.raises(HTTPException) as inactive_model_error:
+        await send_chat_message(
+            chat["id"],
+            ChatIn(message="hi", references=[], model_id=inactive_model.id),
+            user,
+            session,
+        )
+    assert inactive_model_error.value.status_code == 400
+    with pytest.raises(HTTPException) as missing_model_error:
+        await send_chat_message(chat["id"], ChatIn(message="hi", references=[], model_id="missing-model"), user, session)
+    assert missing_model_error.value.status_code == 400
+    assert (
+        await session.scalar(select(func.count(PointTransaction.id)).where(PointTransaction.source_id == chat["id"]))
+    ) == before_transactions
+    await session.refresh(account)
+    assert account.topup_points_balance == 1
+
+    account.monthly_points_balance = 0
+    account.topup_points_balance = 1
     chat_model = await session.get(ChatSession, chat["id"])
     await session.delete(await session.get(AgentSession, chat_model.agno_session_id))
     await session.commit()
-    stream = await send_chat_message(chat["id"], ChatIn(message="首条消息", references=[]), user, session)
+    active_model = (await session.execute(select(AiModel).where(AiModel.status == "active"))).scalars().first()
+    stream = await send_chat_message(
+        chat["id"], ChatIn(message="首条消息", references=[], model_id=active_model.id), user, session
+    )
     body = b"".join([chunk async for chunk in stream.body_iterator]).decode()
     assert "首条消息" in body
     assert (await session.get(ChatSession, chat["id"])).title == "首条消息"
+
+
+async def test_send_chat_without_active_models_does_not_consume_points(session: AsyncSession) -> None:
+    user = await create_user_account(session, "no-model@example.com", "user12345")
+    await session.commit()
+    work = await create_work(WorkIn(title="无模型作品", short_intro="", synopsis="", genre_tags=[], background_rules=""), user, session)
+    chat = await create_chat_session(work["id"], ChatSessionIn(), user, session)
+    account = await ensure_point_account(session, user.id)
+    account.monthly_points_balance = 1
+    account.topup_points_balance = 0
+    for model in (await session.execute(select(AiModel))).scalars():
+        model.status = "inactive"
+    await session.commit()
+
+    with pytest.raises(HTTPException) as no_model_error:
+        await send_chat_message(chat["id"], ChatIn(message="hi", references=[]), user, session)
+
+    assert no_model_error.value.status_code == 503
+    assert (
+        await session.scalar(select(func.count(PointTransaction.id)).where(PointTransaction.source_id == chat["id"]))
+    ) == 0
+    await session.refresh(account)
+    assert account.monthly_points_balance == 1
 
 
 async def test_user_endpoint_edges(client: AsyncClient) -> None:
@@ -606,11 +677,26 @@ def test_create_admin_cli_prints_password_and_exits_on_duplicate(
     assert "Email: cli@example.com" in output
     assert "Password: generated-password" in output
 
+    monkeypatch.setattr("sys.argv", ["jfxz-create-admin", "--email", "FLAG@example.com"])
+    create_admin_main()
+    output = capsys.readouterr().out
+    assert "Email: flag@example.com" in output
+
     monkeypatch.setattr("sys.argv", ["jfxz-create-admin", "cli@example.com"])
     monkeypatch.setattr("app.scripts.create_admin.async_main", fake_duplicate)
     with pytest.raises(SystemExit) as exited:
         create_admin_main()
     assert str(exited.value) == "email already exists: cli@example.com"
+
+    monkeypatch.setattr("sys.argv", ["jfxz-create-admin", "both@example.com", "--email", "both@example.com"])
+    with pytest.raises(SystemExit) as both_args:
+        create_admin_main()
+    assert both_args.value.code == 2
+
+    monkeypatch.setattr("sys.argv", ["jfxz-create-admin"])
+    with pytest.raises(SystemExit) as no_email:
+        create_admin_main()
+    assert no_email.value.code == 2
 
 
 def test_settings_and_token_validation_edges(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -853,6 +939,98 @@ async def test_billing_topup_and_admin_edges(client: AsyncClient) -> None:
         )
     ).json()
     assert updated["boolean_value"] is True
+
+
+async def test_admin_model_errors_and_active_list(client: AsyncClient) -> None:
+    admin = await admin_headers(client)
+    active_models = (await client.get("/ai/models")).json()
+    assert {item["status"] for item in active_models} == {"active"}
+    assert "provider_model_id" not in active_models[0]
+
+    payload = {
+        "display_name": "边界模型",
+        "provider_model_id": "edge-model",
+        "description": None,
+        "logic_score": 1,
+        "prose_score": 2,
+        "knowledge_score": 3,
+        "max_context_tokens": 1000,
+        "max_output_tokens": 500,
+        "temperature": "0.00",
+        "cache_hit_input_multiplier": "0.00",
+        "cache_miss_input_multiplier": "0.10",
+        "output_multiplier": "0.20",
+        "status": "active",
+        "sort_order": None,
+    }
+    created = (await client.post("/admin/models", headers=admin, json=payload)).json()
+    assert created["display_name"] == "边界模型"
+    assert (await client.post("/admin/models", headers=admin, json=payload)).status_code == 409
+    assert (await client.get("/admin/models?status=archived", headers=admin)).status_code == 400
+    assert (await client.post("/admin/models", headers=admin, json={**payload, "logic_score": 0})).status_code == 422
+    assert (await client.post("/admin/models", headers=admin, json={**payload, "temperature": "2.01"})).status_code == 422
+    assert (await client.patch("/admin/models/missing", headers=admin, json=payload)).status_code == 404
+
+    other_payload = {**payload, "display_name": "另一个模型", "provider_model_id": "other-edge-model"}
+    other = (await client.post("/admin/models", headers=admin, json=other_payload)).json()
+    duplicate_update_payload = {**payload, "provider_model_id": other["provider_model_id"]}
+    assert (
+        await client.patch(f"/admin/models/{created['id']}", headers=admin, json=duplicate_update_payload)
+    ).status_code == 409
+
+
+async def test_direct_admin_model_routes(session: AsyncSession) -> None:
+    admin = await create_user_account(session, "model-admin@example.com", "admin12345", role="admin")
+    await session.commit()
+    active = await active_ai_models(session)
+    assert active[0]["display_name"] == "DeepSeek-v4-flash"
+    assert "provider_model_id" not in active[0]
+
+    payload = AiModelIn(
+        display_name="直接模型",
+        provider_model_id="direct-model",
+        description="直接调用",
+        logic_score=4,
+        prose_score=4,
+        knowledge_score=4,
+        max_context_tokens=16000,
+        max_output_tokens=1000,
+        temperature="0.60",
+        cache_hit_input_multiplier="0.10",
+        cache_miss_input_multiplier="0.20",
+        output_multiplier="0.30",
+        status="inactive",
+        sort_order=3,
+    )
+    created = await admin_create_model(payload, admin, session)
+    assert created["provider_model_id"] == "direct-model"
+    page = await admin_models(
+        q="直接",
+        status="inactive",
+        logic_min=4,
+        logic_max=4,
+        context_min=10000,
+        context_max=20000,
+        output_min=900,
+        output_max=1100,
+        _admin=admin,
+        session=session,
+    )
+    assert page["items"][0]["id"] == created["id"]
+    with pytest.raises(HTTPException) as duplicate_create:
+        await admin_create_model(payload, admin, session)
+    assert duplicate_create.value.status_code == 409
+
+    payload.status = "active"
+    payload.display_name = "直接模型改"
+    updated = await admin_update_model(created["id"], payload, admin, session)
+    assert updated["display_name"] == "直接模型改"
+    other_payload = payload.model_copy(update={"provider_model_id": "direct-model-other"})
+    other = await admin_create_model(other_payload, admin, session)
+    payload.provider_model_id = other["provider_model_id"]
+    with pytest.raises(HTTPException) as duplicate_update:
+        await admin_update_model(created["id"], payload, admin, session)
+    assert duplicate_update.value.status_code == 409
 
 
 async def test_config_value_model_accepts_all_supported_types(session: AsyncSession) -> None:

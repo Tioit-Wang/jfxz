@@ -115,7 +115,7 @@ export default function AdminSubscriptionsPage() {
             <SheetDescription>订阅基础信息和关联订单。</SheetDescription>
           </SheetHeader>
           {detail ? (
-            <div className="grid grid-cols-2 gap-3 rounded-lg border p-4 text-sm">
+            <div className="grid grid-cols-2 gap-3 rounded-lg bg-muted/30 p-4 text-sm">
               <span className="text-muted-foreground">用户</span><span>{detail.user.email}</span>
               <span className="text-muted-foreground">套餐</span><span>{String(detail.plan.name ?? detail.subscription.plan_id)}</span>
               <span className="text-muted-foreground">状态</span><StatusBadge status={detail.subscription.status} />

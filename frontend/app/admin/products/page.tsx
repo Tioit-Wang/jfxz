@@ -305,7 +305,7 @@ export default function AdminProductsPage() {
       <AdminPanel title="商品列表" description="使用标签在套餐和加油包之间切换。">
         {loading ? <Skeleton className="h-44 w-full" /> : (
           <Tabs value={activeKind} onValueChange={(value) => setActiveKind(value as AdminProductKind)} className="flex flex-col gap-4">
-            <div className="flex flex-col gap-4 rounded-md border bg-muted/30 p-3 lg:flex-row lg:items-end lg:justify-between">
+            <div className="flex flex-col gap-4 rounded-lg bg-muted/30 p-3 lg:flex-row lg:items-end lg:justify-between">
               <FieldGroup className="grid gap-3 md:grid-cols-[minmax(220px,1fr)_180px] lg:max-w-2xl">
                 <Field>
                   <FieldLabel htmlFor="product-query">关键词</FieldLabel>

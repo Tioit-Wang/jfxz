@@ -116,7 +116,7 @@ export default function AdminSessionsPage() {
           </SheetHeader>
           {detail ? (
             <div className="flex flex-col gap-4 overflow-y-auto text-sm">
-              <div className="grid grid-cols-2 gap-3 rounded-lg border p-4">
+              <div className="grid grid-cols-2 gap-3 rounded-lg bg-muted/30 p-4">
                 <span className="text-muted-foreground">标题</span><span>{detail.session.title}</span>
                 <span className="text-muted-foreground">Agent Session</span><span className="truncate whitespace-nowrap">{detail.session.agno_session_id}</span>
                 <span className="text-muted-foreground">来源</span><span>{detail.session.source_type}</span>

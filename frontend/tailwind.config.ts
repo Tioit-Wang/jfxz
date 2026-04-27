@@ -66,6 +66,7 @@ const config: Config = {
       },
       boxShadow: {
         xs: "0 1px 2px 0 rgb(0 0 0 / 0.05)",
+        card: "0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)",
         soft: "0 18px 50px rgba(25, 32, 29, 0.08)"
       }
     }

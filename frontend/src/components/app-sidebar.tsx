@@ -21,7 +21,6 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -66,7 +65,7 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
           <SidebarMenuItem>
             <SidebarMenuButton asChild size="lg">
               <Link href="/admin">
-                <span className="flex aspect-square size-8 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
+                <span className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
                   <BookOpenText />
                 </span>
                 <span className="grid flex-1 text-left text-sm leading-tight">
@@ -81,7 +80,6 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
       <SidebarContent>
         {menu.map((group) => (
           <SidebarGroup key={group.label}>
-            <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 {group.items.map((item) => (

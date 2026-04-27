@@ -1,48 +1,50 @@
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
-import { AdminHeading, AdminPage, AdminPanel } from "./_components";
+import { ChevronRight } from "lucide-react";
+import Link from "next/link";
+import { AdminHeading, AdminPage } from "./_components";
+
+const modules = [
+  { title: "用户与权限", description: "查看用户资料、账户状态、订阅和积分", href: "/admin/users" },
+  { title: "套餐与加油包", description: "管理订阅套餐和积分加油包", href: "/admin/products" },
+  { title: "订单管理", description: "查看订单、支付状态和权益发放", href: "/admin/orders" },
+  { title: "订阅管理", description: "查看用户订阅状态和周期", href: "/admin/subscriptions" },
+  { title: "会话审计", description: "查看 AI 对话记录和上下文", href: "/admin/sessions" },
+  { title: "系统配置", description: "管理系统参数和配置项", href: "/admin/configs" },
+];
 
 export default function AdminHome() {
   return (
     <AdminPage>
       <AdminHeading
         title="后台概览"
-        description="用于确认管理后台的边界、风险关注点和日常处理节奏；具体业务操作由左侧导航进入。"
+        description="管理后台入口与操作指引。"
       />
-      <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
-        <AdminPanel title="今日工作台" description="概览页只承载管理上下文，不放置功能入口。">
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-wrap gap-2">
-              <Badge variant="outline">用户与权限</Badge>
-              <Badge variant="outline">商品与订单</Badge>
-              <Badge variant="outline">订阅与积分</Badge>
-              <Badge variant="outline">会话审计</Badge>
-              <Badge variant="outline">系统配置</Badge>
-            </div>
-            <Separator />
-            <div className="grid gap-4 md:grid-cols-2">
-              <section className="flex flex-col gap-2">
-                <h2 className="text-sm font-medium">处理原则</h2>
-                <p className="text-sm leading-6 text-muted-foreground">
-                  优先处理会影响用户登录、支付、订阅权益和积分发放的问题；涉及配置变更时先确认影响范围，再保存。
-                </p>
-              </section>
-              <section className="flex flex-col gap-2">
-                <h2 className="text-sm font-medium">审计视角</h2>
-                <p className="text-sm leading-6 text-muted-foreground">
-                  订单、订阅和会话页面保持只读优先，详情抽屉用于追溯上下文，避免在列表中暴露过多噪声。
-                </p>
-              </section>
-            </div>
+      <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+        <nav className="rounded-lg bg-card p-5 shadow-card">
+          <h2 className="mb-4 text-xs font-medium uppercase tracking-wider text-muted-foreground">模块</h2>
+          <div className="divide-y">
+            {modules.map((m) => (
+              <Link
+                key={m.href}
+                href={m.href}
+                className="group -mx-2 flex items-center justify-between rounded-md px-2 py-3 transition-colors hover:bg-muted/50"
+              >
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-sm font-medium">{m.title}</span>
+                  <span className="text-xs text-muted-foreground">{m.description}</span>
+                </div>
+                <ChevronRight className="size-4 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5" />
+              </Link>
+            ))}
           </div>
-        </AdminPanel>
-        <AdminPanel title="界面约定" description="管理端保持低干扰、强可读、少统计的操作体验。">
-          <div className="flex flex-col gap-3 text-sm text-muted-foreground">
+        </nav>
+        <aside className="rounded-lg bg-card p-5 shadow-card">
+          <h2 className="mb-4 text-xs font-medium uppercase tracking-wider text-muted-foreground">界面约定</h2>
+          <div className="space-y-2 text-sm text-muted-foreground">
             <p>列表页以筛选、表格和详情面板为核心。</p>
             <p>配置页按分组标签切换，敏感值默认掩码展示。</p>
             <p>破坏性动作进入确认流程，普通查看动作放在行尾。</p>
           </div>
-        </AdminPanel>
+        </aside>
       </div>
     </AdminPage>
   );

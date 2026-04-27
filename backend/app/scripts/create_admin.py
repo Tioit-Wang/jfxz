@@ -1,6 +1,10 @@
 import argparse
 import asyncio
 import secrets
+import sys
+from pathlib import Path
+
+sys.path[:0] = [str(Path(__file__).resolve().parents[2])]
 
 from pydantic import EmailStr, TypeAdapter
 from sqlalchemy import select

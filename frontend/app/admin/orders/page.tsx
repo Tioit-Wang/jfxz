@@ -117,7 +117,7 @@ export default function AdminOrdersPage() {
           </SheetHeader>
           {detail ? (
             <div className="flex flex-col gap-5 overflow-y-auto text-sm">
-              <div className="grid grid-cols-2 gap-3 rounded-lg border p-4">
+              <div className="grid grid-cols-2 gap-3 rounded-lg bg-muted/30 p-4">
                 <span className="text-muted-foreground">订单号</span><span className="font-mono text-xs">{detail.order.order_no}</span>
                 <span className="text-muted-foreground">用户</span><span>{detail.order.user_email ?? detail.order.user_id}</span>
                 <span className="text-muted-foreground">商品</span><span>{detail.order.product_name_snapshot}</span>

@@ -254,9 +254,8 @@ test("admin login, logout, and shell navigation are stable", async ({ page }, te
   await page.getByRole("button", { name: "登录" }).click();
   await expect(page).toHaveURL(/\/admin\/users$/);
   await expectHealthyAdminPage(page, "用户管理");
-  await expect(page.getByText("Admin Console")).toBeVisible();
 
-  // 验证 SiteHeader 右上角显示真实管理员邮箱，而非硬编码的 admin@example.com
+  // 验证 SiteHeader 显示页面标题和真实管理员邮箱
   const siteHeader = page.locator("header").first();
   await expect(siteHeader.getByText(ADMIN_EMAIL)).toBeVisible();
   await screenshotStep(page, testInfo, "users-after-login");

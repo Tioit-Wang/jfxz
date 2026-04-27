@@ -138,13 +138,13 @@ export default function AdminUsersPage() {
           </SheetHeader>
           {detail ? (
             <div className="flex flex-col gap-4 text-sm">
-              <div className="grid grid-cols-2 gap-3 rounded-lg border p-4">
+              <div className="grid grid-cols-2 gap-3 rounded-lg bg-muted/30 p-4">
                 <span className="text-muted-foreground">邮箱</span><span>{detail.user.email}</span>
                 <span className="text-muted-foreground">昵称</span><span>{detail.user.nickname}</span>
                 <span className="text-muted-foreground">角色</span><span>{detail.user.role}</span>
                 <span className="text-muted-foreground">状态</span><StatusBadge status={detail.user.status} />
               </div>
-              <div className="grid grid-cols-2 gap-3 rounded-lg border p-4">
+              <div className="grid grid-cols-2 gap-3 rounded-lg bg-muted/30 p-4">
                 <span className="text-muted-foreground">当前订阅</span><span>{detail.subscription ? detail.subscription.id : "无订阅"}</span>
                 <span className="text-muted-foreground">月度积分</span><span>{detail.points.monthlyPoints}</span>
                 <span className="text-muted-foreground">加油包积分</span><span>{detail.points.topupPoints}</span>

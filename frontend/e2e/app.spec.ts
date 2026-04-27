@@ -272,13 +272,12 @@ test("admin shell requires login and exposes dashboard navigation", async ({ pag
   await page.getByLabel("邮箱").fill("admin@example.com");
   await page.getByLabel("密码").fill("admin123");
   await page.getByRole("button", { name: "登录" }).click();
-  await expect(page.getByRole("heading", { name: "用户管理" }).nth(1)).toBeVisible();
-  await expect(page.getByText("Admin Console")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "用户管理" }).first()).toBeVisible();
   await expect(page.getByRole("link", { name: /套餐与加油包/ })).toBeVisible();
 
   await page.getByRole("link", { name: /配置/ }).click();
   await page.waitForURL(/\/admin\/configs$/, { timeout: 2000 }).catch(async () => page.goto("/admin/configs"));
-  await expect(page.getByRole("heading", { name: "系统配置" }).nth(1)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "系统配置" }).first()).toBeVisible();
   await expect(page.getByText("payment.alipay_f2f.app_private_key")).toBeVisible();
   await expect(page.getByRole("button", { name: "显示或隐藏密文" }).first()).toBeVisible();
 });

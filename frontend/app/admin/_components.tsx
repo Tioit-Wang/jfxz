@@ -1,6 +1,4 @@
 import type { ReactNode } from "react";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Pagination,
   PaginationContent,
@@ -20,9 +18,9 @@ export function AdminHeading({
   action?: ReactNode;
 }>) {
   return (
-    <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+    <header className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
       <div className="flex min-w-0 flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-normal">{title}</h1>
+        <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
         <p className="max-w-3xl text-sm text-muted-foreground">{description}</p>
       </div>
       {action ? <div className="flex shrink-0 items-center gap-2">{action}</div> : null}
@@ -31,7 +29,7 @@ export function AdminHeading({
 }
 
 export function AdminPage({ children }: Readonly<{ children: ReactNode }>) {
-  return <div className="flex flex-col gap-5">{children}</div>;
+  return <div className="flex flex-col gap-6">{children}</div>;
 }
 
 export function AdminPanel({
@@ -46,27 +44,37 @@ export function AdminPanel({
   children: ReactNode;
 }>) {
   return (
-    <Card>
-      <CardHeader>
-        <div>
-          <CardTitle>{title}</CardTitle>
-          {description ? <CardDescription>{description}</CardDescription> : null}
+    <section className="space-y-4 rounded-lg bg-card p-5 shadow-card">
+      <div className="flex items-start justify-between gap-4">
+        <div className="space-y-1">
+          <h2 className="text-sm font-medium">{title}</h2>
+          {description ? <p className="text-xs text-muted-foreground">{description}</p> : null}
         </div>
-        {action ? <CardAction>{action}</CardAction> : null}
-      </CardHeader>
-      <CardContent>{children}</CardContent>
-    </Card>
+        {action ? <div className="flex shrink-0 items-center gap-2">{action}</div> : null}
+      </div>
+      {children}
+    </section>
   );
 }
 
 export function StatusBadge({ status }: Readonly<{ status: string }>) {
   if (["active", "paid", "TRADE_SUCCESS"].includes(status)) {
-    return <Badge>{status}</Badge>;
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs">
+        <span className="size-1.5 rounded-full bg-foreground" />
+        {status}
+      </span>
+    );
   }
   if (["inactive", "disabled", "closed"].includes(status)) {
-    return <Badge variant="secondary">{status}</Badge>;
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+        <span className="size-1.5 rounded-full bg-muted-foreground/50" />
+        {status}
+      </span>
+    );
   }
-  return <Badge variant="outline">{status}</Badge>;
+  return <span className="text-xs text-muted-foreground">{status}</span>;
 }
 
 export function AdminPagination({

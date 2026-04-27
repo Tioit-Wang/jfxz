@@ -7,7 +7,6 @@
     "**/*.pyc": true,
     "**/*.tsbuildinfo": true,
     "**/*.log": true,
-    "**/*.db": true,
     ".chrome-mcp-profile": true,
     ".runtime-logs": true,
     "backend/.coverage": true,

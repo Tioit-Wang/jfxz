@@ -3,6 +3,7 @@
 import type { ComponentProps } from "react";
 import {
   BookOpenText,
+  BrainCircuit,
   CreditCard,
   FileClock,
   LayoutDashboard,
@@ -37,6 +38,7 @@ const menu = [
     label: "业务管理",
     items: [
       { title: "用户", url: "/admin/users", icon: Users },
+      { title: "模型", url: "/admin/models", icon: BrainCircuit },
       { title: "套餐与加油包", url: "/admin/products", icon: Package },
       { title: "订单", url: "/admin/orders", icon: CreditCard },
       { title: "订阅", url: "/admin/subscriptions", icon: FileClock },

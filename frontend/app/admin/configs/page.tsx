@@ -3,7 +3,7 @@
 import { Eye, EyeOff, Save } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { type AdminConfig, type AdminConfigValue } from "@/api";
+import { type AdminConfig, type AdminConfigValue, type AiModelOption } from "@/api";
 import { AdminHeading, AdminPage, AdminPanel, AdminPagination } from "../_components";
 import { adminClient } from "../admin-utils";
 import {
@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -35,7 +36,8 @@ const labelMap: Record<string, string> = {
   notify_url: "支付回调地址",
   seller_id: "商户 ID",
   timeout_express: "订单超时时间",
-  extra_options: "扩展参数"
+  extra_options: "扩展参数",
+  model_id: "编辑器检查模型"
 };
 
 function configLabel(config: AdminConfig) {
@@ -45,6 +47,7 @@ function configLabel(config: AdminConfig) {
 function groupLabel(group: string) {
   if (group === "all") return "全部";
   if (group === "payment.alipay_f2f") return "支付宝当面付";
+  if (group === "ai.editor_check") return "AI 检查";
   return group;
 }
 
@@ -77,6 +80,7 @@ export default function AdminConfigsPage() {
   const [dirtyIds, setDirtyIds] = useState<Set<string>>(new Set());
   const [jsonErrors, setJsonErrors] = useState<Record<string, string>>({});
   const [reveal, setReveal] = useState<Record<string, boolean>>({});
+  const [models, setModels] = useState<AiModelOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [page, setPage] = useState(1);
@@ -96,6 +100,12 @@ export default function AdminConfigsPage() {
       const nextGroups = ["all", ...Array.from(new Set(allData.items.map((item) => item.config_group))).sort()];
       setGroups(nextGroups);
       setConfigs(pageData.items);
+      if (!models.length) {
+        try {
+          const activeModels = await client.listAiModels();
+          setModels(activeModels);
+        } catch { /* 模型列表加载失败不影响配置页面 */ }
+      }
       setTotal(pageData.total);
       setPage(pageData.page);
       setDrafts((current) => {
@@ -191,6 +201,31 @@ export default function AdminConfigsPage() {
 
   function renderControl(config: AdminConfig) {
     const value = drafts[config.id] ?? configValue(config);
+    if (config.config_group === "ai.editor_check" && config.config_key === "model_id") {
+      const selected = String(value || "__none");
+      const selectedMissing = selected !== "__none" && !models.some((model) => model.id === selected);
+      return (
+        <Select
+          value={selected}
+          onValueChange={(nextValue) => updateDraft(config, nextValue === "__none" ? "" : nextValue)}
+        >
+          <SelectTrigger aria-label={`${configLabel(config)}配置值`}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              <SelectItem value="__none">未选择</SelectItem>
+              {selectedMissing ? <SelectItem value={selected}>当前不可用模型</SelectItem> : null}
+              {models.map((model) => (
+                <SelectItem key={model.id} value={model.id}>
+                  {model.display_name}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      );
+    }
     if (config.value_type === "boolean") {
       return (
         <div className="flex items-center gap-3">

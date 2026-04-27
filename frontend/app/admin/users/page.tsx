@@ -4,13 +4,13 @@ import { Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { type ApiUser, type UserProfile } from "@/api";
-import { AdminHeading, AdminPage, AdminPanel, AdminPagination, StatusBadge } from "../_components";
+import { AdminPagination, StatusBadge } from "../_components";
 import { adminClient, formatDate } from "../admin-utils";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
@@ -68,73 +68,96 @@ export default function AdminUsersPage() {
   }, []);
 
   return (
-    <AdminPage>
-      <AdminHeading title="用户管理" description="查看用户资料、账户状态、订阅和积分概况。" />
-      <AdminPanel
-        title="用户列表"
-        description="按邮箱或昵称检索账户，行尾提供详情和状态调整。"
-        action={
-          <form className="flex w-full gap-2 md:w-auto" onSubmit={(event) => { event.preventDefault(); void load(query, 1); }}>
-            <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索邮箱或昵称" />
-            <Button type="submit" variant="outline">
-              <Search data-icon="inline-start" />
-              搜索
-            </Button>
-          </form>
-        }
-      >
-          {loading ? <Skeleton className="h-40 w-full" /> : null}
-          {!loading && users.length === 0 ? (
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      {/* ── Filter Bar ── */}
+      {loading ? (
+        <div className="shrink-0 space-y-2 px-6">
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-64 w-full" />
+        </div>
+      ) : (
+        <div className="flex shrink-0 flex-col gap-3 px-6 py-4">
+          <div className="flex items-center gap-3">
+            <div className="relative flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+              <Input
+                className="h-9 pl-9"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => event.key === "Enter" && void load(query, 1)}
+                placeholder="搜索邮箱或昵称…"
+              />
+            </div>
+          </div>
+
+          {/* ── Table ── */}
+          {!users.length ? (
             <Empty>
               <EmptyHeader>
-                <EmptyTitle>没有用户</EmptyTitle>
+                <EmptyTitle>没有匹配的用户</EmptyTitle>
                 <EmptyDescription>换一个关键词再试。</EmptyDescription>
               </EmptyHeader>
             </Empty>
-          ) : null}
-          {!loading && users.length ? (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>邮箱</TableHead>
-                    <TableHead>昵称</TableHead>
-                    <TableHead>角色</TableHead>
-                    <TableHead>状态</TableHead>
-                    <TableHead className="text-right">操作</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {users.map((user) => (
-                    <TableRow key={user.id}>
-                      <TableCell className="font-medium">{user.email}</TableCell>
-                      <TableCell>{user.nickname}</TableCell>
-                      <TableCell>{user.role}</TableCell>
-                      <TableCell><StatusBadge status={user.status} /></TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button variant="outline" size="sm" onClick={() => void openDetail(user)}>详情</Button>
-                          <Button variant="secondary" size="sm" onClick={() => setTarget(user)}>
-                            {user.status === "active" ? "禁用" : "启用"}
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          ) : null}
-          {!loading ? (
-            <AdminPagination page={page} pageSize={pageSize} total={total} onPageChange={(nextPage) => void load(query, nextPage)} />
-          ) : null}
-      </AdminPanel>
+          ) : (
+            <>
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border">
+                <div className="overflow-auto">
+                  <Table>
+                    <TableHeader className="sticky top-0 z-10">
+                      <TableRow className="bg-muted/50">
+                        <TableHead>邮箱</TableHead>
+                        <TableHead>昵称</TableHead>
+                        <TableHead>角色</TableHead>
+                        <TableHead>状态</TableHead>
+                        <TableHead className="text-right">操作</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {users.map((user) => (
+                        <TableRow key={user.id} className="group transition-colors hover:bg-muted/30">
+                          <TableCell className="font-medium">{user.email}</TableCell>
+                          <TableCell>{user.nickname}</TableCell>
+                          <TableCell>{user.role}</TableCell>
+                          <TableCell><StatusBadge status={user.status} /></TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 px-2 text-xs"
+                                onClick={() => void openDetail(user)}
+                              >
+                                详情
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className={`h-8 px-2 text-xs ${user.status === "active" ? "text-amber-600 hover:text-amber-700" : "text-emerald-600 hover:text-emerald-700"}`}
+                                onClick={() => setTarget(user)}
+                              >
+                                {user.status === "active" ? "禁用" : "启用"}
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+              <div className="shrink-0">
+                <AdminPagination page={page} pageSize={pageSize} total={total} onPageChange={(nextPage) => void load(query, nextPage)} />
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
+      {/* ── Detail Sheet ── */}
       <Sheet open={!!detail} onOpenChange={(open) => !open && setDetail(null)}>
         <SheetContent>
           <SheetHeader>
-            <SheetTitle>用户详情</SheetTitle>
-            <SheetDescription>基础信息、订阅状态和积分余额。</SheetDescription>
+            <SheetTitle>{detail?.user.email ?? "用户详情"}</SheetTitle>
           </SheetHeader>
           {detail ? (
             <div className="flex flex-col gap-4 text-sm">
@@ -158,12 +181,13 @@ export default function AdminUsersPage() {
         </SheetContent>
       </Sheet>
 
+      {/* ── Status Toggle Confirmation ── */}
       <AlertDialog open={!!target} onOpenChange={(open) => !open && setTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>确认更新账户状态？</AlertDialogTitle>
             <AlertDialogDescription>
-              将 {target?.email} 设置为 {target?.status === "active" ? "disabled" : "active"}。
+              将「{target?.email}」设置为{target?.status === "active" ? "禁用" : "启用"}。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -172,6 +196,6 @@ export default function AdminUsersPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </AdminPage>
+    </div>
   );
 }

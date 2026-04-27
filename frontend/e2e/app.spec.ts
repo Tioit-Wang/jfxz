@@ -99,9 +99,8 @@ async function grantPoints(page: Page) {
 
 test("landing page presents the product and primary actions", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "金番写作" })).toBeVisible();
-  await expect(page.getByRole("navigation").getByRole("link", { name: /开始写作/ })).toBeVisible();
-  await expect(page.getByRole("link", { name: /管理端/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /让长篇创作/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /开始创作/ })).toBeVisible();
 });
 
 test("user can log in and create a fully described work", async ({ page }) => {

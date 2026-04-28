@@ -1,10 +1,10 @@
 "use client";
 
-import { Eye, EyeOff, Save } from "lucide-react";
+import { AlertCircle, Eye, EyeOff, Save } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { type AdminConfig, type AdminConfigValue, type AiModelOption } from "@/api";
-import { AdminHeading, AdminPage, AdminPanel, AdminPagination } from "../_components";
+import { AdminPagination } from "../_components";
 import { adminClient } from "../admin-utils";
 import {
   AlertDialog,
@@ -82,6 +82,7 @@ export default function AdminConfigsPage() {
   const [reveal, setReveal] = useState<Record<string, boolean>>({});
   const [models, setModels] = useState<AiModelOption[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [saving, setSaving] = useState(false);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -92,6 +93,7 @@ export default function AdminConfigsPage() {
 
   async function load(group = activeGroup, nextPage = page) {
     setLoading(true);
+    setLoadError(false);
     try {
       const [allData, pageData] = await Promise.all([
         client.listAdminConfigs({ pageSize: 100 }),
@@ -116,6 +118,7 @@ export default function AdminConfigsPage() {
         return next;
       });
     } catch {
+      setLoadError(true);
       toast.error("配置加载失败");
     } finally {
       setLoading(false);
@@ -276,30 +279,67 @@ export default function AdminConfigsPage() {
   }
 
   return (
-    <AdminPage>
-      <AdminHeading title="系统配置" description="按分组维护全局配置，支持在列表中直接编辑并统一保存。" />
-      <AdminPanel title="配置项" description="顶部切换分组，修改后使用底部按钮保存。">
-        {loading ? <Skeleton className="h-44 w-full" /> : (
-          <>
-            <Tabs value={activeGroup} onValueChange={requestGroupChange} className="flex flex-col gap-4">
-              <div className="overflow-x-auto">
-                <TabsList>
-                  {groups.map((group) => (
-                    <TabsTrigger key={group} value={group}>{groupLabel(group)}</TabsTrigger>
-                  ))}
-                </TabsList>
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      {/* ── Header ── */}
+      <div className="shrink-0 px-6 py-4">
+        <h1 className="text-xl font-semibold tracking-tight">系统配置</h1>
+        <p className="text-sm text-muted-foreground">按分组维护全局配置，支持在列表中直接编辑并统一保存。</p>
+      </div>
+
+      {/* ── Loading ── */}
+      {loading ? (
+        <div className="shrink-0 space-y-2 px-6">
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-64 w-full" />
+        </div>
+      ) : loadError ? (
+        /* ── Error ── */
+        <div className="flex-1 px-6 pt-4">
+          <Empty>
+            <EmptyHeader>
+              <div className="mx-auto mb-2 flex size-9 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+                <AlertCircle className="size-4" />
               </div>
-              {groups.map((group) => (
-                <TabsContent key={group} value={group} className="mt-0">
-                  {!configs.length ? (
-                    <Empty>
-                      <EmptyHeader>
-                        <EmptyTitle>没有配置项</EmptyTitle>
-                        <EmptyDescription>当前分组下没有可编辑配置。</EmptyDescription>
-                      </EmptyHeader>
-                    </Empty>
+              <EmptyTitle>配置加载失败</EmptyTitle>
+              <EmptyDescription>请检查登录状态或稍后重试。</EmptyDescription>
+            </EmptyHeader>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mx-auto mt-3"
+              onClick={() => void load(activeGroup, page)}
+            >
+              重新加载
+            </Button>
+          </Empty>
+        </div>
+      ) : (
+        /* ── Content ── */
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-6">
+          <Tabs value={activeGroup} onValueChange={requestGroupChange} className="flex min-h-0 flex-1 flex-col">
+            <div className="overflow-x-auto shrink-0">
+              <TabsList>
+                {groups.map((group) => (
+                  <TabsTrigger key={group} value={group}>{groupLabel(group)}</TabsTrigger>
+                ))}
+              </TabsList>
+            </div>
+
+            {groups.map((group) => (
+              <TabsContent key={group} value={group} className="mt-0 flex-1">
+                {activeGroup === group ? (
+                  !configs.length ? (
+                    <div className="flex h-full items-center justify-center">
+                      <Empty>
+                        <EmptyHeader>
+                          <EmptyTitle>没有配置项</EmptyTitle>
+                          <EmptyDescription>当前分组下没有可编辑配置。</EmptyDescription>
+                        </EmptyHeader>
+                      </Empty>
+                    </div>
                   ) : (
-                    <div className="flex flex-col gap-3">
+                    <div className="flex h-full flex-col">
+                      <div className="flex flex-1 flex-col gap-3 overflow-auto pb-4">
                       {configs.map((config) => (
                         <div key={config.id} className="grid gap-3 rounded-md border p-4 lg:grid-cols-[minmax(220px,0.8fr)_minmax(320px,1fr)] lg:items-center">
                           <div className="flex min-w-0 flex-col gap-2">
@@ -316,21 +356,24 @@ export default function AdminConfigsPage() {
                         </div>
                       ))}
                     </div>
-                  )}
-                </TabsContent>
-              ))}
-            </Tabs>
-            <div className="sticky bottom-0 flex flex-col gap-4 border-t bg-background/95 pt-4 backdrop-blur md:flex-row md:items-center md:justify-between">
-              <AdminPagination page={page} pageSize={pageSize} total={total} onPageChange={(nextPage) => void load(activeGroup, nextPage)} />
-              <Button disabled={saving || visibleDirtyIds.length === 0} onClick={() => void saveDirty()}>
-                <Save data-icon="inline-start" />
-                保存配置
-              </Button>
-            </div>
-          </>
-        )}
-      </AdminPanel>
 
+                    {/* ── Pagination + Save button (sticky bottom) ── */}
+                    <div className="sticky bottom-0 -mx-6 flex items-center justify-between gap-4 border-t bg-background/95 px-6 pt-4 backdrop-blur pb-2">
+                      <AdminPagination page={page} pageSize={pageSize} total={total} onPageChange={(nextPage) => void load(activeGroup, nextPage)} />
+                      <Button disabled={saving || visibleDirtyIds.length === 0} onClick={() => void saveDirty()}>
+                        <Save /> 保存配置
+                      </Button>
+                    </div>
+                    </div>
+                  )
+                ) : null}
+              </TabsContent>
+            ))}
+          </Tabs>
+        </div>
+      )}
+
+      {/* ── Unsaved changes dialog ── */}
       <AlertDialog open={!!pendingGroup} onOpenChange={(open) => !open && setPendingGroup(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -346,6 +389,6 @@ export default function AdminConfigsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </AdminPage>
+    </div>
   );
 }

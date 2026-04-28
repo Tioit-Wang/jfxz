@@ -1,10 +1,10 @@
 "use client";
 
-import { Search } from "lucide-react";
+import { AlertCircle, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { type AdminOrder } from "@/api";
-import { AdminHeading, AdminPage, AdminPanel, AdminPagination, StatusBadge } from "../_components";
+import { AdminPagination, StatusBadge } from "../_components";
 import { adminClient, formatDate, money } from "../admin-utils";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -20,6 +20,7 @@ export default function AdminOrdersPage() {
   const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [detail, setDetail] = useState<OrderDetail | null>(null);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -32,7 +33,11 @@ export default function AdminOrdersPage() {
       setOrders(data.items);
       setTotal(data.total);
       setPage(data.page);
+      setLoadError(false);
     } catch {
+      setOrders([]);
+      setTotal(0);
+      setLoadError(true);
       toast.error("订单列表加载失败");
     } finally {
       setLoading(false);
@@ -53,62 +58,91 @@ export default function AdminOrdersPage() {
   }, []);
 
   return (
-    <AdminPage>
-      <AdminHeading title="订单管理" description="查看订单、支付状态和权益发放来源。" />
-      <AdminPanel
-        title="订单列表"
-        description="按订单号、用户或商品定位订单，详情中查看支付与积分发放记录。"
-        action={
-          <form className="flex w-full gap-2 md:w-auto" onSubmit={(event) => { event.preventDefault(); void load(1); }}>
-            <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="订单号、用户或商品" />
-            <Button variant="outline" type="submit"><Search data-icon="inline-start" />搜索</Button>
-          </form>
-        }
-      >
-          {loading ? <Skeleton className="h-44 w-full" /> : null}
-          {!loading && !orders.length ? (
-            <Empty>
-              <EmptyHeader>
-                <EmptyTitle>没有订单</EmptyTitle>
-                <EmptyDescription>换一个关键词或清空搜索条件。</EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          ) : null}
-          {!loading && orders.length ? (
-            <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>订单编号</TableHead>
-                  <TableHead>用户</TableHead>
-                  <TableHead>商品</TableHead>
-                  <TableHead>金额</TableHead>
-                  <TableHead>状态</TableHead>
-                  <TableHead>支付时间</TableHead>
-                  <TableHead className="text-right">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {orders.map((order) => (
-                  <TableRow key={order.id}>
-                    <TableCell className="font-mono text-xs">{order.order_no}</TableCell>
-                    <TableCell>{order.user_email ?? order.user_id}</TableCell>
-                    <TableCell>{order.product_name_snapshot}</TableCell>
-                    <TableCell>{money(order.amount, order.currency)}</TableCell>
-                    <TableCell><StatusBadge status={order.status} /></TableCell>
-                    <TableCell>{formatDate(order.paid_at)}</TableCell>
-                    <TableCell className="text-right"><Button size="sm" variant="outline" onClick={() => void openDetail(order)}>详情</Button></TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            </div>
-          ) : null}
-          {!loading ? (
-            <AdminPagination page={page} pageSize={pageSize} total={total} onPageChange={(nextPage) => void load(nextPage)} />
-          ) : null}
-      </AdminPanel>
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      {/* ── Header bar ── */}
+      <div className="flex shrink-0 items-center justify-between px-6 py-4">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">订单管理</h1>
+          <p className="text-sm text-muted-foreground">查看订单、支付状态和权益发放来源。</p>
+        </div>
+        <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); void load(1); }}>
+          <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="订单号、用户或商品" className="h-9 w-56" />
+          <Button variant="outline" type="submit" size="sm"><Search />搜索</Button>
+        </form>
+      </div>
 
+      {loading ? (
+        <div className="shrink-0 space-y-2 px-6">
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-64 w-full" />
+        </div>
+      ) : loadError ? (
+        <div className="flex-1 px-6 pt-4">
+          <Empty>
+            <EmptyHeader>
+              <div className="mx-auto mb-2 flex size-9 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+                <AlertCircle className="size-4" />
+              </div>
+              <EmptyTitle>订单列表加载失败</EmptyTitle>
+              <EmptyDescription>请检查登录状态或稍后重试。</EmptyDescription>
+            </EmptyHeader>
+            <Button variant="outline" size="sm" className="mx-auto mt-3" onClick={() => void load(page)}>
+              重新加载
+            </Button>
+          </Empty>
+        </div>
+      ) : !orders.length ? (
+        <div className="flex-1 px-6 pt-4">
+          <Empty>
+            <EmptyHeader>
+              <EmptyTitle>没有订单</EmptyTitle>
+              <EmptyDescription>换一个关键词或清空搜索条件。</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        </div>
+      ) : (
+        <>
+          {/* ── Table ── */}
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border mx-6">
+            <div className="overflow-auto flex-1">
+              <Table>
+                <TableHeader className="sticky top-0 z-10">
+                  <TableRow className="bg-muted/50">
+                    <TableHead>订单编号</TableHead>
+                    <TableHead>用户</TableHead>
+                    <TableHead>商品</TableHead>
+                    <TableHead>金额</TableHead>
+                    <TableHead>状态</TableHead>
+                    <TableHead>支付时间</TableHead>
+                    <TableHead className="text-right">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {orders.map((order) => (
+                    <TableRow key={order.id} className="group transition-colors hover:bg-muted/30">
+                      <TableCell className="font-mono text-xs">{order.order_no}</TableCell>
+                      <TableCell>{order.user_email ?? order.user_id}</TableCell>
+                      <TableCell>{order.product_name_snapshot}</TableCell>
+                      <TableCell>{money(order.amount, order.currency)}</TableCell>
+                      <TableCell><StatusBadge status={order.status} /></TableCell>
+                      <TableCell>{formatDate(order.paid_at)}</TableCell>
+                      <TableCell className="text-right">
+                        <Button size="sm" variant="outline" onClick={() => void openDetail(order)}>详情</Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+          {/* ── Pagination ── */}
+          <div className="shrink-0 px-6 py-2">
+            <AdminPagination page={page} pageSize={pageSize} total={total} onPageChange={(nextPage) => void load(nextPage)} />
+          </div>
+        </>
+      )}
+
+      {/* ── Detail Sheet ── */}
       <Sheet open={!!detail} onOpenChange={(open) => !open && setDetail(null)}>
         <SheetContent>
           <SheetHeader>
@@ -141,6 +175,6 @@ export default function AdminOrdersPage() {
           ) : null}
         </SheetContent>
       </Sheet>
-    </AdminPage>
+    </div>
   );
 }

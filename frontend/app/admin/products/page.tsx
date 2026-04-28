@@ -1,10 +1,10 @@
 "use client";
 
-import { Plus, Search, Trash2 } from "lucide-react";
+import { AlertCircle, Plus, Search, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { type AdminProductInput, type AdminProductKind } from "@/api";
-import { AdminHeading, AdminPage, AdminPanel, AdminPagination, StatusBadge } from "../_components";
+import { AdminPagination, StatusBadge } from "../_components";
 import { adminClient, money } from "../admin-utils";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,7 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 type ProductRow = Record<string, unknown> & { id: string; name: string; status: string };
@@ -104,6 +104,7 @@ export default function AdminProductsPage() {
   const client = useMemo(() => adminClient(), []);
   const [rows, setRows] = useState<ProductRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [form, setForm] = useState<ProductForm | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ kind: AdminProductKind; row: ProductRow } | null>(null);
   const [statusTarget, setStatusTarget] = useState<{ kind: AdminProductKind; row: ProductRow } | null>(null);
@@ -126,7 +127,11 @@ export default function AdminProductsPage() {
       setRows(data.items as ProductRow[]);
       setTotal(data.total);
       setPage(data.page);
+      setLoadError(false);
     } catch {
+      setRows([]);
+      setTotal(0);
+      setLoadError(true);
       toast.error("商品列表加载失败");
     } finally {
       setLoading(false);
@@ -228,131 +233,158 @@ export default function AdminProductsPage() {
     setPage(1);
   }
 
-  function renderRows(kind: AdminProductKind, rows: ProductRow[]) {
-    if (!rows.length) {
-      return (
-        <Empty>
-          <EmptyHeader>
-            <EmptyTitle>没有匹配商品</EmptyTitle>
-            <EmptyDescription>调整关键词或状态筛选后再试。</EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      );
-    }
-
-    return (
-      <div className="overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>商品名称</TableHead>
-              <TableHead>价格</TableHead>
-              <TableHead>{kind === "plans" ? "VIP 每日积分 / 附带加油包" : "积分数量"}</TableHead>
-              <TableHead>状态</TableHead>
-              <TableHead className="text-right">操作</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((row) => (
-              <TableRow key={row.id}>
-                <TableCell className="font-medium">{row.name}</TableCell>
-                <TableCell>{money(row.price_amount, asString(row.price_currency || "CNY"))}</TableCell>
-                <TableCell>
-                  {kind === "plans"
-                    ? `${asNumber(row.vip_daily_points)} / ${asNumber(row.bundled_credit_pack_points)}`
-                    : `${asNumber(row.points)}`}
-                </TableCell>
-                <TableCell><StatusBadge status={row.status} /></TableCell>
-                <TableCell className="text-right">
-                  <div className="flex justify-end gap-2">
-                    <Button size="sm" variant="outline" onClick={() => edit(kind, row)}>编辑</Button>
-                    <Button size="sm" variant="secondary" onClick={() => setStatusTarget({ kind, row })}>
-                      {row.status === "active" ? "停用" : "启用"}
-                    </Button>
-                    <Button size="sm" variant="destructive" onClick={() => setDeleteTarget({ kind, row })}>
-                      <Trash2 data-icon="inline-start" />
-                      删除
-                    </Button>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-    );
-  }
+  const hasActiveFilters = query || statusFilter !== "all";
 
   return (
-    <AdminPage>
-      <AdminHeading
-        title="套餐与加油包管理"
-        description="管理订阅套餐和独立积分加油包，保存后会影响用户端商品展示。"
-        action={
-          <>
-            <Button onClick={() => setForm(emptyPlan)}><Plus data-icon="inline-start" />新建套餐</Button>
-            <Button variant="outline" onClick={() => setForm(emptyTopup)}><Plus data-icon="inline-start" />新建加油包</Button>
-          </>
-        }
-      />
-      <AdminPanel title="商品列表" description="使用标签在套餐和加油包之间切换。">
-        {loading ? <Skeleton className="h-44 w-full" /> : (
-          <Tabs value={activeKind} onValueChange={(value) => setActiveKind(value as AdminProductKind)} className="flex flex-col gap-4">
-            <div className="flex flex-col gap-4 rounded-lg bg-muted/30 p-3 lg:flex-row lg:items-end lg:justify-between">
-              <FieldGroup className="grid gap-3 md:grid-cols-[minmax(220px,1fr)_180px] lg:max-w-2xl">
-                <Field>
-                  <FieldLabel htmlFor="product-query">关键词</FieldLabel>
-                  <div className="relative">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      id="product-query"
-                      className="pl-9"
-                      value={query}
-                      onChange={(event) => setQuery(event.target.value)}
-                      placeholder="搜索商品名称、价格或状态"
-                    />
-                  </div>
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="product-status">状态</FieldLabel>
-                  <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as StatusFilter)}>
-                    <SelectTrigger id="product-status" aria-label="筛选商品状态">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectItem value="all">全部状态</SelectItem>
-                        <SelectItem value="active">active</SelectItem>
-                        <SelectItem value="inactive">inactive</SelectItem>
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </Field>
-              </FieldGroup>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between lg:justify-end">
-                <Button variant="outline" onClick={resetFilters}>重置筛选</Button>
-                <TabsList className="grid w-full grid-cols-2 sm:w-72">
-                  <TabsTrigger value="plans">套餐</TabsTrigger>
-                  <TabsTrigger value="credit-packs">加油包</TabsTrigger>
-                </TabsList>
-              </div>
-            </div>
-            <TabsContent value="plans" className="mt-0">
-              {renderRows("plans", activeKind === "plans" ? rows : [])}
-              {activeKind === "plans" ? (
-                <AdminPagination page={page} pageSize={pageSize} total={total} onPageChange={(nextPage) => void load("plans", nextPage)} />
-              ) : null}
-            </TabsContent>
-            <TabsContent value="credit-packs" className="mt-0">
-              {renderRows("credit-packs", activeKind === "credit-packs" ? rows : [])}
-              {activeKind === "credit-packs" ? (
-                <AdminPagination page={page} pageSize={pageSize} total={total} onPageChange={(nextPage) => void load("credit-packs", nextPage)} />
-              ) : null}
-            </TabsContent>
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      {/* ── Header ── */}
+      <div className="flex shrink-0 items-center justify-between px-6 py-4">
+        <div className="flex items-center gap-2">
+          <Tabs value={activeKind} onValueChange={(value) => setActiveKind(value as AdminProductKind)}>
+            <TabsList className="grid w-full grid-cols-2 sm:w-72">
+              <TabsTrigger value="plans">套餐</TabsTrigger>
+              <TabsTrigger value="credit-packs">加油包</TabsTrigger>
+            </TabsList>
           </Tabs>
-        )}
-      </AdminPanel>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button onClick={() => setForm(emptyPlan)}><Plus className="size-4" />新建套餐</Button>
+          <Button variant="outline" onClick={() => setForm(emptyTopup)}><Plus className="size-4" />新建加油包</Button>
+        </div>
+      </div>
 
+      {loading ? (
+        <div className="shrink-0 space-y-2 px-6">
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-64 w-full" />
+        </div>
+      ) : (
+        <>
+          {/* ── Search & Filter row ── */}
+          <div className="flex shrink-0 items-center gap-3 px-6">
+            <div className="relative flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+              <Input
+                className="h-9 pl-9"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="搜索商品名称…"
+              />
+            </div>
+            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as StatusFilter)}>
+              <SelectTrigger className="h-9 w-32" aria-label="筛选商品状态">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="all">全部状态</SelectItem>
+                  <SelectItem value="active">active</SelectItem>
+                  <SelectItem value="inactive">inactive</SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            {hasActiveFilters && (
+              <Button variant="outline" className="h-9" onClick={resetFilters}>重置筛选</Button>
+            )}
+          </div>
+
+          {/* ── Error state ── */}
+          {loadError ? (
+            <div className="flex-1 px-6 pt-4">
+              <Empty>
+                <EmptyHeader>
+                  <div className="mx-auto mb-2 flex size-9 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+                    <AlertCircle className="size-4" />
+                  </div>
+                  <EmptyTitle>商品列表加载失败</EmptyTitle>
+                  <EmptyDescription>请检查登录状态或稍后重试。</EmptyDescription>
+                </EmptyHeader>
+                <Button variant="outline" size="sm" className="mx-auto mt-3" onClick={() => void load(activeKind, page)}>
+                  重新加载
+                </Button>
+              </Empty>
+            </div>
+          ) : !rows.length ? (
+            /* ── Empty state ── */
+            <div className="flex-1 px-6 pt-4">
+              <Empty>
+                <EmptyHeader>
+                  <EmptyTitle>没有匹配商品</EmptyTitle>
+                  <EmptyDescription>调整关键词或状态筛选后再试。</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            </div>
+          ) : (
+            <>
+              {/* ── Table (fills remaining height) ── */}
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border mx-6 mt-3">
+                <div className="overflow-auto flex-1">
+                  <Table>
+                    <TableHeader className="sticky top-0 z-10">
+                      <TableRow className="bg-muted/50">
+                        <TableHead>商品名称</TableHead>
+                        <TableHead>价格</TableHead>
+                        <TableHead>{activeKind === "plans" ? "VIP 每日积分 / 附带加油包" : "积分数量"}</TableHead>
+                        <TableHead>状态</TableHead>
+                        <TableHead className="text-right">操作</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {rows.map((row) => (
+                        <TableRow key={row.id} className="group transition-colors hover:bg-muted/30">
+                          <TableCell className="font-medium">{row.name}</TableCell>
+                          <TableCell>{money(row.price_amount, asString(row.price_currency || "CNY"))}</TableCell>
+                          <TableCell>
+                            {activeKind === "plans"
+                              ? `${asNumber(row.vip_daily_points)} / ${asNumber(row.bundled_credit_pack_points)}`
+                              : `${asNumber(row.points)}`}
+                          </TableCell>
+                          <TableCell><StatusBadge status={row.status} /></TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 px-2 text-xs"
+                                onClick={() => edit(activeKind, row)}
+                              >
+                                编辑
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className={`h-8 px-2 text-xs ${row.status === "active" ? "text-amber-600 hover:text-amber-700" : "text-emerald-600 hover:text-emerald-700"}`}
+                                onClick={() => setStatusTarget({ kind: activeKind, row })}
+                              >
+                                {row.status === "active" ? "停用" : "启用"}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 px-2 text-xs text-destructive hover:text-destructive"
+                                onClick={() => setDeleteTarget({ kind: activeKind, row })}
+                              >
+                                <Trash2 className="size-3.5" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+
+              {/* ── Pagination ── */}
+              <div className="shrink-0 px-6 py-2">
+                <AdminPagination page={page} pageSize={pageSize} total={total} onPageChange={(nextPage) => void load(activeKind, nextPage)} />
+              </div>
+            </>
+          )}
+        </>
+      )}
+
+      {/* ── Create / Edit Dialog ── */}
       <Dialog open={!!form} onOpenChange={(open) => !open && setForm(null)}>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
@@ -389,6 +421,7 @@ export default function AdminProductsPage() {
         </DialogContent>
       </Dialog>
 
+      {/* ── Delete Confirmation ── */}
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -402,6 +435,7 @@ export default function AdminProductsPage() {
         </AlertDialogContent>
       </AlertDialog>
 
+      {/* ── Status Toggle Confirmation ── */}
       <AlertDialog open={!!statusTarget} onOpenChange={(open) => !open && setStatusTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -416,6 +450,6 @@ export default function AdminProductsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </AdminPage>
+    </div>
   );
 }

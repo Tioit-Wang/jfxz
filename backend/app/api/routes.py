@@ -30,7 +30,7 @@ from app.core.security import (
     verify_password,
 )
 from app.models import (
-    AgentSession,
+    AgentRunStore,
     AiModel,
     BillingOrder,
     Chapter,
@@ -291,16 +291,24 @@ def request_needs_csrf(request: Request) -> bool:
 
 
 async def csrf_protect(request: Request, call_next: Any) -> Response:
+    cors_headers = _cors_headers(request)
     if request.method in UNSAFE_METHODS and not request_origin_allowed(request):
-        return JSONResponse(status_code=403, content={"detail": "origin not allowed"})
+        return JSONResponse(status_code=403, content={"detail": "origin not allowed"}, headers=cors_headers)
     if request_needs_csrf(request):
         header_token = request.headers.get("x-csrf-token")
         cookie_token = request.cookies.get(CSRF_COOKIE)
         if not header_token or not cookie_token or not hmac.compare_digest(header_token, cookie_token):
-            return JSONResponse(status_code=403, content={"detail": "invalid csrf token"})
+            return JSONResponse(status_code=403, content={"detail": "invalid csrf token"}, headers=cors_headers)
         if not valid_csrf_token(header_token):
-            return JSONResponse(status_code=403, content={"detail": "invalid csrf token"})
+            return JSONResponse(status_code=403, content={"detail": "invalid csrf token"}, headers=cors_headers)
     return await call_next(request)
+
+
+def _cors_headers(request: Request) -> dict[str, str]:
+    origin = request.headers.get("origin", "")
+    if origin in get_settings().cors_origin_list:
+        return {"Access-Control-Allow-Origin": origin, "Access-Control-Allow-Credentials": "true"}
+    return {}
 
 
 async def one(session: AsyncSession, statement: Select[Any]) -> Any:
@@ -837,12 +845,12 @@ async def workspace_bootstrap(
             source_type="manual",
             last_active_at=now(),
         )
-        agent = AgentSession(session_id=agno_session_id, user_id=user.id, runs=[])
+        agent = AgentRunStore(session_id=agno_session_id, user_id=user.id, runs=[])
         session.add_all([active_session, agent])
         await session.flush()
         chat_sessions = [active_session]
     else:
-        agent = await session.get(AgentSession, active_session.agno_session_id)
+        agent = await session.get(AgentRunStore, active_session.agno_session_id)
 
     await session.commit()
     return {
@@ -1090,25 +1098,12 @@ def parse_analysis_output(value: str, source_text: str) -> list[dict[str, Any]]:
     return suggestions
 
 
-def fake_deepseek_analysis(text: str) -> list[dict[str, Any]]:
-    if "无明显问题" in text:
-        return []
-    quote = next((line.strip() for line in text.splitlines() if line.strip()), text.strip()[:120])
-    return [
-        {
-            "quote": quote,
-            "issue": "测试环境检测到可能存在错别字、标点或语句不通顺问题。",
-            "options": [f"建议修改：{quote}"],
-        }
-    ]
-
-
 async def request_analysis(
     text: str, base_url: str, api_key: str, model_id: str
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     if not api_key:
         if get_settings().env == "test":
-            return fake_deepseek_analysis(text), {"prompt_tokens": 0, "completion_tokens": 0, "cached_tokens": 0}
+            return [], {"prompt_tokens": 0, "completion_tokens": 0, "cached_tokens": 0}
         raise HTTPException(status_code=503, detail="AI service not configured")
     prompt = (
         "你是中文长篇小说编辑器的基础校对助手。只检查错别字、错误标点符号、明显病句或不通顺表达。"
@@ -1177,45 +1172,26 @@ async def analyze_chapter(
         return {"suggestions": []}
 
     ai_model = await _resolve_editor_model(session)
-    if ai_model:
-        settings = get_settings()
-        base_url = settings.ai_provider_base_url
-        api_key = settings.ai_provider_api_key or ""
-        model_id = ai_model.provider_model_id
-        from app.services.billing_service import pre_check_balance
-        await pre_check_balance(session, user.id, ai_model, estimated_input_tokens=max(1, len(text) // 3))
-    else:
-        settings = get_settings()
-        base_url = settings.deepseek_base_url
-        api_key = settings.deepseek_api_key or ""
-        model_id = settings.deepseek_model
-        account = await ensure_point_account(session, user.id)
-        if account.vip_daily_points_balance + account.credit_pack_points_balance < 1:
-            raise HTTPException(status_code=402, detail="points not enough")
+    if ai_model is None:
+        raise HTTPException(status_code=503, detail="no editor check model configured")
+
+    settings = get_settings()
+    base_url = settings.ai_provider_base_url
+    api_key = settings.ai_provider_api_key or ""
+    model_id = ai_model.provider_model_id
+    from app.services.billing_service import pre_check_balance
+    await pre_check_balance(session, user.id, ai_model, estimated_input_tokens=max(1, len(text) // 3))
 
     try:
         suggestions, usage = await request_analysis(text, base_url, api_key, model_id)
     except Exception:
         raise HTTPException(status_code=500, detail="AI analysis failed, no charge applied")
 
-    if ai_model:
-        from app.services.billing_service import deduct_by_usage
-        await deduct_by_usage(
-            session, user.id, ai_model, usage,
-            work_id=work_id, source_id=work_id, source_type="ai_editor_check",
-        )
-    else:
-        bucket = await consume_point(session, user.id)
-        session.add(
-            PointTransaction(
-                user_id=user.id,
-                bucket_type=bucket,
-                change_type="consume",
-                source_type="ai_editor_check",
-                source_id=work_id,
-                points_delta=Decimal("-1"),
-            )
-        )
+    from app.services.billing_service import deduct_by_usage
+    await deduct_by_usage(
+        session, user.id, ai_model, usage,
+        work_id=work_id, source_id=work_id, source_type="ai_editor_check",
+    )
 
     await session.commit()
     return {"suggestions": suggestions}
@@ -1252,7 +1228,7 @@ async def create_chat_session(
         source_type=payload.source_type,
         last_active_at=now(),
     )
-    session.add_all([chat, AgentSession(session_id=agno_session_id, user_id=user.id, runs=[])])
+    session.add_all([chat, AgentRunStore(session_id=agno_session_id, user_id=user.id, runs=[])])
     await session.commit()
     return public(chat)
 
@@ -1449,7 +1425,7 @@ async def list_chat_messages(
     chat = await must_get(session, ChatSession, session_id)
     if chat.user_id != user.id:
         raise HTTPException(status_code=404, detail="session not found")
-    agent = await session.get(AgentSession, chat.agno_session_id)
+    agent = await session.get(AgentRunStore, chat.agno_session_id)
     return message_page(agent.runs if agent else [], limit, before)
 
 
@@ -1489,10 +1465,10 @@ async def send_chat_message(
     chat.last_message_preview = payload.message[:120]
     chat.last_active_at = now()
 
-    # Ensure AgentSession exists (dual-write for compatibility)
-    agent = await session.get(AgentSession, chat.agno_session_id)
+    # Ensure AgentRunStore exists (dual-write for compatibility)
+    agent = await session.get(AgentRunStore, chat.agno_session_id)
     if agent is None:
-        agent = AgentSession(session_id=chat.agno_session_id, user_id=user.id, runs=[])
+        agent = AgentRunStore(session_id=chat.agno_session_id, user_id=user.id, runs=[])
         session.add(agent)
         await session.flush()
 
@@ -1589,7 +1565,7 @@ async def send_chat_message(
             billing_failed = True
             logger.warning("billing deduction failed after agent stream", exc_info=True)
 
-        # Persist assistant message to AgentSession.runs
+        # Persist assistant message to AgentRunStore.runs
         assistant_message = {
             "id": str(uuid4()),
             "role": "assistant",
@@ -1600,7 +1576,7 @@ async def send_chat_message(
             "billing_failed": billing_failed,
             "created_at": now().isoformat(),
         }
-        fresh_agent = await session.get(AgentSession, chat.agno_session_id)
+        fresh_agent = await session.get(AgentRunStore, chat.agno_session_id)
         if fresh_agent is not None:
             fresh_agent.runs = [*(fresh_agent.runs or []), assistant_message]
         chat.last_message_preview = full_content[:120]
@@ -2229,7 +2205,7 @@ async def admin_session_detail(
     session_id: str, _admin: User = Depends(current_admin), session: AsyncSession = Depends(get_session)
 ) -> dict[str, Any]:
     chat = await must_get(session, ChatSession, session_id)
-    agent = await session.get(AgentSession, chat.agno_session_id)
+    agent = await session.get(AgentRunStore, chat.agno_session_id)
     return {"session": public(chat), "agent": public(agent)}
 
 

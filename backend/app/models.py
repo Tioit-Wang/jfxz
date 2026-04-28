@@ -123,8 +123,8 @@ class ChatSession(Base, TimestampMixin):
     last_active_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
 
 
-class AgentSession(Base):
-    __tablename__ = "agent_sessions"
+class AgentRunStore(Base):
+    __tablename__ = "agent_run_store"
 
     session_id: Mapped[str] = mapped_column(String(100), primary_key=True)
     user_id: Mapped[str] = mapped_column(String(36))

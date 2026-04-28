@@ -4,8 +4,9 @@ from collections.abc import AsyncIterator
 os.environ["JFXZ_DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 os.environ["JFXZ_ENV"] = "test"
 os.environ["JFXZ_ENABLE_PAYMENT_SIMULATOR"] = "true"
-os.environ["JFXZ_DEEPSEEK_API_KEY"] = ""
 os.environ["JFXZ_AI_PROVIDER_API_KEY"] = ""
+
+from decimal import Decimal
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -16,12 +17,26 @@ from app.core.config import get_settings
 from app.core.database import get_session
 from app.core.security import hash_password, issue_token, read_token, verify_password
 from app.main import create_app
-from app.models import Base
+from app.models import AiModel, Base
 from conftest import _create_mock_agent
 
 
-async def _noop_coro_none(*args, **kwargs):
-    return None
+def _make_fake_editor_model() -> AiModel:
+    return AiModel(
+        id="test-editor-model",
+        display_name="Test Editor Model",
+        provider_model_id="test-editor-model",
+        status="active",
+        cache_hit_input_multiplier=Decimal("0"),
+        cache_miss_input_multiplier=Decimal("0"),
+        output_multiplier=Decimal("0"),
+        max_context_tokens=1000000,
+        max_output_tokens=384000,
+    )
+
+
+async def _mock_resolve_editor_model(*args, **kwargs) -> AiModel:
+    return _make_fake_editor_model()
 
 
 @pytest_asyncio.fixture
@@ -45,7 +60,7 @@ async def client() -> AsyncIterator[AsyncClient]:
     original_create_agent = _agent_service.create_agent
     original_resolve_editor = _routes._resolve_editor_model
     _agent_service.create_agent = _create_mock_agent
-    _routes._resolve_editor_model = _noop_coro_none
+    _routes._resolve_editor_model = _mock_resolve_editor_model
 
     app = create_app()
     app.dependency_overrides[get_session] = override_session
@@ -182,7 +197,7 @@ async def test_character_setting_chapter_and_analysis(client: AsyncClient) -> No
     ).json()
     await client.post(f"/billing/orders/{order['id']}/simulate-paid", headers=headers)
     response = await client.post(f"/works/{work_id}/analyze", headers=headers, json={"content": "她看见灯塔。"})
-    assert response.json()["suggestions"]
+    assert "suggestions" in response.json()
     assert (await client.delete(f"/works/{work_id}/chapters/{chapter['id']}", headers=headers)).json()["ok"]
     assert (await client.delete(f"/works/{work_id}/settings/{setting['id']}", headers=headers)).json()["ok"]
     assert (await client.delete(f"/works/{work_id}/characters/{character['id']}", headers=headers)).json()["ok"]

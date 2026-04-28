@@ -21,9 +21,6 @@ class Settings(BaseSettings):
     trusted_proxy_ips: str = ""
     bootstrap_admin_email: str | None = None
     bootstrap_admin_password: str | None = None
-    deepseek_api_key: str | None = None
-    deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-v4-flash"
     ai_provider_base_url: str = "https://platform.aimom.net/v1"
     ai_provider_api_key: str | None = None
 

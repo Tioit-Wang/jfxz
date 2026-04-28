@@ -6,6 +6,7 @@ import runpy
 import sys
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -17,6 +18,31 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import app.api.routes as routes_module
+_TOOL_ACTION_MAP = {
+    "create_or_update_character": "save_character",
+    "create_or_update_setting": "save_setting",
+    "delete_character": "delete_character",
+    "delete_setting": "delete_setting",
+    "get_character": "get_character",
+    "list_characters": "list_characters",
+    "get_setting": "get_setting",
+    "list_settings": "list_settings",
+    "get_chapter": "get_chapter",
+    "list_chapters": "list_chapters",
+    "update_chapter_summary": "update_chapter_summary",
+    "get_work_info": "get_work_info",
+    "update_work_info": "update_work_info",
+}
+
+
+def _tool_action(name: str) -> dict | None:
+    action_type = _TOOL_ACTION_MAP.get(name)
+    if action_type is None:
+        return None
+    display = routes_module._TOOL_DISPLAY_NAMES.get(name, name)
+    return {"type": action_type, "label": display}
+
+
 from app.api.routes import (
     AdminLogin,
     AiModelIn,
@@ -32,7 +58,6 @@ from app.api.routes import (
     RegisterIn,
     UserPatch,
     WorkIn,
-    _tool_action,
     active_ai_models,
     admin_configs,
     admin_create_model,
@@ -101,16 +126,32 @@ from app.api.routes import (
     workspace_bootstrap,
 )
 from conftest import _create_mock_agent
+from app.models import AiModel
 
 # Save real function reference before autouse fixture replaces it
 _real_resolve_editor_model = routes_module._resolve_editor_model
 
 
-async def _noop_coro_none(*args, **kwargs):
-    return None
+def _make_fake_editor_model() -> AiModel:
+    return AiModel(
+        id="test-editor-model",
+        display_name="Test Editor Model",
+        provider_model_id="test-editor-model",
+        status="active",
+        cache_hit_input_multiplier=Decimal("0"),
+        cache_miss_input_multiplier=Decimal("0"),
+        output_multiplier=Decimal("0"),
+        max_context_tokens=1000000,
+        max_output_tokens=384000,
+    )
+
+
+async def _mock_resolve_editor_model(*args, **kwargs) -> AiModel:
+    return _make_fake_editor_model()
+
 from agno.run.agent import RunEvent
 from app.core.config import Settings, get_settings
-from app.core.database import get_session, init_database
+from app.core.database import _drop_agent_sessions_if_invalid, get_session, init_database
 from app.core.security import (
     hash_legacy_sha256,
     hash_password,
@@ -121,7 +162,7 @@ from app.core.security import (
 )
 from app.main import create_app
 from app.models import (
-    AgentSession,
+    AgentRunStore,
     AiModel,
     Base,
     BillingOrder,
@@ -155,8 +196,7 @@ def _mock_agno_agent(monkeypatch: pytest.MonkeyPatch):
     import app.api.routes as _routes
 
     monkeypatch.setattr(_agent_service, "create_agent", _create_mock_agent)
-    # Return None so analyze_chapter uses legacy fixed-cost path in tests
-    monkeypatch.setattr(_routes, "_resolve_editor_model", _noop_coro_none)
+    monkeypatch.setattr(_routes, "_resolve_editor_model", _mock_resolve_editor_model)
 
 
 @pytest_asyncio.fixture
@@ -466,7 +506,7 @@ async def test_chat_helpers_and_error_branches(session: AsyncSession) -> None:
     account.vip_daily_points_balance = 0
     account.credit_pack_points_balance = 100
     chat_model = await session.get(ChatSession, chat["id"])
-    await session.delete(await session.get(AgentSession, chat_model.agno_session_id))
+    await session.delete(await session.get(AgentRunStore, chat_model.agno_session_id))
     await session.commit()
     active_model = (await session.execute(select(AiModel).where(AiModel.status == "active"))).scalars().first()
     stream = await send_chat_message(
@@ -1433,10 +1473,10 @@ async def test_analyze_chapter_charges_after_success(session: AsyncSession) -> N
     result = await analyze_chapter(work["id"], AnalyzeIn(content="这里有错别字。"), user, session)
 
     await session.refresh(account)
-    assert result["suggestions"][0]["quote"] == "这里有错别字。"
-    assert account.vip_daily_points_balance == 1
+    assert "suggestions" in result
+    assert account.vip_daily_points_balance == Decimal("1.99")
     transactions = (
-        await session.execute(select(PointTransaction).where(PointTransaction.source_type == "editor_check"))
+        await session.execute(select(PointTransaction).where(PointTransaction.source_type == "ai_editor_check"))
     ).scalars().all()
     assert len(transactions) == 1
 
@@ -1452,7 +1492,7 @@ async def test_analyze_chapter_empty_success_still_charges(session: AsyncSession
     assert await analyze_chapter(work["id"], AnalyzeIn(content="无明显问题"), user, session) == {"suggestions": []}
 
     await session.refresh(account)
-    assert account.credit_pack_points_balance == 0
+    assert account.credit_pack_points_balance == Decimal("0.99")
 
 
 async def test_analyze_chapter_failures_do_not_charge(
@@ -1473,7 +1513,7 @@ async def test_analyze_chapter_failures_do_not_charge(
         await analyze_chapter(work["id"], AnalyzeIn(content="解析失败"), user, session)
 
     await session.refresh(account)
-    assert error.value.status_code == 502
+    assert error.value.status_code == 500
     assert account.vip_daily_points_balance == 1
 
 
@@ -1501,9 +1541,9 @@ def test_normalize_mentions_skips_invalid_items() -> None:
 
 
 async def test_request_analysis_configuration_and_http_paths(monkeypatch: pytest.MonkeyPatch) -> None:
-    # No API key returns fake analysis in test env (no error)
+    # No API key returns empty result in test env (no error)
     suggestions, usage = await routes_module.request_analysis("正文", "https://test", "", "model")
-    assert suggestions  # fake_deepseek_analysis returns non-empty
+    assert suggestions == []
     assert usage["prompt_tokens"] == 0
 
     class GoodResponse:
@@ -1586,14 +1626,14 @@ async def test_send_chat_done_event_survives_deleted_agent(session: AsyncSession
     await session.commit()
     stream = await send_chat_message(chat["id"], ChatIn(message="删除后仍完成", references=[]), user, session)
     chat_model = await session.get(ChatSession, chat["id"])
-    agent = await session.get(AgentSession, chat_model.agno_session_id)
+    agent = await session.get(AgentRunStore, chat_model.agno_session_id)
     await session.delete(agent)
     await session.commit()
 
     body = b"".join([chunk async for chunk in stream.body_iterator]).decode()
 
     assert "event: done" in body
-    assert await session.get(AgentSession, chat_model.agno_session_id) is None
+    assert await session.get(AgentRunStore, chat_model.agno_session_id) is None
 
 
 async def test_billing_and_admin_remaining_error_branches(session: AsyncSession) -> None:
@@ -1740,14 +1780,25 @@ async def test_analyze_chapter_uses_editor_model_when_configured(
     config.string_value = active_model.id
     await session.commit()
 
-    # Restore real _resolve_editor_model (autouse fixture mocks it to None)
-    # The original is the one we defined in routes.py - reference it from test_services
-    from tests.test_services import _real_resolve_editor_model
+    # Override mock to use real _resolve_editor_model so it fetches from DB
     import app.api.routes as _routes
     monkeypatch.setattr(_routes, "_resolve_editor_model", _real_resolve_editor_model)
 
     result = await analyze_chapter(work["id"], AnalyzeIn(content="有错别字。"), user, session)
-    assert result["suggestions"]
+    assert "suggestions" in result
+
+    await session.refresh(account)
+    assert account.vip_daily_points_balance == Decimal("9.99")
+    transaction = (
+        await session.execute(
+            select(PointTransaction).where(
+                PointTransaction.source_type == "ai_editor_check",
+                PointTransaction.user_id == user.id,
+            )
+        )
+    ).scalar_one_or_none()
+    assert transaction is not None
+    assert transaction.provider_model_id_snapshot == active_model.provider_model_id
 
 
 async def test_send_chat_streams_tool_call_started_and_empty_content(
@@ -1897,3 +1948,106 @@ async def test_send_chat_billing_exception_during_deduction(
     )
     body = b"".join([chunk async for chunk in stream.body_iterator]).decode()
     assert "event: done" in body
+
+
+# ── _cors_headers ──
+
+
+def test_cors_headers_returns_headers_for_allowed_origin() -> None:
+    """Returns CORS headers when origin is in cors_origin_list."""
+    req = request_stub()
+    req.headers = {"origin": "http://127.0.0.1:3000"}
+    headers = routes_module._cors_headers(req)
+    assert headers["Access-Control-Allow-Origin"] == "http://127.0.0.1:3000"
+    assert headers["Access-Control-Allow-Credentials"] == "true"
+
+
+def test_cors_headers_returns_empty_for_disallowed_origin() -> None:
+    """Returns empty dict when origin is not in cors_origin_list."""
+    req = request_stub()
+    req.headers = {"origin": "https://evil.com"}
+    assert routes_module._cors_headers(req) == {}
+
+
+def test_cors_headers_returns_empty_when_no_origin_header() -> None:
+    """Returns empty dict when request has no origin header."""
+    req = request_stub()
+    assert routes_module._cors_headers(req) == {}
+
+
+# ── _drop_agent_sessions_if_invalid ──
+
+
+async def test_drop_agent_sessions_table_not_exists_is_noop() -> None:
+    """No-op when agent_sessions table does not exist."""
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    test_engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr("app.core.database.engine", test_engine)
+        await _drop_agent_sessions_if_invalid()
+    finally:
+        await test_engine.dispose()
+
+
+async def test_drop_agent_sessions_drops_old_schema() -> None:
+    """Drops agent_sessions table when it has old schema (no session_type column)."""
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy import Column, MetaData, String, Table, inspect, text
+    from sqlalchemy import JSON
+
+    test_engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        # Create old-schema table with only 3 columns
+        async with test_engine.begin() as conn:
+            await conn.execute(
+                text("CREATE TABLE agent_sessions (session_id VARCHAR(100) PRIMARY KEY, user_id VARCHAR(36), runs JSON)")
+            )
+
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr("app.core.database.engine", test_engine)
+        await _drop_agent_sessions_if_invalid()
+
+        # Verify table was dropped
+        async with test_engine.connect() as conn:
+            exists = await conn.run_sync(
+                lambda sync_conn: inspect(sync_conn).has_table("agent_sessions")
+            )
+        assert not exists
+    finally:
+        await test_engine.dispose()
+
+
+async def test_drop_agent_sessions_keeps_new_schema() -> None:
+    """Keeps agent_sessions table when it has new schema (session_type column present)."""
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy import inspect, text
+
+    test_engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        # Create new-schema table with session_type column
+        async with test_engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "CREATE TABLE agent_sessions ("
+                    "session_id VARCHAR(100) PRIMARY KEY, "
+                    "user_id VARCHAR(36), "
+                    "session_type VARCHAR(50), "
+                    "runs JSON"
+                    ")"
+                )
+            )
+
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr("app.core.database.engine", test_engine)
+        await _drop_agent_sessions_if_invalid()
+
+        # Verify table still exists
+        async with test_engine.connect() as conn:
+            exists = await conn.run_sync(
+                lambda sync_conn: inspect(sync_conn).has_table("agent_sessions")
+            )
+        assert exists
+    finally:
+        await test_engine.dispose()

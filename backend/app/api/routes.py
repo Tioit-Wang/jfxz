@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+import logging
 import secrets
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
@@ -12,12 +13,14 @@ import httpx
 from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, EmailStr, Field, ValidationError
-from sqlalchemy import Select, func, or_, select, update
+from sqlalchemy import Select, and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.database import get_session
+
+logger = logging.getLogger(__name__)
 from app.core.security import (
     hash_password,
     issue_token,
@@ -40,7 +43,7 @@ from app.models import (
     PointAccount,
     PointTransaction,
     SettingItem,
-    TopupPack,
+    CreditPack,
     User,
     UserSubscription,
     Work,
@@ -128,10 +131,9 @@ class ChatSessionIn(BaseModel):
 class ProductIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     price_amount: Decimal
-    monthly_points: int = 0
-    bundled_topup_points: int = 0
+    daily_vip_points: int = 0
+    bundled_credit_pack_points: int = 0
     points: int = 0
-    expire_days: int = 30
     status: str = "active"
     sort_order: int | None = None
 
@@ -187,7 +189,13 @@ def page_response(items: list[dict[str, Any]], total: int, page: int, page_size:
 
 
 def public(model: Any) -> dict[str, Any]:
-    data = {column.name: getattr(model, column.name) for column in model.__table__.columns}
+    from decimal import Decimal as _Decimal
+    data: dict[str, Any] = {}
+    for column in model.__table__.columns:
+        value = getattr(model, column.name)
+        if isinstance(value, _Decimal):
+            value = float(value)
+        data[column.name] = value
     if "password_hash" in data:
         del data["password_hash"]
     return data
@@ -425,7 +433,7 @@ async def current_admin(
 async def ensure_point_account(session: AsyncSession, user_id: str) -> PointAccount:
     account = await one(session, select(PointAccount).where(PointAccount.user_id == user_id))
     if account is None:
-        account = PointAccount(user_id=user_id, monthly_points_balance=0, topup_points_balance=0)
+        account = PointAccount(user_id=user_id, vip_daily_points_balance=0, credit_pack_points_balance=0)
         session.add(account)
         await session.flush()
     return account
@@ -433,20 +441,20 @@ async def ensure_point_account(session: AsyncSession, user_id: str) -> PointAcco
 
 async def consume_point(session: AsyncSession, user_id: str) -> str:
     await ensure_point_account(session, user_id)
-    monthly = await session.execute(
+    vip = await session.execute(
         update(PointAccount)
-        .where(PointAccount.user_id == user_id, PointAccount.monthly_points_balance >= 1)
-        .values(monthly_points_balance=PointAccount.monthly_points_balance - 1)
+        .where(PointAccount.user_id == user_id, PointAccount.vip_daily_points_balance >= 1)
+        .values(vip_daily_points_balance=PointAccount.vip_daily_points_balance - 1)
     )
-    if monthly.rowcount:
-        return "monthly"
-    topup = await session.execute(
+    if vip.rowcount:
+        return "vip_daily"
+    pack = await session.execute(
         update(PointAccount)
-        .where(PointAccount.user_id == user_id, PointAccount.topup_points_balance >= 1)
-        .values(topup_points_balance=PointAccount.topup_points_balance - 1)
+        .where(PointAccount.user_id == user_id, PointAccount.credit_pack_points_balance >= 1)
+        .values(credit_pack_points_balance=PointAccount.credit_pack_points_balance - 1)
     )
-    if topup.rowcount:
-        return "topup"
+    if pack.rowcount:
+        return "credit_pack"
     raise HTTPException(status_code=402, detail="points not enough")
 
 
@@ -482,28 +490,27 @@ async def seed_defaults(session: AsyncSession) -> None:
                 Plan(
                     name="创作月卡",
                     price_amount=Decimal("29.00"),
-                    monthly_points=1000,
-                    bundled_topup_points=200,
+                    daily_vip_points=1000,
+                    bundled_credit_pack_points=200,
                     sort_order=1,
                 ),
                 Plan(
                     name="专业月卡",
                     price_amount=Decimal("69.00"),
-                    monthly_points=3000,
-                    bundled_topup_points=800,
+                    daily_vip_points=3000,
+                    bundled_credit_pack_points=800,
                     sort_order=2,
                 ),
             ]
         )
 
-    existing_topups = await one(session, select(func.count(TopupPack.id)))
+    existing_topups = await one(session, select(func.count(CreditPack.id)))
     if not existing_topups:
         session.add(
-            TopupPack(
-                name="灵感加油包",
+            CreditPack(
+                name="灵感积分包",
                 price_amount=Decimal("19.00"),
                 points=1200,
-                expire_days=90,
                 sort_order=1,
             )
         )
@@ -1078,12 +1085,13 @@ def fake_deepseek_analysis(text: str) -> list[dict[str, Any]]:
     ]
 
 
-async def request_deepseek_analysis(text: str) -> list[dict[str, Any]]:
-    settings = get_settings()
-    if settings.env == "test":
-        return fake_deepseek_analysis(text)
-    if not settings.deepseek_api_key:
-        raise HTTPException(status_code=503, detail="deepseek api key not configured")
+async def request_analysis(
+    text: str, base_url: str, api_key: str, model_id: str
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    if not api_key:
+        if get_settings().env == "test":
+            return fake_deepseek_analysis(text), {"prompt_tokens": 0, "completion_tokens": 0, "cached_tokens": 0}
+        raise HTTPException(status_code=503, detail="AI service not configured")
     prompt = (
         "你是中文长篇小说编辑器的基础校对助手。只检查错别字、错误标点符号、明显病句或不通顺表达。"
         "不要检查人物设定、世界观设定、剧情节奏或文风。"
@@ -1094,13 +1102,13 @@ async def request_deepseek_analysis(text: str) -> list[dict[str, Any]]:
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(
-                f"{settings.deepseek_base_url.rstrip('/')}/chat/completions",
+                f"{base_url.rstrip('/')}/chat/completions",
                 headers={
-                    "Authorization": f"Bearer {settings.deepseek_api_key}",
+                    "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": settings.deepseek_model,
+                    "model": model_id,
                     "messages": [
                         {"role": "system", "content": prompt},
                         {"role": "user", "content": text},
@@ -1111,9 +1119,31 @@ async def request_deepseek_analysis(text: str) -> list[dict[str, Any]]:
             response.raise_for_status()
             data = response.json()
     except (httpx.HTTPError, ValueError) as error:
-        raise HTTPException(status_code=502, detail="deepseek request failed") from error
+        raise HTTPException(status_code=502, detail="analysis request failed") from error
     content = str(data.get("choices", [{}])[0].get("message", {}).get("content", ""))
-    return parse_analysis_output(content, text)
+    raw_usage = data.get("usage", {})
+    usage = {
+        "prompt_tokens": raw_usage.get("prompt_tokens", 0),
+        "completion_tokens": raw_usage.get("completion_tokens", 0),
+        "cached_tokens": raw_usage.get("prompt_tokens_details", {}).get("cached_tokens", 0),
+    }
+    return parse_analysis_output(content, text), usage
+
+
+async def _resolve_editor_model(session: AsyncSession) -> AiModel | None:
+    result = await session.execute(
+        select(GlobalConfig).where(
+            GlobalConfig.config_group == "ai.editor_check",
+            GlobalConfig.config_key == "model_id",
+        )
+    )
+    config = result.scalar_one_or_none()
+    if config is None or not config.string_value:
+        return None
+    model = await session.get(AiModel, config.string_value)
+    if model is None or model.status != "active":
+        return None
+    return model
 
 
 @router.post("/works/{work_id}/analyze")
@@ -1127,21 +1157,48 @@ async def analyze_chapter(
     text = payload.content
     if not text.strip():
         return {"suggestions": []}
-    account = await ensure_point_account(session, user.id)
-    if account.monthly_points_balance + account.topup_points_balance < 1:
-        raise HTTPException(status_code=402, detail="points not enough")
-    suggestions = await request_deepseek_analysis(text)
-    bucket = await consume_point(session, user.id)
-    session.add(
-        PointTransaction(
-            user_id=user.id,
-            bucket_type=bucket,
-            change_type="consume",
-            source_type="analyze",
-            source_id=work_id,
-            points_delta=-1,
+
+    ai_model = await _resolve_editor_model(session)
+    if ai_model:
+        settings = get_settings()
+        base_url = settings.ai_provider_base_url
+        api_key = settings.ai_provider_api_key or ""
+        model_id = ai_model.provider_model_id
+        from app.services.billing_service import pre_check_balance
+        await pre_check_balance(session, user.id, ai_model, estimated_input_tokens=max(1, len(text) // 3))
+    else:
+        settings = get_settings()
+        base_url = settings.deepseek_base_url
+        api_key = settings.deepseek_api_key or ""
+        model_id = settings.deepseek_model
+        account = await ensure_point_account(session, user.id)
+        if account.vip_daily_points_balance + account.credit_pack_points_balance < 1:
+            raise HTTPException(status_code=402, detail="points not enough")
+
+    try:
+        suggestions, usage = await request_analysis(text, base_url, api_key, model_id)
+    except Exception:
+        raise HTTPException(status_code=500, detail="AI analysis failed, no charge applied")
+
+    if ai_model:
+        from app.services.billing_service import deduct_by_usage
+        await deduct_by_usage(
+            session, user.id, ai_model, usage,
+            work_id=work_id, source_id=work_id, source_type="ai_editor_check",
         )
-    )
+    else:
+        bucket = await consume_point(session, user.id)
+        session.add(
+            PointTransaction(
+                user_id=user.id,
+                bucket_type=bucket,
+                change_type="consume",
+                source_type="ai_editor_check",
+                source_id=work_id,
+                points_delta=Decimal("-1"),
+            )
+        )
+
     await session.commit()
     return {"suggestions": suggestions}
 
@@ -1341,35 +1398,26 @@ async def reference_context(session: AsyncSession, work_id: str, references: lis
     return contexts
 
 
-def assistant_actions(message: str) -> list[dict[str, str]]:
-    actions: list[dict[str, str]] = []
-    if any(word in message for word in ["角色", "人物", "主角", "配角"]):
-        actions.append({"type": "save_character", "label": "保存为角色"})
-    if any(word in message for word in ["设定", "世界观", "地点", "规则"]):
-        actions.append({"type": "save_setting", "label": "保存为设定"})
-    if any(word in message for word in ["章节", "提要", "摘要", "情节"]):
-        actions.append({"type": "update_chapter_summary", "label": "更新章节提要"})
-    if any(word in message for word in ["作品", "简介", "梗概", "背景"]):
-        actions.append({"type": "update_work_info", "label": "更新作品信息"})
-    if not actions:
-        actions.append({"type": "update_chapter_summary", "label": "更新章节提要"})
-    return actions
-
-
-def build_reply(work: Work, message: str, refs: list[dict[str, Any]], history: list[dict[str, Any]]) -> str:
-    ref_names = "、".join(ref["name"] for ref in refs) if refs else "当前作品与当前章节"
-    history_hint = f"我也参考了最近 {len(history)} 条对话。" if history else "这是这个会话的新一轮讨论。"
-    return (
-        f"我已读取《{work.title}》的上下文，并结合{ref_names}来处理。"
-        f"{history_hint}"
-        f"针对“{message[:80]}”，建议先明确冲突目标，再补足人物动机与设定约束。"
-    )
-
-
 def encode_sse(event: str | None, data: Any) -> bytes:
     prefix = f"event: {event}\n" if event else ""
     payload = data if isinstance(data, str) else json.dumps(data, ensure_ascii=False)
     return f"{prefix}data: {payload}\n\n".encode()
+
+_TOOL_DISPLAY_NAMES = {
+    "get_character": "查询角色",
+    "list_characters": "列出角色",
+    "create_or_update_character": "创建/更新角色",
+    "delete_character": "删除角色",
+    "get_setting": "查询设定",
+    "list_settings": "列出设定",
+    "create_or_update_setting": "创建/更新设定",
+    "delete_setting": "删除设定",
+    "get_chapter": "查询章节",
+    "list_chapters": "列出章节",
+    "update_chapter_summary": "更新章节提要",
+    "get_work_info": "查询作品信息",
+    "update_work_info": "更新作品信息",
+}
 
 
 @router.get("/chat-sessions/{session_id}/messages")
@@ -1397,66 +1445,148 @@ async def send_chat_message(
     chat = await must_get(session, ChatSession, session_id)
     if chat.user_id != user.id:
         raise HTTPException(status_code=404, detail="session not found")
-    await resolve_active_ai_model(session, payload.model_id)
-    bucket = await consume_point(session, user.id)
-    session.add(
-        PointTransaction(
-            user_id=user.id,
-            bucket_type=bucket,
-            change_type="consume",
-            source_type="ai_chat",
-            source_id=chat.id,
-            points_delta=-1,
-        )
-    )
+    model = await resolve_active_ai_model(session, payload.model_id)
+
+    settings = get_settings()
+    if settings.env != "test" and not settings.ai_provider_api_key:  # pragma: no cover
+        raise HTTPException(status_code=503, detail="AI provider not configured, please set JFXZ_AI_PROVIDER_API_KEY")
+
+    # Context collection (before pre-check so we can estimate tokens accurately)
     work = await owned_work(session, user.id, chat.work_id)
     mentions = normalize_mentions(payload.mentions)
     references = normalize_references(payload.references, mentions)
     refs = await reference_context(session, chat.work_id, references)
+
+    # Pre-check balance with dynamic token estimation
+    from app.services.billing_service import pre_check_balance
+    estimated_tokens = len(payload.message) // 3
+    for ref in refs:
+        estimated_tokens += len(ref.get("summary", "")) // 3 + len(ref.get("detail", "")) // 3
+    estimated_tokens += len(work.short_intro or "") // 3 + len(work.synopsis or "") // 3
+    estimated_tokens = max(estimated_tokens, 100)
+    await pre_check_balance(session, user.id, model, estimated_input_tokens=estimated_tokens)
+
     chat.last_message_preview = payload.message[:120]
     chat.last_active_at = now()
+
+    # Ensure AgentSession exists (dual-write for compatibility)
     agent = await session.get(AgentSession, chat.agno_session_id)
     if agent is None:
         agent = AgentSession(session_id=chat.agno_session_id, user_id=user.id, runs=[])
         session.add(agent)
         await session.flush()
+
     current_runs = agent.runs or []
     if not current_runs and chat.title == "新的对话":
         chat.title = payload.message[:24] or "新的对话"
-    created_at = now().isoformat()
+
     user_message = {
         "id": str(uuid4()),
         "role": "user",
         "content": payload.message,
         "mentions": mentions,
         "references": references,
-        "created_at": created_at,
+        "created_at": now().isoformat(),
     }
-    history = [normalized_run(run, index) for index, run in enumerate(current_runs)][-20:]
     agent.runs = [*current_runs, user_message]
     await session.commit()
 
-    reply = build_reply(work, payload.message, refs, history)
-    chunks = [reply[index : index + 18] for index in range(0, len(reply), 18)]
-    assistant_message = {
-        "id": str(uuid4()),
-        "role": "assistant",
-        "content": reply,
-        "mentions": [],
-        "references": references,
-        "actions": assistant_actions(payload.message),
-        "created_at": now().isoformat(),
-    }
+    # Build Agno Agent
+    from app.services.agent_service import create_agent
+    agno_agent = create_agent(
+        model=model,
+        work=work,
+        refs=refs,
+        db_session=session,
+        work_id=chat.work_id,
+        agno_session_id=chat.agno_session_id,
+    )
+
+    # Collect full response for persistence
+    full_content_parts: list[str] = []
+    tool_results: list[dict[str, str]] = []
+    billing_failed = False
 
     async def stream_reply() -> AsyncIterator[bytes]:
-        for chunk in chunks:
-            yield encode_sse(None, chunk)
+        from agno.run.agent import RunEvent
+
+        nonlocal billing_failed
+        completed_event = None
+        event_stream = agno_agent.arun(
+            payload.message,
+            stream=True,
+            stream_events=True,
+        )
+        async for event in event_stream:
+            if event.event == RunEvent.run_content:
+                content = event.content
+                if content:
+                    full_content_parts.append(content)
+                    yield encode_sse(None, content)
+            elif event.event == RunEvent.tool_call_started:
+                tool_name = event.tool.tool_name if event.tool else ""
+                display = _TOOL_DISPLAY_NAMES.get(tool_name, tool_name)
+                yield encode_sse("tool_call", {"tool": tool_name, "display": display, "status": "started"})
+            elif event.event == RunEvent.tool_call_completed:
+                tool_name = event.tool.tool_name if event.tool else ""
+                display = _TOOL_DISPLAY_NAMES.get(tool_name, tool_name)
+                result_text = ""
+                if event.tool and hasattr(event.tool, "result") and event.tool.result:
+                    result_text = str(event.tool.result)[:500]
+                tool_results.append({"tool": tool_name, "display": display, "result": result_text})
+                yield encode_sse("tool_result", {
+                    "tool": tool_name,
+                    "display": display,
+                    "status": "completed",
+                    "result": result_text,
+                })
+            elif event.event == RunEvent.run_completed:
+                completed_event = event
+
+        # Stream complete -- persist and bill
+        full_content = "".join(full_content_parts)
+
+        # Deduct by actual usage
+        from app.services.billing_service import deduct_by_usage
+        try:
+            if completed_event and hasattr(completed_event, 'metrics') and completed_event.metrics:
+                metrics = completed_event.metrics
+                usage = {
+                    "prompt_tokens": getattr(metrics, 'input_tokens', 0) or 0,
+                    "completion_tokens": getattr(metrics, 'output_tokens', 0) or 0,
+                    "cached_tokens": getattr(metrics, 'cache_read_tokens', 0) or 0,
+                }
+                await deduct_by_usage(
+                    session, user.id, model, usage,
+                    work_id=chat.work_id,
+                    source_id=chat.id,
+                    source_type="ai_chat",
+                )
+            else:
+                logger.warning("no metrics from agent run, billing skipped for chat %s", chat.id)
+                billing_failed = True
+        except Exception:
+            billing_failed = True
+            logger.warning("billing deduction failed after agent stream", exc_info=True)
+
+        # Persist assistant message to AgentSession.runs
+        assistant_message = {
+            "id": str(uuid4()),
+            "role": "assistant",
+            "content": full_content,
+            "mentions": [],
+            "references": references,
+            "tool_results": tool_results,
+            "billing_failed": billing_failed,
+            "created_at": now().isoformat(),
+        }
         fresh_agent = await session.get(AgentSession, chat.agno_session_id)
         if fresh_agent is not None:
             fresh_agent.runs = [*(fresh_agent.runs or []), assistant_message]
-            chat.last_message_preview = reply[:120]
-            chat.last_active_at = now()
-            await session.commit()
+        chat.last_message_preview = full_content[:120]
+        chat.last_active_at = now()
+        await session.commit()
+
         yield encode_sse("done", assistant_message)
 
     return StreamingResponse(stream_reply(), media_type="text/event-stream")
@@ -1465,19 +1595,20 @@ async def send_chat_message(
 @router.get("/billing/products")
 async def billing_products(session: AsyncSession = Depends(get_session)) -> dict[str, list[dict[str, Any]]]:
     plans = await session.execute(select(Plan).where(Plan.status == "active").order_by(Plan.sort_order))
-    topups = await session.execute(select(TopupPack).where(TopupPack.status == "active").order_by(TopupPack.sort_order))
-    return {"plans": [public(item) for item in plans.scalars()], "topup_packs": [public(item) for item in topups.scalars()]}
+    packs = await session.execute(select(CreditPack).where(CreditPack.status == "active").order_by(CreditPack.sort_order))
+    return {"plans": [public(item) for item in plans.scalars()], "credit_packs": [public(item) for item in packs.scalars()]}
 
 
 async def product_snapshot(
     session: AsyncSession, product_type: str, product_id: str
-) -> tuple[str, Decimal, int, int, str | None]:
+) -> tuple[str, Decimal, int, int, int]:
+    """Return (name, amount, daily_vip_points, bundled_credit_pack_points, credit_pack_points)."""
     if product_type == "plan":
         product = await must_get(session, Plan, product_id)
-        return product.name, product.price_amount, product.monthly_points, product.bundled_topup_points, None
-    if product_type == "topup_pack":
-        product = await must_get(session, TopupPack, product_id)
-        return product.name, product.price_amount, 0, product.points, str(product.expire_days)
+        return product.name, product.price_amount, product.daily_vip_points, product.bundled_credit_pack_points, 0
+    if product_type == "credit_pack":
+        product = await must_get(session, CreditPack, product_id)
+        return product.name, product.price_amount, 0, 0, product.points
     raise HTTPException(status_code=400, detail="bad product type")
 
 
@@ -1485,7 +1616,9 @@ async def product_snapshot(
 async def create_order(
     payload: OrderIn, user: User = Depends(current_user), session: AsyncSession = Depends(get_session)
 ) -> dict[str, Any]:
-    name, amount, *_ = await product_snapshot(session, payload.product_type, payload.product_id)
+    name, amount, daily_vip, bundled_pack, pack_points = await product_snapshot(
+        session, payload.product_type, payload.product_id
+    )
     order_no = f"JF{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}{uuid4().hex[:8]}"
     order = BillingOrder(
         order_no=order_no,
@@ -1493,6 +1626,10 @@ async def create_order(
         product_type=payload.product_type,
         product_id=payload.product_id,
         product_name_snapshot=name,
+        daily_vip_points_snapshot=daily_vip if daily_vip else None,
+        bundled_credit_pack_points_snapshot=bundled_pack if bundled_pack else None,
+        credit_pack_points_snapshot=pack_points if pack_points else None,
+        duration_days_snapshot=31 if payload.product_type == "plan" else None,
         pay_channel="alipay_f2f",
         amount=amount,
         status="qr_created",
@@ -1515,6 +1652,12 @@ async def create_order(
 
 
 async def grant_order(session: AsyncSession, order: BillingOrder) -> None:
+    """Grant purchased benefits using the snapshot locked at order creation time."""
+    from app.services.billing_service import (
+        grant_credit_pack_points,
+        grant_vip_daily_points,
+    )
+
     paid_at = now()
     marked_paid = await session.execute(
         update(BillingOrder)
@@ -1524,47 +1667,63 @@ async def grant_order(session: AsyncSession, order: BillingOrder) -> None:
     if not marked_paid.rowcount:
         await session.refresh(order)
         return
-    _name, _amount, monthly, topup, expire_days = await product_snapshot(session, order.product_type, order.product_id)
-    account = await ensure_point_account(session, order.user_id)
+
     order.status = "paid"
     order.paid_at = paid_at
-    if monthly:
-        account.monthly_points_balance += monthly
-        session.add(
-            PointTransaction(
-                user_id=order.user_id,
-                bucket_type="monthly",
-                change_type="grant",
-                source_type="plan_monthly",
-                source_id=order.id,
-                points_delta=monthly,
-                expire_at=now() + timedelta(days=31),
-            )
-        )
-    if topup:
-        account.topup_points_balance += topup
-        session.add(
-            PointTransaction(
-                user_id=order.user_id,
-                bucket_type="topup",
-                change_type="grant",
-                source_type="topup_pack" if expire_days else "plan_bundled_topup",
-                source_id=order.id,
-                points_delta=topup,
-                expire_at=now() + timedelta(days=int(expire_days or 31)),
-            )
-        )
+
     if order.product_type == "plan":
-        session.add(
-            UserSubscription(
-                user_id=order.user_id,
-                plan_id=order.product_id,
-                order_id=order.id,
-                start_at=now(),
-                end_at=now() + timedelta(days=31),
-                next_renew_at=now() + timedelta(days=31),
+        daily_vip = order.daily_vip_points_snapshot or 0
+        bundled_pack = order.bundled_credit_pack_points_snapshot or 0
+        duration_days = order.duration_days_snapshot or 31
+
+        # First-day VIP daily points: grant immediately
+        if daily_vip:
+            await grant_vip_daily_points(session, order.user_id, daily_vip, source_id=order.id)
+
+        # Bundled credit pack points: permanent, no expiry
+        if bundled_pack:
+            await grant_credit_pack_points(session, order.user_id, bundled_pack, source_id=order.id)
+
+        # Check for active subscription (renewal case)
+        existing_sub = await session.execute(
+            select(UserSubscription)
+            .where(
+                UserSubscription.user_id == order.user_id,
+                UserSubscription.status == "active",
+                UserSubscription.end_at > now(),
             )
+            .order_by(UserSubscription.end_at.desc())
+            .limit(1)
         )
+        active_sub = existing_sub.scalar_one_or_none()
+
+        if active_sub:
+            # Renewal: extend from current end_at, do NOT grant VIP daily points now
+            active_sub.end_at = active_sub.end_at + timedelta(days=duration_days)
+            active_sub.next_renew_at = active_sub.end_at
+            active_sub.daily_vip_points_snapshot = daily_vip
+            active_sub.duration_days_snapshot = duration_days
+        else:
+            # New subscription
+            start = now()
+            end = start + timedelta(days=duration_days)
+            session.add(
+                UserSubscription(
+                    user_id=order.user_id,
+                    plan_id=order.product_id,
+                    order_id=order.id,
+                    start_at=start,
+                    end_at=end,
+                    next_renew_at=end,
+                    daily_vip_points_snapshot=daily_vip,
+                    duration_days_snapshot=duration_days,
+                )
+            )
+
+    elif order.product_type == "credit_pack":
+        pack_points = order.credit_pack_points_snapshot or 0
+        if pack_points:
+            await grant_credit_pack_points(session, order.user_id, pack_points, source_id=order.id)
 
 
 async def confirm_verified_payment(
@@ -1781,7 +1940,7 @@ async def admin_products(
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict[str, Any]:
     if kind:
-        model = Plan if kind == "plans" else TopupPack if kind == "topup-packs" else None
+        model = Plan if kind == "plans" else CreditPack if kind == "credit-packs" else None
         if model is None:
             raise HTTPException(status_code=400, detail="bad product kind")
         statement = select(model)
@@ -1793,8 +1952,8 @@ async def admin_products(
         return page_response([public(row[0]) for row in rows], total, page, page_size)
 
     plans = await session.execute(select(Plan).order_by(Plan.sort_order))
-    topups = await session.execute(select(TopupPack).order_by(TopupPack.sort_order))
-    return {"plans": [public(item) for item in plans.scalars()], "topup_packs": [public(item) for item in topups.scalars()]}
+    packs = await session.execute(select(CreditPack).order_by(CreditPack.sort_order))
+    return {"plans": [public(item) for item in plans.scalars()], "credit_packs": [public(item) for item in packs.scalars()]}
 
 
 @router.post("/admin/products/{kind}")
@@ -1808,17 +1967,16 @@ async def admin_create_product(
         item = Plan(
             name=payload.name,
             price_amount=payload.price_amount,
-            monthly_points=payload.monthly_points,
-            bundled_topup_points=payload.bundled_topup_points,
+            daily_vip_points=payload.daily_vip_points,
+            bundled_credit_pack_points=payload.bundled_credit_pack_points,
             status=payload.status,
             sort_order=payload.sort_order,
         )
-    elif kind == "topup-packs":
-        item = TopupPack(
+    elif kind == "credit-packs":
+        item = CreditPack(
             name=payload.name,
             price_amount=payload.price_amount,
             points=payload.points,
-            expire_days=payload.expire_days,
             status=payload.status,
             sort_order=payload.sort_order,
         )
@@ -1837,7 +1995,7 @@ async def admin_update_product(
     _admin: User = Depends(current_admin),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    model = Plan if kind == "plans" else TopupPack if kind == "topup-packs" else None
+    model = Plan if kind == "plans" else CreditPack if kind == "credit-packs" else None
     if model is None:
         raise HTTPException(status_code=400, detail="bad product kind")
     item = await must_get(session, model, item_id)
@@ -1855,7 +2013,7 @@ async def admin_delete_product(
     _admin: User = Depends(current_admin),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, bool]:
-    model = Plan if kind == "plans" else TopupPack if kind == "topup-packs" else None
+    model = Plan if kind == "plans" else CreditPack if kind == "credit-packs" else None
     if model is None:
         raise HTTPException(status_code=400, detail="bad product kind")
     item = await must_get(session, model, item_id)
@@ -2028,3 +2186,155 @@ async def admin_patch_config(
         setattr(config, key, value)
     await session.commit()
     return public_config(config)
+
+
+@router.get("/admin/credit-transactions")
+async def admin_credit_transactions(
+    q: Annotated[str | None, Query(max_length=100)] = None,
+    balance_type: Annotated[str | None, Query(max_length=20)] = None,
+    change_type: Annotated[str | None, Query(max_length=20)] = None,
+    source_type: Annotated[str | None, Query(max_length=50)] = None,
+    model_id: Annotated[str | None, Query(max_length=36)] = None,
+    work_id: Annotated[str | None, Query(max_length=36)] = None,
+    points_min: Annotated[float | None, Query()] = None,
+    points_max: Annotated[float | None, Query()] = None,
+    time_from: Annotated[str | None, Query()] = None,
+    time_to: Annotated[str | None, Query()] = None,
+    _admin: User = Depends(current_admin),
+    session: AsyncSession = Depends(get_session),
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> dict[str, Any]:
+    statement = (
+        select(
+            PointTransaction,
+            User.email,
+            Work.title,
+            BillingOrder.product_name_snapshot,
+            BillingOrder.product_type,
+            BillingOrder.id,
+        )
+        .join(User, User.id == PointTransaction.user_id)
+        .outerjoin(Work, Work.id == PointTransaction.work_id)
+        .outerjoin(BillingOrder, BillingOrder.id == PointTransaction.source_id)
+    )
+
+    def _escape_like(value: str) -> str:
+        return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+    if q:
+        like = f"%{_escape_like(q)}%"
+        statement = statement.where(or_(User.email.ilike(like, escape="\\"), User.nickname.ilike(like, escape="\\")))
+    if balance_type:
+        statement = statement.where(PointTransaction.bucket_type == balance_type)
+    if change_type:
+        statement = statement.where(PointTransaction.change_type == change_type)
+    if source_type:
+        statement = statement.where(PointTransaction.source_type == source_type)
+    if model_id:
+        statement = statement.where(PointTransaction.model_id == model_id)
+    if work_id:
+        statement = statement.where(PointTransaction.work_id == work_id)
+    if points_min is not None:
+        statement = statement.where(PointTransaction.points_delta >= points_min)
+    if points_max is not None:
+        statement = statement.where(PointTransaction.points_delta <= points_max)
+    if time_from:
+        try:
+            dt_from = datetime.fromisoformat(time_from)
+            if dt_from.tzinfo is None:
+                dt_from = dt_from.replace(tzinfo=UTC)
+            statement = statement.where(PointTransaction.created_at >= dt_from)
+        except ValueError:
+            pass
+    if time_to:
+        try:
+            dt_to = datetime.fromisoformat(time_to)
+            if dt_to.tzinfo is None:
+                dt_to = dt_to.replace(tzinfo=UTC)
+            if dt_to.hour == 0 and dt_to.minute == 0 and dt_to.second == 0:
+                dt_to = dt_to + timedelta(days=1) - timedelta(microseconds=1)
+            statement = statement.where(PointTransaction.created_at <= dt_to)
+        except ValueError:
+            pass
+
+    statement = statement.order_by(PointTransaction.created_at.desc())
+
+    # Count separately to avoid window function interfering
+    count_stmt = select(func.count()).select_from(statement.order_by(None).subquery())
+    total = await session.scalar(count_stmt) or 0
+
+    result = await session.execute(statement.limit(page_size).offset((page - 1) * page_size))
+    rows_result = result.all()
+
+    rows = []
+    for tx, email, work_title, product_name, prod_type, order_id in rows_result:
+        data = public(tx)
+        data["balance_type"] = data.pop("bucket_type", "")
+        data["user_email"] = email
+        data["work_title"] = work_title
+        data["points_change"] = data.pop("points_delta")
+        data["cache_hit_input_tokens"] = data.pop("prompt_cache_hit_tokens", None)
+        data["cache_miss_input_tokens"] = data.pop("prompt_cache_miss_tokens", None)
+        data["output_tokens"] = data.pop("completion_tokens", None)
+        data["platform_call_id"] = data.pop("provider_model_id_snapshot", None)
+        data.pop("expire_at", None)
+        data["points_after"] = float(data.pop("balance_after", None) or 0)
+        data["order_id"] = order_id
+        data["product_name_snapshot"] = product_name
+        data["product_type"] = prod_type
+
+        rows.append(data)
+
+    return page_response(rows, int(total), page, page_size)
+
+
+@router.get("/admin/credit-transactions/{tx_id}")
+async def admin_credit_transaction_detail(
+    tx_id: str, _admin: User = Depends(current_admin), session: AsyncSession = Depends(get_session)
+) -> dict[str, Any]:
+    tx = await must_get(session, PointTransaction, tx_id)
+    user = await session.get(User, tx.user_id)
+    work = await session.get(Work, tx.work_id) if tx.work_id else None
+    order = await session.get(BillingOrder, tx.source_id) if tx.source_id else None
+
+    # Calculate points_after (consistent with list endpoint's window function)
+    points_after = await session.scalar(
+        select(
+            func.coalesce(
+                select(func.sum(PointTransaction.points_delta))
+                .where(
+                    PointTransaction.user_id == tx.user_id,
+                    or_(
+                        PointTransaction.created_at < tx.created_at,
+                        and_(
+                            PointTransaction.created_at == tx.created_at,
+                            PointTransaction.id <= tx.id,
+                        ),
+                    ),
+                )
+                .correlate(PointTransaction)
+                .scalar_subquery(),
+                0,
+            )
+        )
+    )
+
+    data = public(tx)
+    bt = data.pop("bucket_type", "")
+    data["balance_type"] = bt
+
+    data["user_email"] = user.email if user else None
+    data["work_title"] = work.title if work else None
+    data["points_change"] = data.pop("points_delta")
+    data["cache_hit_input_tokens"] = data.pop("prompt_cache_hit_tokens", None)
+    data["cache_miss_input_tokens"] = data.pop("prompt_cache_miss_tokens", None)
+    data["output_tokens"] = data.pop("completion_tokens", None)
+    data["platform_call_id"] = data.pop("provider_model_id_snapshot", None)
+    data.pop("expire_at", None)
+    data["points_after"] = float(points_after) if points_after is not None else 0.0
+    data["order_id"] = order.id if order else None
+    data["product_name_snapshot"] = order.product_name_snapshot if order else None
+    data["product_type"] = order.product_type if order else None
+
+    return data

@@ -46,7 +46,7 @@ async def create_admin_account(session: AsyncSession, email: str) -> tuple[User,
     )
     session.add(user)
     await session.flush()
-    session.add(PointAccount(user_id=user.id, monthly_points_balance=0, topup_points_balance=0))
+    session.add(PointAccount(user_id=user.id, vip_daily_points_balance=0, credit_pack_points_balance=0))
     await session.flush()
     return user, password
 

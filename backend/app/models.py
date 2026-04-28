@@ -159,21 +159,20 @@ class Plan(Base, TimestampMixin):
     price_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     price_currency: Mapped[str] = mapped_column(String(10), default="CNY")
     billing_cycle_months: Mapped[int] = mapped_column(Integer, default=1)
-    monthly_points: Mapped[int] = mapped_column(Integer)
-    bundled_topup_points: Mapped[int] = mapped_column(Integer, default=0)
+    daily_vip_points: Mapped[int] = mapped_column(Integer)
+    bundled_credit_pack_points: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(20), default="active", index=True)
     sort_order: Mapped[int | None] = mapped_column(Integer)
 
 
-class TopupPack(Base, TimestampMixin):
-    __tablename__ = "topup_packs"
+class CreditPack(Base, TimestampMixin):
+    __tablename__ = "credit_packs"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     name: Mapped[str] = mapped_column(String(100))
     price_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     price_currency: Mapped[str] = mapped_column(String(10), default="CNY")
     points: Mapped[int] = mapped_column(Integer)
-    expire_days: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(20), default="active", index=True)
     sort_order: Mapped[int | None] = mapped_column(Integer)
 
@@ -187,6 +186,10 @@ class BillingOrder(Base, TimestampMixin):
     product_type: Mapped[str] = mapped_column(String(30))
     product_id: Mapped[str] = mapped_column(String(36))
     product_name_snapshot: Mapped[str] = mapped_column(String(200))
+    daily_vip_points_snapshot: Mapped[int | None] = mapped_column(Integer)
+    bundled_credit_pack_points_snapshot: Mapped[int | None] = mapped_column(Integer)
+    credit_pack_points_snapshot: Mapped[int | None] = mapped_column(Integer)
+    duration_days_snapshot: Mapped[int | None] = mapped_column(Integer)
     pay_channel: Mapped[str | None] = mapped_column(String(30))
     amount: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     currency: Mapped[str] = mapped_column(String(10), default="CNY")
@@ -236,6 +239,8 @@ class UserSubscription(Base, TimestampMixin):
     start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     end_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     next_renew_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    daily_vip_points_snapshot: Mapped[int] = mapped_column(Integer)
+    duration_days_snapshot: Mapped[int] = mapped_column(Integer)
 
 
 class PointAccount(Base):
@@ -243,8 +248,8 @@ class PointAccount(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True)
-    monthly_points_balance: Mapped[int] = mapped_column(Integer, default=0)
-    topup_points_balance: Mapped[int] = mapped_column(Integer, default=0)
+    vip_daily_points_balance: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
+    credit_pack_points_balance: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
 
@@ -257,7 +262,18 @@ class PointTransaction(Base):
     change_type: Mapped[str] = mapped_column(String(20))
     source_type: Mapped[str] = mapped_column(String(50))
     source_id: Mapped[str | None] = mapped_column(String(36))
-    points_delta: Mapped[int] = mapped_column(Integer)
+    points_delta: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    work_id: Mapped[str | None] = mapped_column(String(36))
+    model_id: Mapped[str | None] = mapped_column(String(36))
+    model_name_snapshot: Mapped[str | None] = mapped_column(String(100))
+    provider_model_id_snapshot: Mapped[str | None] = mapped_column(String(100))
+    prompt_cache_hit_tokens: Mapped[int | None] = mapped_column(Integer)
+    prompt_cache_miss_tokens: Mapped[int | None] = mapped_column(Integer)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer)
+    cache_hit_input_multiplier_snapshot: Mapped[Decimal | None] = mapped_column(Numeric(8, 2))
+    cache_miss_input_multiplier_snapshot: Mapped[Decimal | None] = mapped_column(Numeric(8, 2))
+    output_multiplier_snapshot: Mapped[Decimal | None] = mapped_column(Numeric(8, 2))
+    balance_after: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     expire_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
 

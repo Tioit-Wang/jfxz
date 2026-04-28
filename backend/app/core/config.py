@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-v4-flash"
+    ai_provider_base_url: str = "https://platform.aimom.net/v1"
+    ai_provider_api_key: str | None = None
 
     model_config = SettingsConfigDict(env_prefix="JFXZ_", env_file=SHARED_ENV_FILES, extra="ignore")
 

@@ -23,10 +23,9 @@ type ProductForm = {
   kind: AdminProductKind;
   name: string;
   priceAmount: string;
-  monthlyPoints: string;
-  bundledTopupPoints: string;
+  vipDailyPoints: string;
+  bundledCreditPackPoints: string;
   points: string;
-  expireDays: string;
   status: string;
   sortOrder: string;
 };
@@ -36,21 +35,19 @@ const emptyPlan: ProductForm = {
   kind: "plans",
   name: "",
   priceAmount: "0.00",
-  monthlyPoints: "0",
-  bundledTopupPoints: "0",
+  vipDailyPoints: "0",
+  bundledCreditPackPoints: "0",
   points: "0",
-  expireDays: "30",
   status: "active",
   sortOrder: ""
 };
 const emptyTopup: ProductForm = {
-  kind: "topup-packs",
+  kind: "credit-packs",
   name: "",
   priceAmount: "0.00",
-  monthlyPoints: "0",
-  bundledTopupPoints: "0",
+  vipDailyPoints: "0",
+  bundledCreditPackPoints: "0",
   points: "0",
-  expireDays: "30",
   status: "active",
   sortOrder: ""
 };
@@ -73,14 +70,13 @@ function formPayload(form: ProductForm): AdminProductInput {
   if (form.kind === "plans") {
     return {
       ...base,
-      monthlyPoints: Number(form.monthlyPoints || 0),
-      bundledTopupPoints: Number(form.bundledTopupPoints || 0),
+      vipDailyPoints: Number(form.vipDailyPoints || 0),
+      bundledCreditPackPoints: Number(form.bundledCreditPackPoints || 0),
     };
   }
   return {
     ...base,
     points: Number(form.points || 0),
-    expireDays: Number(form.expireDays || 30),
   };
 }
 
@@ -94,14 +90,13 @@ function rowStatusPayload(kind: AdminProductKind, row: ProductRow, status: strin
   if (kind === "plans") {
     return {
       ...base,
-      monthlyPoints: asNumber(row.monthly_points),
-      bundledTopupPoints: asNumber(row.bundled_topup_points),
+      vipDailyPoints: asNumber(row.vip_daily_points),
+      bundledCreditPackPoints: asNumber(row.bundled_credit_pack_points),
     };
   }
   return {
     ...base,
     points: asNumber(row.points),
-    expireDays: asNumber(row.expire_days || 30),
   };
 }
 
@@ -149,10 +144,9 @@ export default function AdminProductsPage() {
       kind,
       name: row.name,
       priceAmount: asString(row.price_amount),
-      monthlyPoints: asString(row.monthly_points ?? 0),
-      bundledTopupPoints: asString(row.bundled_topup_points ?? 0),
+      vipDailyPoints: asString(row.vip_daily_points ?? 0),
+      bundledCreditPackPoints: asString(row.bundled_credit_pack_points ?? 0),
       points: asString(row.points ?? 0),
-      expireDays: asString(row.expire_days ?? 30),
       status: row.status,
       sortOrder: row.sort_order == null ? "" : asString(row.sort_order)
     });
@@ -183,23 +177,22 @@ export default function AdminProductsPage() {
       return;
     }
     if (form.kind === "plans") {
-      if (form.monthlyPoints === "" || form.bundledTopupPoints === "") {
+      if (form.vipDailyPoints === "" || form.bundledCreditPackPoints === "") {
         toast.error("请填写所有积分字段");
         return;
       }
-      if (isNaN(Number(form.monthlyPoints)) || Number(form.monthlyPoints) < 0 ||
-          isNaN(Number(form.bundledTopupPoints)) || Number(form.bundledTopupPoints) < 0) {
+      if (isNaN(Number(form.vipDailyPoints)) || Number(form.vipDailyPoints) < 0 ||
+          isNaN(Number(form.bundledCreditPackPoints)) || Number(form.bundledCreditPackPoints) < 0) {
         toast.error("积分数量不能为负数");
         return;
       }
     } else {
-      if (form.points === "" || form.expireDays === "") {
-        toast.error("请填写所有积分字段");
+      if (form.points === "") {
+        toast.error("请填写积分数量");
         return;
       }
-      if (isNaN(Number(form.points)) || Number(form.points) < 0 ||
-          isNaN(Number(form.expireDays)) || Number(form.expireDays) < 0) {
-        toast.error("积分数量和有效期不能为负数");
+      if (isNaN(Number(form.points)) || Number(form.points) < 0) {
+        toast.error("积分数量不能为负数");
         return;
       }
     }
@@ -254,7 +247,7 @@ export default function AdminProductsPage() {
             <TableRow>
               <TableHead>商品名称</TableHead>
               <TableHead>价格</TableHead>
-              <TableHead>{kind === "plans" ? "月度积分 / 附带加油包" : "积分数量 / 有效期"}</TableHead>
+              <TableHead>{kind === "plans" ? "VIP 每日积分 / 附带加油包" : "积分数量"}</TableHead>
               <TableHead>状态</TableHead>
               <TableHead className="text-right">操作</TableHead>
             </TableRow>
@@ -266,8 +259,8 @@ export default function AdminProductsPage() {
                 <TableCell>{money(row.price_amount, asString(row.price_currency || "CNY"))}</TableCell>
                 <TableCell>
                   {kind === "plans"
-                    ? `${asNumber(row.monthly_points)} / ${asNumber(row.bundled_topup_points)}`
-                    : `${asNumber(row.points)} / ${asNumber(row.expire_days)} 天`}
+                    ? `${asNumber(row.vip_daily_points)} / ${asNumber(row.bundled_credit_pack_points)}`
+                    : `${asNumber(row.points)}`}
                 </TableCell>
                 <TableCell><StatusBadge status={row.status} /></TableCell>
                 <TableCell className="text-right">
@@ -340,7 +333,7 @@ export default function AdminProductsPage() {
                 <Button variant="outline" onClick={resetFilters}>重置筛选</Button>
                 <TabsList className="grid w-full grid-cols-2 sm:w-72">
                   <TabsTrigger value="plans">套餐</TabsTrigger>
-                  <TabsTrigger value="topup-packs">加油包</TabsTrigger>
+                  <TabsTrigger value="credit-packs">加油包</TabsTrigger>
                 </TabsList>
               </div>
             </div>
@@ -350,10 +343,10 @@ export default function AdminProductsPage() {
                 <AdminPagination page={page} pageSize={pageSize} total={total} onPageChange={(nextPage) => void load("plans", nextPage)} />
               ) : null}
             </TabsContent>
-            <TabsContent value="topup-packs" className="mt-0">
-              {renderRows("topup-packs", activeKind === "topup-packs" ? rows : [])}
-              {activeKind === "topup-packs" ? (
-                <AdminPagination page={page} pageSize={pageSize} total={total} onPageChange={(nextPage) => void load("topup-packs", nextPage)} />
+            <TabsContent value="credit-packs" className="mt-0">
+              {renderRows("credit-packs", activeKind === "credit-packs" ? rows : [])}
+              {activeKind === "credit-packs" ? (
+                <AdminPagination page={page} pageSize={pageSize} total={total} onPageChange={(nextPage) => void load("credit-packs", nextPage)} />
               ) : null}
             </TabsContent>
           </Tabs>
@@ -372,13 +365,12 @@ export default function AdminProductsPage() {
               <Field><FieldLabel htmlFor="product-price">价格</FieldLabel><Input id="product-price" value={form.priceAmount} onChange={(event) => setForm({ ...form, priceAmount: event.target.value })} /></Field>
               {form.kind === "plans" ? (
                 <>
-                  <Field><FieldLabel htmlFor="product-monthly-points">月度积分</FieldLabel><Input id="product-monthly-points" inputMode="numeric" value={form.monthlyPoints} onChange={(event) => setForm({ ...form, monthlyPoints: event.target.value })} /></Field>
-                  <Field><FieldLabel htmlFor="product-bundled-topup-points">附带加油包积分</FieldLabel><Input id="product-bundled-topup-points" inputMode="numeric" value={form.bundledTopupPoints} onChange={(event) => setForm({ ...form, bundledTopupPoints: event.target.value })} /></Field>
+                  <Field><FieldLabel htmlFor="product-vip-daily-points">VIP 每日积分</FieldLabel><Input id="product-vip-daily-points" inputMode="numeric" value={form.vipDailyPoints} onChange={(event) => setForm({ ...form, vipDailyPoints: event.target.value })} /></Field>
+                  <Field><FieldLabel htmlFor="product-bundled-credit-pack-points">附带加油包积分</FieldLabel><Input id="product-bundled-credit-pack-points" inputMode="numeric" value={form.bundledCreditPackPoints} onChange={(event) => setForm({ ...form, bundledCreditPackPoints: event.target.value })} /></Field>
                 </>
               ) : (
                 <>
                   <Field><FieldLabel htmlFor="product-points">积分数量</FieldLabel><Input id="product-points" inputMode="numeric" value={form.points} onChange={(event) => setForm({ ...form, points: event.target.value })} /></Field>
-                  <Field><FieldLabel htmlFor="product-expire-days">有效期天数</FieldLabel><Input id="product-expire-days" inputMode="numeric" value={form.expireDays} onChange={(event) => setForm({ ...form, expireDays: event.target.value })} /></Field>
                 </>
               )}
               <Field>

@@ -169,8 +169,8 @@ export default function AdminUsersPage() {
               </div>
               <div className="grid grid-cols-2 gap-3 rounded-lg bg-muted/30 p-4">
                 <span className="text-muted-foreground">当前订阅</span><span>{detail.subscription ? detail.subscription.id : "无订阅"}</span>
-                <span className="text-muted-foreground">月度积分</span><span>{detail.points.monthlyPoints}</span>
-                <span className="text-muted-foreground">加油包积分</span><span>{detail.points.topupPoints}</span>
+                <span className="text-muted-foreground">VIP 每日积分</span><span>{detail.points.vipDailyPoints}</span>
+                <span className="text-muted-foreground">加油包积分</span><span>{detail.points.creditPackPoints}</span>
                 <span className="text-muted-foreground">总积分</span><span>{detail.points.totalPoints}</span>
               </div>
               {detail.subscription ? (

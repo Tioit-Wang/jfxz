@@ -37,7 +37,6 @@ import {
   type ApiSuggestion,
   type BillingOrder,
   type BillingProducts,
-  type ChatAction,
   type ChatMention,
   type ChatMessage,
   type ChatReference,
@@ -84,13 +83,6 @@ type CharacterDraft = { name: string; summary: string; detail: string };
 type SettingMode = "detail" | "create" | "edit";
 type SettingStatus = "ready" | "saving" | "deleting" | "error";
 type SettingDraft = { name: string; summary: string; detail: string; type: string };
-type PendingAction = {
-  action: ChatAction;
-  name: string;
-  summary: string;
-  detail: string;
-};
-
 const RECENT_REF_KEY = "jfxz-recent-references";
 const CHAT_MODEL_KEY = "jfxz-chat-model";
 const WORKSPACE_LAYOUT_PANEL_IDS = ["workspace-sidebar", "workspace-editor", "workspace-chat"] as const;
@@ -168,6 +160,7 @@ function formatUpdatedAt(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
@@ -175,16 +168,23 @@ function formatUpdatedAt(value: string): string {
   }).format(date);
 }
 
-function actionDraft(action: ChatAction, content: string): { name: string; summary: string; detail: string } {
-  const summary = truncate(content.replace(/\s+/g, " "), 90);
-  if (action.type === "save_character") return { name: "新角色草稿", summary, detail: content };
-  if (action.type === "save_setting") return { name: "新设定草稿", summary, detail: content };
-  if (action.type === "update_work_info") return { name: "shortIntro", summary, detail: content };
-  return { name: "summary", summary, detail: content };
-}
 
-function runActionLabel(action: ChatAction): string {
-  return action.type === "update_work_info" ? "写回短简介" : action.label;
+const TOOL_LABELS: Record<string, string> = {
+  get_character: "查询角色",
+  list_characters: "列出角色",
+  create_or_update_character: "创建角色",
+  get_setting: "查询设定",
+  list_settings: "列出设定",
+  create_or_update_setting: "创建设定",
+  get_chapter: "查询章节",
+  list_chapters: "列出章节",
+  update_chapter_summary: "更新提要",
+  get_work_info: "查看作品",
+  update_work_info: "更新作品",
+};
+
+function toolLabel(toolName: string): string {
+  return TOOL_LABELS[toolName] ?? toolName;
 }
 
 function referenceTone(type: ChatReference["type"]): string {
@@ -206,6 +206,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const router = useRouter();
   const client = useMemo(() => new ApiClient(), []);
   const chatInputRef = useRef<ChatMentionInputHandle | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const workspaceGroupRef = useGroupRef();
   const workspaceSidebarRef = usePanelRef();
   const workspaceEditorRef = usePanelRef();
@@ -240,7 +241,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [nextBefore, setNextBefore] = useState<string | null>(null);
   const [chatInput, setChatInput] = useState("");
-  const [chatStatus, setChatStatus] = useState<"loading" | "ready" | "streaming" | "error" | "no_points">("loading");
+  const [chatStatus, setChatStatus] = useState<"loading" | "ready" | "streaming" | "error" | "no_points" | "idle">("loading");
   const [showHistory, setShowHistory] = useState(false);
   const [pendingReferences, setPendingReferences] = useState<ChatReference[]>([]);
   const [chatMentions, setChatMentions] = useState<ChatMention[]>([]);
@@ -248,8 +249,10 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const [aiModels, setAiModels] = useState<AiModelOption[]>([]);
   const [selectedModelId, setSelectedModelId] = useState("");
   const [modelStatus, setModelStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [actionNotice, setActionNotice] = useState("");
-  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+
+  const [activeToolCalls, setActiveToolCalls] = useState<string[]>([]);
+  const [toolResults, setToolResults] = useState<{ tool: string; display: string; result: string }[]>([]);
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
 
   const [characterSearch, setCharacterSearch] = useState("");
   const [activeCharacterId, setActiveCharacterId] = useState("");
@@ -275,7 +278,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const [nicknameDraft, setNicknameDraft] = useState("");
   const [accountStatus, setAccountStatus] = useState<"idle" | "loading" | "saving" | "error">("idle");
   const [billingOpen, setBillingOpen] = useState(false);
-  const [billingProducts, setBillingProducts] = useState<BillingProducts>({ plans: [], topupPacks: [] });
+  const [billingProducts, setBillingProducts] = useState<BillingProducts>({ plans: [], creditPacks: [] });
   const [billingOrder, setBillingOrder] = useState<BillingOrder | null>(null);
   const [billingStatus, setBillingStatus] = useState<"idle" | "loading" | "creating" | "paid" | "error">("idle");
   const [workspaceDefaultLayout, setWorkspaceDefaultLayout] = useState<Layout | undefined>(() => readWorkspaceLayout(bookId));
@@ -783,7 +786,12 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
 
   async function sendMessage() {
     const message = chatInput;
-    if (!message.trim() || chatStatus === "streaming" || !selectedModelId) return;
+    if (!message.trim() || !selectedModelId) return;
+    if (chatStatus === "streaming") {
+      abortRef.current?.abort();
+    }
+    const controller = new AbortController();
+    abortRef.current = controller;
     let sessionId = activeSessionId;
     if (!sessionId) {
       const session = await client.createChatSession(bookId);
@@ -803,6 +811,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       createdAt: new Date().toISOString()
     };
     const assistantId = `local-assistant-${Date.now()}`;
+    setStreamingMessageId(assistantId);
     const assistantDraft: ChatMessage = {
       id: assistantId,
       role: "assistant",
@@ -827,7 +836,18 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
             items.map((item) => (item.id === assistantId ? { ...item, content: `${item.content}${chunk}` } : item))
           );
         },
-        selectedModelId
+        selectedModelId,
+        (tool, status, data) => {
+          if (status === "started") {
+            setActiveToolCalls((prev) => prev.includes(tool) ? prev : [...prev, tool]);
+          } else {
+            setActiveToolCalls((prev) => prev.filter((t) => t !== tool));
+            if (data) {
+              setToolResults((prev) => [...prev, { tool, display: data.display ?? toolLabel(tool), result: data.result ?? "" }]);
+            }
+          }
+        },
+        controller.signal
       );
       setMessages((items) => items.map((item) => (item.id === assistantId ? final : item)));
       setSessions((items) =>
@@ -843,49 +863,18 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
         )
       );
       setChatStatus("ready");
+      setStreamingMessageId(null);
+      setActiveToolCalls([]);
+      setToolResults([]);
     } catch (error) {
-      setChatStatus(error instanceof ApiError && error.status === 402 ? "no_points" : "error");
-    }
-  }
-
-  function openMessageAction(action: ChatAction, message: ChatMessage) {
-    setPendingAction({ action, ...actionDraft(action, message.content) });
-    setActionNotice("");
-  }
-
-  async function confirmMessageAction() {
-    if (!pendingAction) return;
-    const { action, name, summary: draftSummary, detail } = pendingAction;
-    try {
-      if (action.type === "save_character") {
-        const created = await client.createCharacter(bookId, { name, summary: draftSummary, detail });
-        setCharacters((items) => [created, ...items]);
-        setActionNotice(`已保存角色：${created.name}`);
-      } else if (action.type === "save_setting") {
-        const created = await client.createSetting(bookId, { name, summary: draftSummary, detail, type: "other" });
-        setSettings((items) => [created, ...items]);
-        setActionNotice(`已保存设定：${created.name}`);
-      } else if (action.type === "update_chapter_summary" && activeChapter) {
-        const updated = await client.updateChapter(bookId, { ...activeChapter, summary: draftSummary });
-        setChapters((items) => items.map((chapter) => (chapter.id === updated.id ? updated : chapter)));
-        setSummary(updated.summary);
-        setActionNotice("已更新章节提要");
-      } else if (action.type === "update_work_info" && work) {
-        const nextWork = { ...work };
-        if (name === "synopsis") {
-          nextWork.synopsis = draftSummary;
-        } else if (name === "backgroundRules") {
-          nextWork.backgroundRules = draftSummary;
-        } else {
-          nextWork.shortIntro = draftSummary;
-        }
-        const updated = await client.updateWork(nextWork);
-        setWork(updated);
-        setActionNotice("已更新作品短简介");
+      setStreamingMessageId(null);
+      setActiveToolCalls([]);
+      setToolResults([]);
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setChatStatus("idle");
+        return;
       }
-      setPendingAction(null);
-    } catch {
-      setActionNotice("操作失败，请稍后重试");
+      setChatStatus(error instanceof ApiError && error.status === 402 ? "no_points" : "error");
     }
   }
 
@@ -1113,7 +1102,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     }
   }
 
-  async function createOrder(productType: "plan" | "topup_pack", productId: string) {
+  async function createOrder(productType: "plan" | "credit_pack", productId: string) {
     setBillingStatus("creating");
     try {
       setBillingOrder(await client.createBillingOrder(productType, productId));
@@ -1503,8 +1492,8 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
               <div className="h-1.5 rounded-full bg-primary" style={{ width: `${Math.min(100, ((profile?.points.totalPoints ?? 0) / 2000) * 100)}%` }} />
             </div>
             <div className="flex justify-between text-[10px] text-muted-foreground">
-              <span>月度: {profile?.points.monthlyPoints ?? 0}</span>
-              <span>加油包: {profile?.points.topupPoints ?? 0}</span>
+              <span>VIP 每日: {profile?.points.vipDailyPoints ?? 0}</span>
+              <span>加油包: {profile?.points.creditPackPoints ?? 0}</span>
             </div>
           </button>
         </div>
@@ -1691,65 +1680,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                   发送失败，请稍后重试。
                 </div>
               ) : null}
-              {actionNotice ? <p className="animate-pop rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground shadow-sm">{actionNotice}</p> : null}
-
-              {pendingAction ? (
-                <div className="animate-pop rounded-xl border border-border bg-card p-4 shadow-sm">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <h3 className="text-sm font-semibold text-foreground">{pendingAction.action.label}</h3>
-                    <button className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700" onClick={() => setPendingAction(null)} aria-label="关闭确认层">
-                      <X size={15} />
-                    </button>
-                  </div>
-                  {pendingAction.action.type === "update_work_info" ? (
-                    <Select
-                      value={pendingAction.name}
-                      onValueChange={(value) => setPendingAction((current) => (current ? { ...current, name: value } : current))}
-                    >
-                      <SelectTrigger className="mb-3 w-full" aria-label="写回位置">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectGroup>
-                          <SelectItem value="shortIntro">短简介</SelectItem>
-                          <SelectItem value="synopsis">梗概</SelectItem>
-                          <SelectItem value="backgroundRules">背景规则</SelectItem>
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
-                  ) : pendingAction.action.type === "save_character" || pendingAction.action.type === "save_setting" ? (
-                    <Input
-                      className="mb-3 rounded-lg border-input"
-                      value={pendingAction.name}
-                      onChange={(event) => setPendingAction((value) => (value ? { ...value, name: event.target.value } : value))}
-                      aria-label="落库名称"
-                    />
-                  ) : null}
-                  <Textarea
-                    className="min-h-24 resize-none rounded-lg border-input"
-                    value={pendingAction.summary}
-                    onChange={(event) => setPendingAction((value) => (value ? { ...value, summary: event.target.value } : value))}
-                    aria-label="落库摘要"
-                  />
-                  {pendingAction.action.type === "save_character" || pendingAction.action.type === "save_setting" ? (
-                    <Textarea
-                      className="mt-3 min-h-24 resize-none rounded-lg border-input"
-                      value={pendingAction.detail}
-                      onChange={(event) => setPendingAction((value) => (value ? { ...value, detail: event.target.value } : value))}
-                      aria-label="落库详情"
-                    />
-                  ) : null}
-                  <div className="mt-3 flex justify-end gap-2">
-                    <Button variant="secondary" className="rounded-lg" onClick={() => setPendingAction(null)}>
-                      取消
-                    </Button>
-                    <Button className="rounded-lg" onClick={() => void confirmMessageAction()}>
-                      <Save size={15} />
-                      确认保存
-                    </Button>
-                  </div>
-                </div>
-              ) : null}
 
               {messages.map((message) => (
                 <div key={message.id} className={cn("animate-pop flex w-full", message.role === "user" ? "justify-end" : "justify-start")}>
@@ -1762,18 +1692,35 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                     )}
                   >
                     {renderMessageContent(message)}
-                    {message.role === "assistant" && message.actions.length ? (
-                      <div className="mt-3 flex flex-wrap gap-1.5">
-                        {message.actions.map((action) => (
-                          <button
-                            key={action.type}
-                            className="inline-flex items-center gap-1 rounded-full border border-border bg-secondary px-2.5 py-1 text-xs font-medium text-secondary-foreground hover:bg-secondary/80"
-                            onClick={() => openMessageAction(action, message)}
-                          >
-                            <Check size={13} />
-                            {runActionLabel(action)}
-                          </button>
+                    {message.role === "assistant" && message.id === streamingMessageId && activeToolCalls.length > 0 && chatStatus === "streaming" ? (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {activeToolCalls.map((tool) => (
+                          <span key={tool} className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-600">
+                            <Loader2 size={12} className="animate-spin" />
+                            {toolLabel(tool)}
+                          </span>
                         ))}
+                      </div>
+                    ) : null}
+                    {message.role === "assistant" && message.id === streamingMessageId && toolResults.length > 0 ? (
+                      <div className="mt-2 space-y-1.5">
+                        {toolResults.map((result, index) => (
+                          <div key={`tool-result-${index}`} className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs">
+                            <div className="flex items-center gap-1 font-medium text-green-700">
+                              <Check size={12} />
+                              {result.display || toolLabel(result.tool)}
+                            </div>
+                            {result.result ? (
+                              <p className="mt-1 text-green-600 line-clamp-3">{result.result.length > 200 ? `${result.result.slice(0, 200)}...` : result.result}</p>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                    {message.role === "assistant" && message.billing_failed ? (
+                      <div className="mt-2 flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-700">
+                        <AlertCircle size={12} className="shrink-0" />
+                        计费异常，请联系管理员
                       </div>
                     ) : null}
                   </div>
@@ -1823,6 +1770,20 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
               </div>
 
               {/* Input area */}
+              {chatStatus === "streaming" && (
+                <div className="flex justify-center border-t border-gray-100 px-4 py-2">
+                  <button
+                    className="flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-100"
+                    onClick={() => {
+                      abortRef.current?.abort();
+                      setChatStatus("idle");
+                    }}
+                  >
+                    <X size={12} />
+                    停止生成
+                  </button>
+                </div>
+              )}
               <ChatMentionInput
                 ref={chatInputRef}
                 valueText={chatInput}
@@ -2107,12 +2068,12 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                 <p className="font-semibold">{profile?.points.totalPoints ?? 0}</p>
               </div>
               <div>
-                <p className="text-xs text-muted-foreground">月度</p>
-                <p className="font-semibold">{profile?.points.monthlyPoints ?? 0}</p>
+                <p className="text-xs text-muted-foreground">VIP 每日</p>
+                <p className="font-semibold">{profile?.points.vipDailyPoints ?? 0}</p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">加油包</p>
-                <p className="font-semibold">{profile?.points.topupPoints ?? 0}</p>
+                <p className="font-semibold">{profile?.points.creditPackPoints ?? 0}</p>
               </div>
             </div>
             {accountStatus === "error" ? <FieldError>账户信息保存失败，请稍后重试</FieldError> : null}
@@ -2139,7 +2100,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
             {billingStatus === "loading" ? <p className="py-8 text-center text-sm text-muted-foreground">商品加载中...</p> : null}
             {billingStatus === "error" ? <p className="rounded-lg border bg-muted p-3 text-sm text-muted-foreground">计费请求失败，请稍后重试。</p> : null}
             <div className="grid gap-3 md:grid-cols-2">
-              {[...billingProducts.plans.map((item) => ({ ...item, productType: "plan" as const })), ...billingProducts.topupPacks.map((item) => ({ ...item, productType: "topup_pack" as const }))].map((item) => (
+              {[...billingProducts.plans.map((item) => ({ ...item, productType: "plan" as const })), ...billingProducts.creditPacks.map((item) => ({ ...item, productType: "credit_pack" as const }))].map((item) => (
                 <div key={item.id} className="rounded-lg border bg-card p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -2150,8 +2111,8 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                   </div>
                   <p className="mt-3 text-sm text-muted-foreground">
                     {item.productType === "plan"
-                      ? `月度 ${item.monthlyPoints} 点，附带加油包 ${item.bundledTopupPoints} 点`
-                      : `${item.points} 点，有效期 ${item.expireDays} 天`}
+                      ? `VIP 每日 ${item.vipDailyPoints} 点，附赠积分包 ${item.bundledCreditPackPoints} 点`
+                      : `${item.points} 点（永久有效）`}
                   </p>
                   <Button className="mt-4 w-full" size="sm" onClick={() => void createOrder(item.productType, item.id)} disabled={billingStatus === "creating"}>
                     {billingStatus === "creating" ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Zap data-icon="inline-start" />}

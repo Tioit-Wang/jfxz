@@ -102,6 +102,7 @@ export type ChatMessage = {
   references: ChatReference[];
   actions: ChatAction[];
   createdAt: string;
+  billing_failed?: boolean;
 };
 
 export type ChatMessagePage = {
@@ -130,8 +131,8 @@ export type ApiUser = {
 };
 
 export type PointAccount = {
-  monthlyPoints: number;
-  topupPoints: number;
+  vipDailyPoints: number;
+  creditPackPoints: number;
   totalPoints: number;
 };
 
@@ -153,28 +154,27 @@ export type BillingProduct = {
   id: string;
   name: string;
   priceAmount: string;
-  monthlyPoints: number;
-  bundledTopupPoints: number;
+  vipDailyPoints: number;
+  bundledCreditPackPoints: number;
   points: number;
-  expireDays: number;
 };
 
 export type BillingProducts = {
   plans: BillingProduct[];
-  topupPacks: BillingProduct[];
+  creditPacks: BillingProduct[];
 };
 
 export type BillingOrder = {
   id: string;
   orderNo: string;
-  productType: "plan" | "topup_pack";
+  productType: "plan" | "credit_pack";
   productName: string;
   amount: string;
   status: string;
   qrCode: string;
 };
 
-export type AdminProductKind = "plans" | "topup-packs";
+export type AdminProductKind = "plans" | "credit-packs";
 
 export type AdminListParams = {
   q?: string;
@@ -187,10 +187,9 @@ export type AdminListParams = {
 export type AdminProductInput = {
   name: string;
   priceAmount: string;
-  monthlyPoints?: number;
-  bundledTopupPoints?: number;
+  vipDailyPoints?: number;
+  bundledCreditPackPoints?: number;
   points?: number;
-  expireDays?: number;
   status: string;
   sortOrder?: number | null;
 };
@@ -271,13 +270,55 @@ export type AdminOrder = {
   order_no: string;
   user_id: string;
   user_email?: string;
-  product_type: "plan" | "topup_pack";
+  product_type: "plan" | "credit_pack";
   product_name_snapshot: string;
   amount: string;
   currency: string;
   status: string;
   created_at: string;
   paid_at: string | null;
+};
+
+export type AdminCreditTransaction = {
+  id: string;
+  created_at: string;
+  user_id: string;
+  user_email?: string;
+  balance_type: "vip_daily" | "credit_pack";
+  change_type: "grant" | "consume" | "expire" | "refund" | "adjust";
+  source_type: string;
+  source_id?: string;
+  work_id?: string;
+  work_title?: string;
+  model_id?: string;
+  model_name_snapshot?: string;
+  cache_hit_input_tokens?: number;
+  cache_miss_input_tokens?: number;
+  output_tokens?: number;
+  cache_hit_input_multiplier_snapshot?: string;
+  cache_miss_input_multiplier_snapshot?: string;
+  output_multiplier_snapshot?: string;
+  platform_call_id?: string;
+  points_change: number;
+  points_after: number;
+  order_id?: string;
+  product_name_snapshot?: string;
+  product_type?: string;
+};
+
+export type CreditTransactionListParams = {
+  q?: string;
+  balance_type?: string;
+  change_type?: string;
+  source_type?: string;
+  model_id?: string;
+  work_id?: string;
+  points_min?: number;
+  points_max?: number;
+  time_from?: string;
+  time_to?: string;
+  page?: number;
+  pageSize?: number;
 };
 
 export type AdminSubscription = {
@@ -410,40 +451,38 @@ export function mapChatSession(session: ApiChatSession): ChatSession {
 }
 
 function mapPoints(item: {
-  monthly_points_balance?: number;
-  topup_points_balance?: number;
-  monthlyPoints?: number;
-  topupPoints?: number;
+  vip_daily_points_balance?: number;
+  credit_pack_points_balance?: number;
+  vipDailyPoints?: number;
+  creditPackPoints?: number;
 }): PointAccount {
-  const monthlyPoints = item.monthly_points_balance ?? item.monthlyPoints ?? 0;
-  const topupPoints = item.topup_points_balance ?? item.topupPoints ?? 0;
-  return { monthlyPoints, topupPoints, totalPoints: monthlyPoints + topupPoints };
+  const vipDailyPoints = item.vip_daily_points_balance ?? item.vipDailyPoints ?? 0;
+  const creditPackPoints = item.credit_pack_points_balance ?? item.creditPackPoints ?? 0;
+  return { vipDailyPoints, creditPackPoints, totalPoints: vipDailyPoints + creditPackPoints };
 }
 
 function mapProduct(item: {
   id: string;
   name: string;
   price_amount: string;
-  monthly_points?: number;
-  bundled_topup_points?: number;
+  daily_vip_points?: number;
+  bundled_credit_pack_points?: number;
   points?: number;
-  expire_days?: number;
 }): BillingProduct {
   return {
     id: item.id,
     name: item.name,
     priceAmount: item.price_amount,
-    monthlyPoints: item.monthly_points ?? 0,
-    bundledTopupPoints: item.bundled_topup_points ?? 0,
+    vipDailyPoints: item.daily_vip_points ?? 0,
+    bundledCreditPackPoints: item.bundled_credit_pack_points ?? 0,
     points: item.points ?? 0,
-    expireDays: item.expire_days ?? 30
   };
 }
 
 function mapOrder(item: {
   id: string;
   order_no: string;
-  product_type: "plan" | "topup_pack";
+  product_type: "plan" | "credit_pack";
   product_name_snapshot: string;
   amount: string;
   status: string;
@@ -464,10 +503,9 @@ function productPayload(input: AdminProductInput): Record<string, unknown> {
   return {
     name: input.name,
     price_amount: input.priceAmount,
-    monthly_points: input.monthlyPoints ?? 0,
-    bundled_topup_points: input.bundledTopupPoints ?? 0,
+    daily_vip_points: input.vipDailyPoints ?? 0,
+    bundled_credit_pack_points: input.bundledCreditPackPoints ?? 0,
     points: input.points ?? 0,
-    expire_days: input.expireDays ?? 30,
     status: input.status,
     sort_order: input.sortOrder ?? null
   };
@@ -500,6 +538,7 @@ function mapChatMessage(message: {
   references?: ChatReference[];
   actions?: ChatAction[];
   created_at: string;
+  billing_failed?: boolean;
 }): ChatMessage {
   return {
     id: message.id,
@@ -508,7 +547,8 @@ function mapChatMessage(message: {
     mentions: message.mentions ?? [],
     references: message.references ?? [],
     actions: message.actions ?? [],
-    createdAt: message.created_at
+    createdAt: message.created_at,
+    billing_failed: message.billing_failed
   };
 }
 
@@ -551,7 +591,7 @@ export class ApiClient {
   async getMe(): Promise<UserProfile> {
     const data = await this.request<{
       user: ApiUser;
-      points: { monthly_points_balance: number; topup_points_balance: number };
+      points: { vip_daily_points_balance: number; credit_pack_points_balance: number };
       subscription?: ApiSubscription | null;
     }>("/me");
     return { user: data.user, points: mapPoints(data.points), subscription: data.subscription ?? null };
@@ -625,7 +665,7 @@ export class ApiClient {
       };
       profile: {
         user: ApiUser;
-        points: { monthly_points_balance: number; topup_points_balance: number };
+        points: { vip_daily_points_balance: number; credit_pack_points_balance: number };
         subscription?: ApiSubscription | null;
       };
     }>(`/works/${workId}/workspace-bootstrap?${params}`, { method: "POST" });
@@ -792,12 +832,12 @@ export class ApiClient {
   async listBillingProducts(): Promise<BillingProducts> {
     const data = await this.request<{
       plans: Array<Parameters<typeof mapProduct>[0]>;
-      topup_packs: Array<Parameters<typeof mapProduct>[0]>;
+      credit_packs: Array<Parameters<typeof mapProduct>[0]>;
     }>("/billing/products");
-    return { plans: data.plans.map(mapProduct), topupPacks: data.topup_packs.map(mapProduct) };
+    return { plans: data.plans.map(mapProduct), creditPacks: data.credit_packs.map(mapProduct) };
   }
 
-  async createBillingOrder(productType: "plan" | "topup_pack", productId: string): Promise<BillingOrder> {
+  async createBillingOrder(productType: "plan" | "credit_pack", productId: string): Promise<BillingOrder> {
     const data = await this.request<Parameters<typeof mapOrder>[0]>("/billing/orders", {
       method: "POST",
       body: JSON.stringify({ product_type: productType, product_id: productId })
@@ -848,7 +888,7 @@ export class ApiClient {
   async getAdminUser(userId: string): Promise<UserProfile> {
     const data = await this.request<{
       user: ApiUser;
-      points: { monthly_points_balance: number; topup_points_balance: number };
+      points: { vip_daily_points_balance: number; credit_pack_points_balance: number };
       subscription?: ApiSubscription | null;
     }>(`/admin/users/${userId}`);
     return { user: data.user, points: mapPoints(data.points), subscription: data.subscription ?? null };
@@ -881,7 +921,7 @@ export class ApiClient {
 
   async listAdminProducts(): Promise<{
     plans: Array<Record<string, unknown>>;
-    topup_packs: Array<Record<string, unknown>>;
+    credit_packs: Array<Record<string, unknown>>;
   }> {
     return this.request("/admin/products");
   }
@@ -911,6 +951,27 @@ export class ApiClient {
 
   async deleteAdminProduct(kind: AdminProductKind, itemId: string): Promise<void> {
     await this.request<{ ok: boolean }>(`/admin/products/${kind}/${itemId}`, { method: "DELETE" });
+  }
+
+  async listAdminCreditTransactions(params: CreditTransactionListParams = {}): Promise<Paginated<AdminCreditTransaction>> {
+    const search = new URLSearchParams();
+    if (params.q) search.set("q", params.q);
+    if (params.balance_type) search.set("balance_type", params.balance_type);
+    if (params.change_type) search.set("change_type", params.change_type);
+    if (params.source_type) search.set("source_type", params.source_type);
+    if (params.model_id) search.set("model_id", params.model_id);
+    if (params.work_id) search.set("work_id", params.work_id);
+    if (params.points_min != null) search.set("points_min", String(params.points_min));
+    if (params.points_max != null) search.set("points_max", String(params.points_max));
+    if (params.time_from) search.set("time_from", params.time_from);
+    if (params.time_to) search.set("time_to", params.time_to);
+    if (params.page) search.set("page", String(params.page));
+    if (params.pageSize) search.set("page_size", String(params.pageSize));
+    return this.request<Paginated<AdminCreditTransaction>>(`/admin/credit-transactions${search.toString() ? `?${search}` : ""}`);
+  }
+
+  async getAdminCreditTransaction(id: string): Promise<AdminCreditTransaction> {
+    return this.request<AdminCreditTransaction>(`/admin/credit-transactions/${id}`);
   }
 
   async listAdminOrders(params: AdminListParams = {}): Promise<Paginated<AdminOrder>> {
@@ -1010,9 +1071,12 @@ export class ApiClient {
     references: ChatReference[],
     mentions: ChatMention[],
     onChunk: (chunk: string) => void,
-    modelId?: string
+    modelId?: string,
+    onToolCall?: (tool: string, status: "started" | "completed", data?: { display?: string; result?: string }) => void,
+    signal?: AbortSignal
   ): Promise<ChatMessage> {
     const response = await this.rawRequest(`/chat-sessions/${sessionId}/messages`, {
+      signal,
       method: "POST",
       body: JSON.stringify({ message, references, mentions, ...(modelId ? { model_id: modelId } : {}) })
     });
@@ -1039,6 +1103,15 @@ export class ApiClient {
         }
         if (event.event === "done") {
           finalMessage = mapChatMessage(JSON.parse(event.data));
+        } else if (event.event === "tool_call" || event.event === "tool_result") {
+          try {
+            const toolData = JSON.parse(event.data);
+            if (onToolCall && toolData.tool) {
+              onToolCall(toolData.tool, toolData.status, event.event === "tool_result" ? { display: toolData.display, result: toolData.result } : undefined);
+            }
+          } catch {
+            // Ignore malformed tool events
+          }
         } else {
           onChunk(event.data);
         }
@@ -1049,6 +1122,15 @@ export class ApiClient {
       const event = parseSseEvent(buffer);
       if (event.event === "done" && event.data) {
         finalMessage = mapChatMessage(JSON.parse(event.data));
+      } else if (event.event === "tool_call" || event.event === "tool_result") {
+        try {
+          const toolData = JSON.parse(event.data!);
+          if (onToolCall && toolData.tool) {
+            onToolCall(toolData.tool, toolData.status, event.event === "tool_result" ? { display: toolData.display, result: toolData.result } : undefined);
+          }
+        } catch {
+          // Ignore malformed tool events
+        }
       }
     }
 

@@ -10,6 +10,7 @@ import {
   LogOut,
   MessageSquareText,
   Package,
+  Receipt,
   Settings2,
   Users,
 } from "lucide-react";
@@ -43,6 +44,7 @@ const menu = [
       { title: "订单", url: "/admin/orders", icon: CreditCard },
       { title: "订阅", url: "/admin/subscriptions", icon: FileClock },
       { title: "会话", url: "/admin/sessions", icon: MessageSquareText },
+      { title: "积分流水", url: "/admin/credit-transactions", icon: Receipt },
     ],
   },
   {

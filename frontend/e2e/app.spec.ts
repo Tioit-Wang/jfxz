@@ -87,7 +87,7 @@ async function grantPoints(page: Page) {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
-      body: JSON.stringify({ product_type: "topup_pack", product_id: products.topup_packs[0].id })
+      body: JSON.stringify({ product_type: "credit_pack", product_id: products.credit_packs[0].id })
     }).then((response) => response.json());
     await fetch(`${apiBase}/billing/orders/${order.id}/simulate-paid`, {
       method: "POST",

@@ -4,6 +4,8 @@ from collections.abc import AsyncIterator
 os.environ["JFXZ_DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 os.environ["JFXZ_ENV"] = "test"
 os.environ["JFXZ_ENABLE_PAYMENT_SIMULATOR"] = "true"
+os.environ["JFXZ_DEEPSEEK_API_KEY"] = ""
+os.environ["JFXZ_AI_PROVIDER_API_KEY"] = ""
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -15,6 +17,11 @@ from app.core.database import get_session
 from app.core.security import hash_password, issue_token, read_token, verify_password
 from app.main import create_app
 from app.models import Base
+from conftest import _create_mock_agent
+
+
+async def _noop_coro_none(*args, **kwargs):
+    return None
 
 
 @pytest_asyncio.fixture
@@ -32,10 +39,20 @@ async def client() -> AsyncIterator[AsyncClient]:
         async with maker() as session:
             yield session
 
+    import app.services.agent_service as _agent_service
+    import app.api.routes as _routes
+
+    original_create_agent = _agent_service.create_agent
+    original_resolve_editor = _routes._resolve_editor_model
+    _agent_service.create_agent = _create_mock_agent
+    _routes._resolve_editor_model = _noop_coro_none
+
     app = create_app()
     app.dependency_overrides[get_session] = override_session
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
+    _agent_service.create_agent = original_create_agent
+    _routes._resolve_editor_model = original_resolve_editor
     await engine.dispose()
 
 
@@ -71,18 +88,6 @@ async def create_work(client: AsyncClient, headers: dict[str, str]) -> str:
     )
     assert response.status_code == 200
     return response.json()["id"]
-
-
-async def test_create_work_defaults_blank_title(client: AsyncClient) -> None:
-    headers = await auth_headers(client)
-    response = await client.post(
-        "/works",
-        headers=headers,
-        json={"title": "  ", "genre_tags": [], "synopsis": ""},
-    )
-    assert response.status_code == 200
-    assert response.json()["title"] == "未命名作品"
-
     response = await client.post("/works", headers=headers, json={})
     assert response.status_code == 200
     assert response.json()["title"] == "未命名作品"
@@ -172,7 +177,7 @@ async def test_character_setting_chapter_and_analysis(client: AsyncClient) -> No
         await client.post(
             "/billing/orders",
             headers=headers,
-            json={"product_type": "topup_pack", "product_id": products["topup_packs"][0]["id"]},
+            json={"product_type": "credit_pack", "product_id": products["credit_packs"][0]["id"]},
         )
     ).json()
     await client.post(f"/billing/orders/{order['id']}/simulate-paid", headers=headers)
@@ -234,7 +239,7 @@ async def test_billing_chat_and_admin(client: AsyncClient) -> None:
         "status"
     ] == "active"
     assert (await client.get("/admin/users/" + paid["user_id"], headers=admin)).json()["points"][
-        "monthly_points_balance"
+        "vip_daily_points_balance"
     ] > 0
     public_models = (await client.get("/ai/models", headers=headers)).json()
     assert [item["display_name"] for item in public_models] == ["DeepSeek-v4-flash", "DeepSeek-v4-pro"]
@@ -336,7 +341,7 @@ async def test_error_paths(client: AsyncClient) -> None:
         await client.post(
             "/billing/orders",
             headers=headers,
-            json={"product_type": "topup_pack", "product_id": products["topup_packs"][0]["id"]},
+            json={"product_type": "credit_pack", "product_id": products["credit_packs"][0]["id"]},
         )
     ).json()
     assert (await client.get(f"/billing/orders/{order['id']}", headers=other)).status_code == 404

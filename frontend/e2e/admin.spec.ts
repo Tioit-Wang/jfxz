@@ -179,7 +179,7 @@ async function seedBusinessData(page: Page) {
 
       const products = await request<{
         plans: Array<{ id: string; name: string }>;
-        topup_packs: Array<{ id: string; name: string }>;
+        credit_packs: Array<{ id: string; name: string }>;
       }>("/billing/products");
       const order = await request<{ id: string; order_no: string; product_name_snapshot: string }>("/billing/orders", {
         method: "POST",

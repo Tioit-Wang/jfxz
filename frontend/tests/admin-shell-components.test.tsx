@@ -60,7 +60,7 @@ describe("admin block shell components", () => {
                 role: "admin",
                 status: "active",
               },
-              points: { monthlyPoints: 0, topupPoints: 0, totalPoints: 0 },
+              points: { vipDailyPoints: 0, creditPackPoints: 0, totalPoints: 0 },
               subscription: null,
             }}
           >

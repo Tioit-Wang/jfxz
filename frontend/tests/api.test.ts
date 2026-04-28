@@ -132,13 +132,13 @@ describe("api client", () => {
       .mockResolvedValueOnce(
         jsonResponse({
           user: { id: "u1", email: "a@example.com", nickname: "A", role: "user", status: "active" },
-          points: { monthlyPoints: 10, topupPoints: 5 }
+          points: { vipDailyPoints: 10, creditPackPoints: 5 }
         })
       )
       .mockResolvedValueOnce(
         jsonResponse({
           user: { id: "u1", email: "a@example.com", nickname: "A", role: "user", status: "active" },
-          points: { monthly_points_balance: 0, topup_points_balance: 0 },
+          points: { vip_daily_points_balance: 0, credit_pack_points_balance: 0 },
           subscription: { id: "sub-1", plan_id: "plan-1", start_at: "1", end_at: "2", next_renew_at: "3" }
         })
       )
@@ -152,7 +152,7 @@ describe("api client", () => {
       .mockResolvedValueOnce(
         jsonResponse({
           plans: [{ id: "plan-1", name: "专业版", price_amount: "29.00", monthly_points: 100, bundled_topup_points: 20 }],
-          topup_packs: [{ id: "pack-1", name: "加油包", price_amount: "9.00", points: 50 }]
+          credit_packs: [{ id: "pack-1", name: "加油包", price_amount: "9.00", points: 50 }]
         })
       )
       .mockResolvedValueOnce(
@@ -271,8 +271,8 @@ describe("api client", () => {
     await expect(client.getMe()).resolves.toMatchObject({ points: { totalPoints: 0 }, subscription: null });
     await expect(client.updateMe("B")).resolves.toMatchObject({ nickname: "B" });
     await expect(client.listBillingProducts()).resolves.toMatchObject({
-      plans: [{ id: "plan-1", monthlyPoints: 100, bundledTopupPoints: 20 }],
-      topupPacks: [{ id: "pack-1", points: 50, expireDays: 30 }]
+      plans: [{ id: "plan-1", vipDailyPoints: 100, bundledCreditPackPoints: 20 }],
+      creditPacks: [{ id: "pack-1", points: 50 }]
     });
     await expect(client.createBillingOrder("plan", "plan-1")).resolves.toMatchObject({ id: "order-1", qrCode: "qr" });
     await expect(client.getBillingOrder("order-1")).resolves.toMatchObject({ id: "order-1", qrCode: "" });
@@ -321,7 +321,7 @@ describe("api client", () => {
         },
         profile: {
           user: { id: "u1", email: "a@example.com", nickname: "A", role: "user", status: "active" },
-          points: { monthly_points_balance: 1, topup_points_balance: 2 },
+          points: { vip_daily_points_balance: 1, credit_pack_points_balance: 2 },
           subscription: null
         }
       })
@@ -396,6 +396,76 @@ describe("api client", () => {
       mentions: [],
       model_id: "model-1"
     });
+  });
+
+  it("streams tool_call and tool_result events to onToolCall callback", async () => {
+    const final = {
+      id: "a2",
+      role: "assistant",
+      content: "已查询角色。",
+      references: [],
+      actions: [{ type: "save_character", label: "保存为角色" }],
+      created_at: "now"
+    };
+    const stream = new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder();
+        controller.enqueue(encoder.encode("data: 正在\n\n"));
+        controller.enqueue(encoder.encode("event: tool_call\ndata: " + JSON.stringify({ tool: "list_characters", status: "started" }) + "\n\n"));
+        controller.enqueue(encoder.encode("event: tool_result\ndata: " + JSON.stringify({ tool: "list_characters", status: "completed" }) + "\n\n"));
+        controller.enqueue(encoder.encode("data: 查询角色。\n\nevent: done\ndata: " + JSON.stringify(final) + "\n\n"));
+        controller.close();
+      }
+    });
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(stream, { status: 200 }));
+    const client = new ApiClient("http://api", fetcher);
+    const chunks: string[] = [];
+    const toolCalls: Array<{ tool: string; status: string }> = [];
+
+    const result = await client.streamChatMessage(
+      "s1",
+      "列出角色",
+      [],
+      [],
+      (chunk) => chunks.push(chunk),
+      undefined,
+      (tool, status) => toolCalls.push({ tool, status })
+    );
+
+    expect(result).toMatchObject({ id: "a2", content: "已查询角色。" });
+    expect(chunks).toEqual(["正在", "查询角色。"]);
+    expect(toolCalls).toEqual([
+      { tool: "list_characters", status: "started" },
+      { tool: "list_characters", status: "completed" }
+    ]);
+  });
+
+  it("ignores malformed tool_call events gracefully", async () => {
+    const final = {
+      id: "a3",
+      role: "assistant",
+      content: "ok",
+      references: [],
+      actions: [],
+      created_at: "now"
+    };
+    const stream = new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder();
+        controller.enqueue(encoder.encode("event: tool_call\ndata: not-json\n\n"));
+        controller.enqueue(encoder.encode("event: done\ndata: " + JSON.stringify(final) + "\n\n"));
+        controller.close();
+      }
+    });
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(stream, { status: 200 }));
+    const client = new ApiClient("http://api", fetcher);
+    const toolCalls: Array<{ tool: string; status: string }> = [];
+
+    const result = await client.streamChatMessage(
+      "s1", "hi", [], [], vi.fn(), undefined, (tool, status) => toolCalls.push({ tool, status })
+    );
+    expect(result).toMatchObject({ id: "a3" });
+    expect(toolCalls).toEqual([]);
   });
 
   it("handles chat pagination, empty sse events, and missing stream bodies", async () => {
@@ -511,10 +581,9 @@ describe("api client", () => {
     const productInput = {
       name: "专业版",
       priceAmount: "29.00",
-      monthlyPoints: 100,
-      bundledTopupPoints: 20,
+      vipDailyPoints: 100,
+      bundledCreditPackPoints: 20,
       points: 50,
-      expireDays: 30,
       status: "active",
       sortOrder: 1
     };
@@ -524,9 +593,9 @@ describe("api client", () => {
       .mockResolvedValueOnce(jsonResponse({ user: admin }))
       .mockResolvedValueOnce(jsonResponse({ ok: true }))
       .mockResolvedValueOnce(jsonResponse({ items: [user], total: 1, page: 1, page_size: 20 }))
-      .mockResolvedValueOnce(jsonResponse({ user, points: { monthly_points_balance: 2, topup_points_balance: 3 } }))
+      .mockResolvedValueOnce(jsonResponse({ user, points: { vip_daily_points_balance: 2, credit_pack_points_balance: 3 } }))
       .mockResolvedValueOnce(jsonResponse({ ...user, nickname: "B" }))
-      .mockResolvedValueOnce(jsonResponse({ plans: [], topup_packs: [] }))
+      .mockResolvedValueOnce(jsonResponse({ plans: [], credit_packs: [] }))
       .mockResolvedValueOnce(jsonResponse({ id: "plan-1" }))
       .mockResolvedValueOnce(jsonResponse({ id: "plan-1", name: "专业版改" }))
       .mockResolvedValueOnce(jsonResponse({ ok: true }))
@@ -643,7 +712,7 @@ describe("api client", () => {
     await expect(client.listAdminUsers("a@")).resolves.toMatchObject({ total: 1, items: [user] });
     await expect(client.getAdminUser("u1")).resolves.toMatchObject({ points: { totalPoints: 5 } });
     await expect(client.updateAdminUser("u1", { nickname: "B", status: "active" })).resolves.toMatchObject({ nickname: "B" });
-    await expect(client.listAdminProducts()).resolves.toEqual({ plans: [], topup_packs: [] });
+    await expect(client.listAdminProducts()).resolves.toEqual({ plans: [], credit_packs: [] });
     await expect(client.createAdminProduct("plans", productInput)).resolves.toMatchObject({ id: "plan-1" });
     await expect(client.updateAdminProduct("plans", "plan-1", productInput)).resolves.toMatchObject({ name: "专业版改" });
     await expect(client.deleteAdminProduct("plans", "plan-1")).resolves.toBeUndefined();

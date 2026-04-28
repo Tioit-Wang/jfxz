@@ -7,6 +7,7 @@ import sys
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 import pytest_asyncio
@@ -31,6 +32,7 @@ from app.api.routes import (
     RegisterIn,
     UserPatch,
     WorkIn,
+    _tool_action,
     active_ai_models,
     admin_configs,
     admin_create_model,
@@ -52,9 +54,7 @@ from app.api.routes import (
     admin_user_detail,
     admin_users,
     analyze_chapter,
-    assistant_actions,
     billing_products,
-    build_reply,
     client_ip,
     confirm_verified_payment,
     create_chapter,
@@ -100,6 +100,15 @@ from app.api.routes import (
     update_work,
     workspace_bootstrap,
 )
+from conftest import _create_mock_agent
+
+# Save real function reference before autouse fixture replaces it
+_real_resolve_editor_model = routes_module._resolve_editor_model
+
+
+async def _noop_coro_none(*args, **kwargs):
+    return None
+from agno.run.agent import RunEvent
 from app.core.config import Settings, get_settings
 from app.core.database import get_session, init_database
 from app.core.security import (
@@ -124,7 +133,7 @@ from app.models import (
     Plan,
     PointTransaction,
     SettingItem,
-    TopupPack,
+    CreditPack,
     User,
     UserSubscription,
     Work,
@@ -138,6 +147,16 @@ from app.scripts.create_admin import (
 from app.scripts.create_admin import (
     main as create_admin_main,
 )
+
+
+@pytest_asyncio.fixture(autouse=True)
+def _mock_agno_agent(monkeypatch: pytest.MonkeyPatch):
+    import app.services.agent_service as _agent_service
+    import app.api.routes as _routes
+
+    monkeypatch.setattr(_agent_service, "create_agent", _create_mock_agent)
+    # Return None so analyze_chapter uses legacy fixed-cost path in tests
+    monkeypatch.setattr(_routes, "_resolve_editor_model", _noop_coro_none)
 
 
 @pytest_asyncio.fixture
@@ -397,11 +416,15 @@ async def test_chat_helpers_and_error_branches(session: AsyncSession) -> None:
     )
     assert page["messages"][0]["id"] == "m2"
     assert page["has_more"] is True
-    assert assistant_actions("作品简介")[0]["type"] == "update_work_info"
-    assert assistant_actions("随便聊聊")[0]["type"] == "update_chapter_summary"
+    assert _tool_action("update_work_info") == {"type": "update_work_info", "label": "更新作品信息"}
+    assert _tool_action("create_or_update_character") == {"type": "save_character", "label": "保存为角色"}
+    assert _tool_action("nonexistent") is None
     assert "event: done" in encode_sse("done", {"ok": True}).decode()
     assert "data: 文本" in encode_sse(None, "文本").decode()
-    assert "当前作品与当前章节" in build_reply(await session.get(Work, work_id), "问题", [], [])
+    from app.services.agent_service import build_system_prompt
+    work_obj = await session.get(Work, work_id)
+    prompt = build_system_prompt(work_obj, [])
+    assert work_obj.title in prompt
 
     chat = await create_chat_session(work_id, ChatSessionIn(), user, session)
     with pytest.raises(HTTPException) as list_error:
@@ -415,8 +438,8 @@ async def test_chat_helpers_and_error_branches(session: AsyncSession) -> None:
     assert points_error.value.status_code == 402
 
     account = await ensure_point_account(session, user.id)
-    account.monthly_points_balance = 0
-    account.topup_points_balance = 1
+    account.vip_daily_points_balance = 0
+    account.credit_pack_points_balance = 1
     inactive_model = (await session.execute(select(AiModel).order_by(AiModel.sort_order.desc()))).scalars().first()
     inactive_model.status = "inactive"
     await session.commit()
@@ -438,10 +461,10 @@ async def test_chat_helpers_and_error_branches(session: AsyncSession) -> None:
         await session.scalar(select(func.count(PointTransaction.id)).where(PointTransaction.source_id == chat["id"]))
     ) == before_transactions
     await session.refresh(account)
-    assert account.topup_points_balance == 1
+    assert account.credit_pack_points_balance == 1
 
-    account.monthly_points_balance = 0
-    account.topup_points_balance = 1
+    account.vip_daily_points_balance = 0
+    account.credit_pack_points_balance = 100
     chat_model = await session.get(ChatSession, chat["id"])
     await session.delete(await session.get(AgentSession, chat_model.agno_session_id))
     await session.commit()
@@ -450,7 +473,7 @@ async def test_chat_helpers_and_error_branches(session: AsyncSession) -> None:
         chat["id"], ChatIn(message="首条消息", references=[], model_id=active_model.id), user, session
     )
     body = b"".join([chunk async for chunk in stream.body_iterator]).decode()
-    assert "首条消息" in body
+    assert "event: done" in body
     assert (await session.get(ChatSession, chat["id"])).title == "首条消息"
 
 
@@ -460,8 +483,8 @@ async def test_send_chat_without_active_models_does_not_consume_points(session: 
     work = await create_work(WorkIn(title="无模型作品", short_intro="", synopsis="", genre_tags=[], background_rules=""), user, session)
     chat = await create_chat_session(work["id"], ChatSessionIn(), user, session)
     account = await ensure_point_account(session, user.id)
-    account.monthly_points_balance = 1
-    account.topup_points_balance = 0
+    account.vip_daily_points_balance = 1
+    account.credit_pack_points_balance = 0
     for model in (await session.execute(select(AiModel))).scalars():
         model.status = "inactive"
     await session.commit()
@@ -474,7 +497,7 @@ async def test_send_chat_without_active_models_does_not_consume_points(session: 
         await session.scalar(select(func.count(PointTransaction.id)).where(PointTransaction.source_id == chat["id"]))
     ) == 0
     await session.refresh(account)
-    assert account.monthly_points_balance == 1
+    assert account.vip_daily_points_balance == 1
 
 
 async def test_user_endpoint_edges(client: AsyncClient) -> None:
@@ -798,7 +821,7 @@ async def test_payment_confirmation_guards_and_prod_simulation_gate(
     user = await create_user_account(session, "pay-guard@example.com", "user12345")
     await session.commit()
     products = await billing_products(session)
-    order = await create_order(OrderIn(product_type="topup_pack", product_id=products["topup_packs"][0]["id"]), user, session)
+    order = await create_order(OrderIn(product_type="credit_pack", product_id=products["credit_packs"][0]["id"]), user, session)
     payment = await one_payment(session, order["id"])
 
     with pytest.raises(HTTPException) as amount_error:
@@ -834,7 +857,7 @@ async def test_verified_payment_success_is_idempotent(session: AsyncSession) -> 
     user = await create_user_account(session, "pay-success@example.com", "user12345")
     await session.commit()
     products = await billing_products(session)
-    order_data = await create_order(OrderIn(product_type="topup_pack", product_id=products["topup_packs"][0]["id"]), user, session)
+    order_data = await create_order(OrderIn(product_type="credit_pack", product_id=products["credit_packs"][0]["id"]), user, session)
     payment = await one_payment(session, order_data["id"])
     order = await confirm_verified_payment(
         session,
@@ -875,7 +898,7 @@ async def test_billing_topup_and_admin_edges(client: AsyncClient) -> None:
         await client.post(
             "/billing/orders",
             headers=headers,
-            json={"product_type": "topup_pack", "product_id": products["topup_packs"][0]["id"]},
+            json={"product_type": "credit_pack", "product_id": products["credit_packs"][0]["id"]},
         )
     ).json()
     assert (await client.post(f"/billing/orders/{topup_order['id']}/simulate-paid", headers=headers)).json()[
@@ -896,36 +919,34 @@ async def test_billing_topup_and_admin_edges(client: AsyncClient) -> None:
 
     topup = (
         await client.post(
-            "/admin/products/topup-packs",
+            "/admin/products/credit-packs",
             headers=admin,
             json={
-                "name": "测试加油包",
+                "name": "测试积分包",
                 "price_amount": "8.00",
                 "points": 88,
-                "expire_days": 30,
                 "status": "inactive",
             },
         )
     ).json()
     assert topup["points"] == 88
-    product_page = (await client.get("/admin/products?kind=topup-packs&page=1&page_size=1", headers=admin)).json()
+    product_page = (await client.get("/admin/products?kind=credit-packs&page=1&page_size=1", headers=admin)).json()
     assert product_page["page"] == 1
     assert product_page["page_size"] == 1
     assert product_page["total"] >= 1
     assert len(product_page["items"]) == 1
     assert (
         await client.patch(
-            f"/admin/products/topup-packs/{topup['id']}",
+            f"/admin/products/credit-packs/{topup['id']}",
             headers=admin,
             json={
-                "name": "测试加油包2",
+                "name": "测试积分包2",
                 "price_amount": "9.00",
                 "points": 99,
-                "expire_days": 60,
                 "status": "active",
             },
         )
-    ).json()["expire_days"] == 60
+    ).json()["points"] == 99
 
     assert (await client.get("/admin/sessions", headers=admin)).json()["items"] == []
     configs = (await client.get("/admin/configs", headers=admin)).json()["items"]
@@ -1126,18 +1147,18 @@ async def test_direct_user_routes_cover_core_documented_workflows(session: Async
         )
     )["title"] == "第二章 改"
     account = await ensure_point_account(session, user.id)
-    account.monthly_points_balance = 1
+    account.vip_daily_points_balance = 1
     await session.commit()
     assert (await analyze_chapter(work_id, AnalyzeIn(content="第一段\n第二段"), user, session))["suggestions"]
-    account.monthly_points_balance = 0
-    account.topup_points_balance = 1
+    account.vip_daily_points_balance = 0
+    account.credit_pack_points_balance = 1
     await session.commit()
     assert (await analyze_chapter(work_id, AnalyzeIn(content="第三段"), user, session))["suggestions"]
 
     chat = await create_chat_session(work_id, ChatSessionIn(title="直接会话"), user, session)
     assert (await list_chat_sessions(work_id, user, session))[0]["title"] == "直接会话"
     account = await ensure_point_account(session, user.id)
-    account.monthly_points_balance = 1
+    account.vip_daily_points_balance = 100
     await session.commit()
     stream = await send_chat_message(
         chat["id"],
@@ -1183,12 +1204,12 @@ async def test_direct_billing_and_admin_routes(session: AsyncSession) -> None:
 
     products = await billing_products(session)
     plan_id = products["plans"][0]["id"]
-    topup_id = products["topup_packs"][0]["id"]
+    topup_id = products["credit_packs"][0]["id"]
     plan_order = await create_order(OrderIn(product_type="plan", product_id=plan_id), user, session)
     assert (await get_order(plan_order["id"], admin, session))["id"] == plan_order["id"]
     assert (await simulate_paid(plan_order["id"], user, session))["status"] == "paid"
 
-    topup_order = await create_order(OrderIn(product_type="topup_pack", product_id=topup_id), user, session)
+    topup_order = await create_order(OrderIn(product_type="credit_pack", product_id=topup_id), user, session)
     topup_model = await session.get(BillingOrder, topup_order["id"])
     await grant_order(session, topup_model)
     await session.commit()
@@ -1220,16 +1241,16 @@ async def test_direct_billing_and_admin_routes(session: AsyncSession) -> None:
         await admin_delete_product("bad-kind", created_plan["id"], admin, session)
     assert bad_delete.value.status_code == 400
     created_topup = await admin_create_product(
-        "topup-packs",
-        ProductIn(name="直测加油包", price_amount="5.00", points=50, expire_days=10),
+        "credit-packs",
+        ProductIn(name="直测积分包", price_amount="5.00", points=50),
         admin,
         session,
     )
-    assert await session.get(TopupPack, created_topup["id"])
+    assert await session.get(CreditPack, created_topup["id"])
     assert await session.get(Plan, created_plan["id"])
 
-    assert await admin_delete_product("topup-packs", created_topup["id"], admin, session) == {"ok": True}
-    assert (await session.get(TopupPack, created_topup["id"])).status == "inactive"
+    assert await admin_delete_product("credit-packs", created_topup["id"], admin, session) == {"ok": True}
+    assert (await session.get(CreditPack, created_topup["id"])).status == "inactive"
     assert (await admin_orders(None, None, None, admin, session))["items"]
     assert (await admin_orders("JF", "paid", "plan", admin, session))["items"]
     assert (await admin_order_detail(plan_order["id"], admin, session))["payments"]
@@ -1406,16 +1427,16 @@ async def test_analyze_chapter_charges_after_success(session: AsyncSession) -> N
     await session.commit()
     work = await create_work(WorkIn(title="检测扣费", short_intro="", synopsis="", genre_tags=[], background_rules=""), user, session)
     account = await ensure_point_account(session, user.id)
-    account.monthly_points_balance = 2
+    account.vip_daily_points_balance = 2
     await session.commit()
 
     result = await analyze_chapter(work["id"], AnalyzeIn(content="这里有错别字。"), user, session)
 
     await session.refresh(account)
     assert result["suggestions"][0]["quote"] == "这里有错别字。"
-    assert account.monthly_points_balance == 1
+    assert account.vip_daily_points_balance == 1
     transactions = (
-        await session.execute(select(PointTransaction).where(PointTransaction.source_type == "analyze"))
+        await session.execute(select(PointTransaction).where(PointTransaction.source_type == "editor_check"))
     ).scalars().all()
     assert len(transactions) == 1
 
@@ -1425,13 +1446,13 @@ async def test_analyze_chapter_empty_success_still_charges(session: AsyncSession
     await session.commit()
     work = await create_work(WorkIn(title="无问题检测", short_intro="", synopsis="", genre_tags=[], background_rules=""), user, session)
     account = await ensure_point_account(session, user.id)
-    account.topup_points_balance = 1
+    account.credit_pack_points_balance = 1
     await session.commit()
 
     assert await analyze_chapter(work["id"], AnalyzeIn(content="无明显问题"), user, session) == {"suggestions": []}
 
     await session.refresh(account)
-    assert account.topup_points_balance == 0
+    assert account.credit_pack_points_balance == 0
 
 
 async def test_analyze_chapter_failures_do_not_charge(
@@ -1441,19 +1462,19 @@ async def test_analyze_chapter_failures_do_not_charge(
     await session.commit()
     work = await create_work(WorkIn(title="失败不扣费", short_intro="", synopsis="", genre_tags=[], background_rules=""), user, session)
     account = await ensure_point_account(session, user.id)
-    account.monthly_points_balance = 1
+    account.vip_daily_points_balance = 1
     await session.commit()
 
-    async def fail_analysis(_text: str) -> list[dict[str, Any]]:
+    async def fail_analysis(_text: str, _base_url: str, _api_key: str, _model_id: str) -> tuple[list[dict[str, Any]], dict[str, int]]:
         raise HTTPException(status_code=502, detail="analysis response parse failed")
 
-    monkeypatch.setattr(routes_module, "request_deepseek_analysis", fail_analysis)
+    monkeypatch.setattr(routes_module, "request_analysis", fail_analysis)
     with pytest.raises(HTTPException) as error:
         await analyze_chapter(work["id"], AnalyzeIn(content="解析失败"), user, session)
 
     await session.refresh(account)
     assert error.value.status_code == 502
-    assert account.monthly_points_balance == 1
+    assert account.vip_daily_points_balance == 1
 
 
 def test_parse_analysis_output_requires_valid_json_and_quotes() -> None:
@@ -1479,11 +1500,11 @@ def test_normalize_mentions_skips_invalid_items() -> None:
     ) == [{"type": "setting", "id": "s1", "label": "设定", "start": 0, "end": 3}]
 
 
-async def test_request_deepseek_analysis_configuration_and_http_paths(monkeypatch: pytest.MonkeyPatch) -> None:
-    with pytest.raises(HTTPException) as missing_key:
-        monkeypatch.setattr(routes_module, "get_settings", lambda: Settings(env="development"))
-        await routes_module.request_deepseek_analysis("正文")
-    assert missing_key.value.status_code == 503
+async def test_request_analysis_configuration_and_http_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+    # No API key returns fake analysis in test env (no error)
+    suggestions, usage = await routes_module.request_analysis("正文", "https://test", "", "model")
+    assert suggestions  # fake_deepseek_analysis returns non-empty
+    assert usage["prompt_tokens"] == 0
 
     class GoodResponse:
         def raise_for_status(self) -> None:
@@ -1497,7 +1518,8 @@ async def test_request_deepseek_analysis_configuration_and_http_paths(monkeypatc
                             "content": '{"suggestions":[{"quote":"正文","issue":"问题","options":["改文"]}]}'
                         }
                     }
-                ]
+                ],
+                "usage": {"prompt_tokens": 100, "completion_tokens": 50},
             }
 
     class GoodClient:
@@ -1513,13 +1535,11 @@ async def test_request_deepseek_analysis_configuration_and_http_paths(monkeypatc
         async def post(self, *_args: object, **_kwargs: object) -> GoodResponse:
             return GoodResponse()
 
-    monkeypatch.setattr(
-        routes_module,
-        "get_settings",
-        lambda: Settings(env="development", deepseek_api_key="key", deepseek_base_url="https://deepseek.test"),
-    )
     monkeypatch.setattr(routes_module.httpx, "AsyncClient", GoodClient)
-    assert await routes_module.request_deepseek_analysis("正文") == [{"quote": "正文", "issue": "问题", "options": ["改文"]}]
+    suggestions, usage = await routes_module.request_analysis("正文", "https://deepseek.test", "key", "deepseek-v4-flash")
+    assert suggestions == [{"quote": "正文", "issue": "问题", "options": ["改文"]}]
+    assert usage["prompt_tokens"] == 100
+    assert usage["completion_tokens"] == 50
 
     class BadClient(GoodClient):
         async def post(self, *_args: object, **_kwargs: object) -> GoodResponse:
@@ -1527,7 +1547,7 @@ async def test_request_deepseek_analysis_configuration_and_http_paths(monkeypatc
 
     monkeypatch.setattr(routes_module.httpx, "AsyncClient", BadClient)
     with pytest.raises(HTTPException) as request_error:
-        await routes_module.request_deepseek_analysis("正文")
+        await routes_module.request_analysis("正文", "https://test", "key", "model")
     assert request_error.value.status_code == 502
 
 
@@ -1562,7 +1582,7 @@ async def test_send_chat_done_event_survives_deleted_agent(session: AsyncSession
     work = await create_work(WorkIn(title="删除 Agent", short_intro="", synopsis="", genre_tags=[], background_rules=""), user, session)
     chat = await create_chat_session(work["id"], ChatSessionIn(), user, session)
     account = await ensure_point_account(session, user.id)
-    account.monthly_points_balance = 1
+    account.vip_daily_points_balance = 100
     await session.commit()
     stream = await send_chat_message(chat["id"], ChatIn(message="删除后仍完成", references=[]), user, session)
     chat_model = await session.get(ChatSession, chat["id"])
@@ -1583,9 +1603,9 @@ async def test_billing_and_admin_remaining_error_branches(session: AsyncSession)
     await session.commit()
     products = await billing_products(session)
     plan_id = products["plans"][0]["id"]
-    topup_id = products["topup_packs"][0]["id"]
+    topup_id = products["credit_packs"][0]["id"]
 
-    order_data = await create_order(OrderIn(product_type="topup_pack", product_id=topup_id), user, session)
+    order_data = await create_order(OrderIn(product_type="credit_pack", product_id=topup_id), user, session)
     with pytest.raises(HTTPException) as hidden_order:
         await get_order(order_data["id"], other, session)
     assert hidden_order.value.status_code == 404
@@ -1687,3 +1707,193 @@ def test_create_admin_module_entrypoint_runs_real_cli(monkeypatch: pytest.Monkey
     output = capsys.readouterr().out
     assert "Admin account created" in output
     assert "Email: runpy-admin@example.com" in output
+
+
+async def test_consume_point_raises_402_when_both_balances_zero(session: AsyncSession) -> None:
+    user = await create_user_account(session, "no-bal@example.com", "user12345")
+    await session.commit()
+    with pytest.raises(HTTPException) as exc:
+        await routes_module.consume_point(session, user.id)
+    assert exc.value.status_code == 402
+
+
+async def test_analyze_chapter_uses_editor_model_when_configured(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = await create_user_account(session, "editor-model@example.com", "user12345")
+    await session.commit()
+    work = await create_work(WorkIn(title="编辑器模型检测", short_intro="", synopsis="", genre_tags=[], background_rules=""), user, session)
+    account = await ensure_point_account(session, user.id)
+    account.vip_daily_points_balance = 10
+    await session.commit()
+
+    # Configure editor model
+    active_model = (await session.execute(select(AiModel).where(AiModel.status == "active"))).scalars().first()
+    config = (
+        await session.execute(
+            select(GlobalConfig).where(
+                GlobalConfig.config_group == "ai.editor_check",
+                GlobalConfig.config_key == "model_id",
+            )
+        )
+    ).scalar_one()
+    config.string_value = active_model.id
+    await session.commit()
+
+    # Restore real _resolve_editor_model (autouse fixture mocks it to None)
+    # The original is the one we defined in routes.py - reference it from test_services
+    from tests.test_services import _real_resolve_editor_model
+    import app.api.routes as _routes
+    monkeypatch.setattr(_routes, "_resolve_editor_model", _real_resolve_editor_model)
+
+    result = await analyze_chapter(work["id"], AnalyzeIn(content="有错别字。"), user, session)
+    assert result["suggestions"]
+
+
+async def test_send_chat_streams_tool_call_started_and_empty_content(
+    session: AsyncSession,
+) -> None:
+    """Cover tool_call_started event and empty content branch in stream_reply."""
+    user = await create_user_account(session, "stream-edges@example.com", "user12345")
+    await session.commit()
+    work = await create_work(WorkIn(title="流式边界", short_intro="", synopsis="", genre_tags=[], background_rules=""), user, session)
+    chat = await create_chat_session(work["id"], ChatSessionIn(), user, session)
+    account = await ensure_point_account(session, user.id)
+    account.vip_daily_points_balance = 100
+    await session.commit()
+
+    # Override the mock to produce events with tool_call_started and empty content
+    class _EmptyContentEvent:
+        event = RunEvent.run_content
+        content = ""
+        tool = None
+
+    class _ToolStartedEvent:
+        event = RunEvent.tool_call_started
+        tool = MagicMock(tool_name="unknown_tool")
+
+    class _ToolCompletedNoAction:
+        event = RunEvent.tool_call_completed
+        tool = MagicMock(tool_name="nonexistent_tool")
+
+    class _CompletedEvent:
+        event = RunEvent.run_completed
+        content = "回复"
+        metrics = MagicMock(input_tokens=10, output_tokens=5, cache_read_tokens=0)
+
+    async def _custom_events():
+        for ev in [_EmptyContentEvent(), _ToolStartedEvent(), _ToolCompletedNoAction(), _CompletedEvent()]:
+            yield ev
+
+    def _custom_arun(message, *, stream=True, stream_events=True):
+        return _custom_events()
+
+    import app.services.agent_service as _agent_service
+
+    original = _agent_service.create_agent
+
+    def _custom_agent(*args, **kwargs):
+        agent = MagicMock()
+        agent.arun = _custom_arun
+        return agent
+
+    _agent_service.create_agent = _custom_agent
+
+    try:
+        active_model = (await session.execute(select(AiModel).where(AiModel.status == "active"))).scalars().first()
+        stream = await send_chat_message(
+            chat["id"], ChatIn(message="测试流式事件", references=[], model_id=active_model.id), user, session
+        )
+        body = b"".join([chunk async for chunk in stream.body_iterator]).decode()
+        assert "event: done" in body
+    finally:
+        _agent_service.create_agent = original
+
+
+async def test_send_chat_rejects_missing_api_key_in_non_test_env(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cover the 503 guard when AI provider API key is missing in non-test env."""
+    user = await create_user_account(session, "no-apikey@example.com", "user12345")
+    await session.commit()
+    work = await create_work(WorkIn(title="无Key作品", short_intro="", synopsis="", genre_tags=[], background_rules=""), user, session)
+    chat = await create_chat_session(work["id"], ChatSessionIn(), user, session)
+    account = await ensure_point_account(session, user.id)
+    account.vip_daily_points_balance = 100
+    await session.commit()
+
+    test_settings = Settings(env="development", jwt_secret="x" * 32, ai_provider_api_key="")
+    monkeypatch.setattr(routes_module, "get_settings", lambda: test_settings)
+
+    with pytest.raises(HTTPException) as exc:
+        await send_chat_message(chat["id"], ChatIn(message="hi", references=[]), user, session)
+    assert exc.value.status_code == 503
+
+
+async def test_send_chat_billing_failure_when_no_metrics(
+    session: AsyncSession,
+) -> None:
+    """Cover billing_failed=True when agent run has no metrics."""
+    user = await create_user_account(session, "no-metrics@example.com", "user12345")
+    await session.commit()
+    work = await create_work(WorkIn(title="无Metrics", short_intro="", synopsis="", genre_tags=[], background_rules=""), user, session)
+    chat = await create_chat_session(work["id"], ChatSessionIn(), user, session)
+    account = await ensure_point_account(session, user.id)
+    account.vip_daily_points_balance = 100
+    await session.commit()
+
+    class _CompletedNoMetrics:
+        event = RunEvent.run_completed
+        content = "回复"
+        metrics = None
+
+    async def _no_metrics_events():
+        yield _CompletedNoMetrics()
+
+    def _no_metrics_arun(message, *, stream=True, stream_events=True):
+        return _no_metrics_events()
+
+    import app.services.agent_service as _agent_service
+    original = _agent_service.create_agent
+
+    def _custom_agent(*args, **kwargs):
+        agent = MagicMock()
+        agent.arun = _no_metrics_arun
+        return agent
+
+    _agent_service.create_agent = _custom_agent
+    try:
+        active_model = (await session.execute(select(AiModel).where(AiModel.status == "active"))).scalars().first()
+        stream = await send_chat_message(
+            chat["id"], ChatIn(message="测试", references=[], model_id=active_model.id), user, session
+        )
+        body = b"".join([chunk async for chunk in stream.body_iterator]).decode()
+        assert "event: done" in body
+    finally:
+        _agent_service.create_agent = original
+
+
+async def test_send_chat_billing_exception_during_deduction(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cover billing_failed=True when deduct_by_usage raises."""
+    user = await create_user_account(session, "billing-exc@example.com", "user12345")
+    await session.commit()
+    work = await create_work(WorkIn(title="扣费异常", short_intro="", synopsis="", genre_tags=[], background_rules=""), user, session)
+    chat = await create_chat_session(work["id"], ChatSessionIn(), user, session)
+    account = await ensure_point_account(session, user.id)
+    account.vip_daily_points_balance = 100
+    await session.commit()
+
+    active_model = (await session.execute(select(AiModel).where(AiModel.status == "active"))).scalars().first()
+
+    async def _failing_deduct(*args, **kwargs):
+        raise RuntimeError("billing db error")
+
+    monkeypatch.setattr("app.services.billing_service.deduct_by_usage", _failing_deduct)
+
+    stream = await send_chat_message(
+        chat["id"], ChatIn(message="触发扣费异常", references=[], model_id=active_model.id), user, session
+    )
+    body = b"".join([chunk async for chunk in stream.body_iterator]).decode()
+    assert "event: done" in body

@@ -142,7 +142,7 @@ class JfxzTools(Toolkit):
         else:
             character = Character(work_id=self.work_id, name=name, summary=summary, detail=detail)
             self.db.add(character)
-        await self.db.flush()
+        await self.db.commit()
         return json.dumps(_serialize(character), ensure_ascii=False)
 
     async def delete_character(self, character_id: str) -> str:
@@ -155,7 +155,7 @@ class JfxzTools(Toolkit):
             return json.dumps({"error": f"未找到角色 {character_id}"}, ensure_ascii=False)
         name = character.name
         await self.db.delete(character)
-        await self.db.flush()
+        await self.db.commit()
         return json.dumps({"success": True, "message": f"已删除角色 {name}"}, ensure_ascii=False)
 
     async def get_setting(self, setting_id: str) -> str:
@@ -201,7 +201,7 @@ class JfxzTools(Toolkit):
         else:
             setting = SettingItem(work_id=self.work_id, type=setting_type, name=name, summary=summary, detail=detail)
             self.db.add(setting)
-        await self.db.flush()
+        await self.db.commit()
         return json.dumps(_serialize(setting), ensure_ascii=False)
 
     async def delete_setting(self, setting_id: str) -> str:
@@ -214,7 +214,7 @@ class JfxzTools(Toolkit):
             return json.dumps({"error": f"未找到设定 {setting_id}"}, ensure_ascii=False)
         name = setting.name
         await self.db.delete(setting)
-        await self.db.flush()
+        await self.db.commit()
         return json.dumps({"success": True, "message": f"已删除设定 {name}"}, ensure_ascii=False)
 
     async def get_chapter(self, chapter_id: str) -> str:
@@ -244,7 +244,7 @@ class JfxzTools(Toolkit):
         if chapter is None:
             return json.dumps({"error": "chapter not found"}, ensure_ascii=False)
         chapter.summary = summary
-        await self.db.flush()
+        await self.db.commit()
         return json.dumps(_serialize(chapter), ensure_ascii=False)
 
     async def get_work_info(self) -> str:
@@ -268,7 +268,7 @@ class JfxzTools(Toolkit):
         if work is None:
             return json.dumps({"error": "work not found"}, ensure_ascii=False)
         setattr(work, field, content)
-        await self.db.flush()
+        await self.db.commit()
         return json.dumps(_serialize(work), ensure_ascii=False)
 
 

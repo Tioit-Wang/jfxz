@@ -19,7 +19,8 @@ export default defineConfig({
         JFXZ_ENV: "test",
         JFXZ_ENABLE_PAYMENT_SIMULATOR: "true",
         JFXZ_BOOTSTRAP_ADMIN_EMAIL: "admin@example.com",
-        JFXZ_BOOTSTRAP_ADMIN_PASSWORD: "admin123"
+        JFXZ_BOOTSTRAP_ADMIN_PASSWORD: "admin123",
+        JFXZ_CORS_ORIGINS: "http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:3100,http://localhost:3100"
       },
       reuseExistingServer: false,
       timeout: 120_000,

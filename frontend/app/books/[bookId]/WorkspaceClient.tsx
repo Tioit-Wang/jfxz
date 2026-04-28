@@ -847,6 +847,11 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
             }
           }
         },
+        (errorMessage) => {
+          setMessages((items) =>
+            items.map((item) => (item.id === assistantId ? { ...item, error: errorMessage } : item))
+          );
+        },
         controller.signal
       );
       setMessages((items) => items.map((item) => (item.id === assistantId ? final : item)));
@@ -1721,6 +1726,12 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                       <div className="mt-2 flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-700">
                         <AlertCircle size={12} className="shrink-0" />
                         计费异常，请联系管理员
+                      </div>
+                    ) : null}
+                    {message.role === "assistant" && message.error ? (
+                      <div className="mt-2 flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs text-red-700">
+                        <AlertCircle size={12} className="shrink-0" />
+                        {message.error}
                       </div>
                     ) : null}
                   </div>

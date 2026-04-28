@@ -1508,6 +1508,7 @@ async def send_chat_message(
 
         nonlocal billing_failed
         completed_event = None
+        error_messages: list[str] = []
         event_stream = agno_agent.arun(
             payload.message,
             stream=True,
@@ -1536,6 +1537,17 @@ async def send_chat_message(
                     "status": "completed",
                     "result": result_text,
                 })
+            elif event.event == RunEvent.run_error:
+                error_msg = str(event.content) if event.content else "Agent run failed"
+                logger.error("agent run error for chat %s: %s", chat.id, error_msg)
+                error_messages.append(error_msg)
+                yield encode_sse("error", {"message": error_msg})
+            elif event.event == RunEvent.tool_call_error:
+                tool_name = event.tool.tool_name if event.tool else ""
+                error_msg = str(event.content) if event.content else "Tool call failed"
+                logger.error("tool call error for chat %s, tool=%s: %s", chat.id, tool_name, error_msg)
+                error_messages.append(error_msg)
+                yield encode_sse("error", {"message": f"Tool '{tool_name}' failed: {error_msg}"})
             elif event.event == RunEvent.run_completed:
                 completed_event = event
 
@@ -1566,6 +1578,8 @@ async def send_chat_message(
             logger.warning("billing deduction failed after agent stream", exc_info=True)
 
         # Persist assistant message to AgentRunStore.runs
+        if not full_content and error_messages:
+            full_content = ""
         assistant_message = {
             "id": str(uuid4()),
             "role": "assistant",
@@ -1574,6 +1588,7 @@ async def send_chat_message(
             "references": references,
             "tool_results": tool_results,
             "billing_failed": billing_failed,
+            "error": "; ".join(error_messages) if error_messages else None,
             "created_at": now().isoformat(),
         }
         fresh_agent = await session.get(AgentRunStore, chat.agno_session_id)

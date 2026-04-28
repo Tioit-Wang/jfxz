@@ -103,6 +103,7 @@ export type ChatMessage = {
   actions: ChatAction[];
   createdAt: string;
   billing_failed?: boolean;
+  error?: string | null;
 };
 
 export type ChatMessagePage = {
@@ -556,6 +557,7 @@ function mapChatMessage(message: {
   actions?: ChatAction[];
   created_at: string;
   billing_failed?: boolean;
+  error?: string | null;
 }): ChatMessage {
   return {
     id: message.id,
@@ -565,7 +567,8 @@ function mapChatMessage(message: {
     references: message.references ?? [],
     actions: message.actions ?? [],
     createdAt: message.created_at,
-    billing_failed: message.billing_failed
+    billing_failed: message.billing_failed,
+    error: message.error ?? undefined,
   };
 }
 
@@ -1097,6 +1100,7 @@ export class ApiClient {
     onChunk: (chunk: string) => void,
     modelId?: string,
     onToolCall?: (tool: string, status: "started" | "completed", data?: { display?: string; result?: string }) => void,
+    onError?: (message: string) => void,
     signal?: AbortSignal
   ): Promise<ChatMessage> {
     const response = await this.rawRequest(`/chat-sessions/${sessionId}/messages`, {
@@ -1127,6 +1131,15 @@ export class ApiClient {
         }
         if (event.event === "done") {
           finalMessage = mapChatMessage(JSON.parse(event.data));
+        } else if (event.event === "error") {
+          try {
+            const errorData = JSON.parse(event.data);
+            if (onError && errorData.message) {
+              onError(errorData.message);
+            }
+          } catch {
+            // Ignore malformed error events
+          }
         } else if (event.event === "tool_call" || event.event === "tool_result") {
           try {
             const toolData = JSON.parse(event.data);
@@ -1146,6 +1159,15 @@ export class ApiClient {
       const event = parseSseEvent(buffer);
       if (event.event === "done" && event.data) {
         finalMessage = mapChatMessage(JSON.parse(event.data));
+      } else if (event.event === "error") {
+        try {
+          const errorData = JSON.parse(event.data!);
+          if (onError && errorData.message) {
+            onError(errorData.message);
+          }
+        } catch {
+          // Ignore malformed error events
+        }
       } else if (event.event === "tool_call" || event.event === "tool_result") {
         try {
           const toolData = JSON.parse(event.data!);

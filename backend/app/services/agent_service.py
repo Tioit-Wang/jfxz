@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from agno.agent import Agent
 from agno.db.base import BaseDb
+from agno.models.deepseek import DeepSeek
 from agno.models.openai import OpenAIChat
 from agno.tools import Toolkit
 
@@ -282,8 +283,9 @@ def create_agent(
     settings = get_settings()
     toolkit = JfxzTools(db=db_session, work_id=work_id)
     prompt = build_system_prompt(work, refs)
+    model_cls = DeepSeek if "deepseek" in model.provider_model_id.lower() else OpenAIChat
     return Agent(
-        model=OpenAIChat(
+        model=model_cls(
             id=model.provider_model_id,
             base_url=settings.ai_provider_base_url,
             api_key=settings.ai_provider_api_key,

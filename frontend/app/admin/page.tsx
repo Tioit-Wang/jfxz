@@ -7,6 +7,7 @@ const modules = [
   { title: "套餐与加油包", description: "管理订阅套餐和积分加油包", href: "/admin/products" },
   { title: "订单管理", description: "查看订单、支付状态和权益发放", href: "/admin/orders" },
   { title: "订阅管理", description: "查看用户订阅状态和周期", href: "/admin/subscriptions" },
+  { title: "积分流水", description: "查看用户积分发放与消费记录", href: "/admin/credit-transactions" },
   { title: "会话审计", description: "查看 AI 对话记录和上下文", href: "/admin/sessions" },
   { title: "系统配置", description: "管理系统参数和配置项", href: "/admin/configs" },
 ];

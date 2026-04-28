@@ -3,7 +3,7 @@
 import { Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { type ApiUser, type UserProfile } from "@/api";
+import { type AdminBalanceAdjustInput, type AdminUserListItem, type ApiUser, type UserProfile } from "@/api";
 import { AdminPagination, StatusBadge } from "../_components";
 import { adminClient, formatDate } from "../admin-utils";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -13,14 +13,16 @@ import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { BalanceAdjustDialog } from "./BalanceAdjustDialog";
 
 export default function AdminUsersPage() {
   const client = useMemo(() => adminClient(), []);
-  const [users, setUsers] = useState<ApiUser[]>([]);
+  const [users, setUsers] = useState<AdminUserListItem[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState<UserProfile | null>(null);
-  const [target, setTarget] = useState<ApiUser | null>(null);
+  const [target, setTarget] = useState<AdminUserListItem | null>(null);
+  const [adjustTarget, setAdjustTarget] = useState<UserProfile | null>(null);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const pageSize = 20;
@@ -52,7 +54,7 @@ export default function AdminUsersPage() {
     const status = target.status === "active" ? "disabled" : "active";
     try {
       const updated = await client.updateAdminUser(target.id, { status });
-      setUsers((items) => items.map((item) => (item.id === updated.id ? updated : item)));
+      setUsers((items) => items.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)));
       if (detail?.user.id === updated.id) setDetail({ ...detail, user: updated });
       toast.success("用户状态已更新");
     } catch {
@@ -60,6 +62,13 @@ export default function AdminUsersPage() {
     } finally {
       setTarget(null);
     }
+  }
+
+  async function handleBalanceAdjust(input: AdminBalanceAdjustInput) {
+    if (!adjustTarget) return;
+    await client.adminAdjustBalance(adjustTarget.user.id, input);
+    setDetail(await client.getAdminUser(adjustTarget.user.id));
+    await load();
   }
 
   useEffect(() => {
@@ -109,6 +118,8 @@ export default function AdminUsersPage() {
                         <TableHead>昵称</TableHead>
                         <TableHead>角色</TableHead>
                         <TableHead>状态</TableHead>
+                        <TableHead className="text-right">余额</TableHead>
+                        <TableHead>套餐</TableHead>
                         <TableHead className="text-right">操作</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -119,6 +130,10 @@ export default function AdminUsersPage() {
                           <TableCell>{user.nickname}</TableCell>
                           <TableCell>{user.role}</TableCell>
                           <TableCell><StatusBadge status={user.status} /></TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {(user.points.vip_daily_points_balance + user.points.credit_pack_points_balance).toFixed(2)}
+                          </TableCell>
+                          <TableCell>{user.subscription ? user.subscription.plan_id : "—"}</TableCell>
                           <TableCell className="text-right">
                             <div className="flex items-center justify-end gap-1">
                               <Button
@@ -168,11 +183,14 @@ export default function AdminUsersPage() {
                 <span className="text-muted-foreground">状态</span><StatusBadge status={detail.user.status} />
               </div>
               <div className="grid grid-cols-2 gap-3 rounded-lg bg-muted/30 p-4">
-                <span className="text-muted-foreground">当前订阅</span><span>{detail.subscription ? detail.subscription.id : "无订阅"}</span>
+                <span className="text-muted-foreground">当前订阅</span><span>{detail.subscription ? (detail.subscription as { plan_name?: string }).plan_name || detail.subscription.id : "无订阅"}</span>
                 <span className="text-muted-foreground">VIP 每日积分</span><span>{detail.points.vipDailyPoints}</span>
                 <span className="text-muted-foreground">加油包积分</span><span>{detail.points.creditPackPoints}</span>
                 <span className="text-muted-foreground">总积分</span><span>{detail.points.totalPoints}</span>
               </div>
+              <Button size="sm" className="w-fit" onClick={() => setAdjustTarget(detail)}>
+                余额操作
+              </Button>
               {detail.subscription ? (
                 <p className="text-xs text-muted-foreground">订阅结束：{formatDate(detail.subscription.end_at)}</p>
               ) : null}
@@ -196,6 +214,14 @@ export default function AdminUsersPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* ── Balance Adjust Dialog ── */}
+      <BalanceAdjustDialog
+        user={adjustTarget}
+        open={!!adjustTarget}
+        onOpenChange={(open) => !open && setAdjustTarget(null)}
+        onSubmit={handleBalanceAdjust}
+      />
     </div>
   );
 }

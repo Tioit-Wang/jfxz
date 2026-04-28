@@ -16,6 +16,7 @@ from pydantic import BaseModel, EmailStr, Field, ValidationError
 from sqlalchemy import Select, and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
 from app.core.database import get_session
@@ -173,6 +174,13 @@ class UserPatch(BaseModel):
     status: str | None = Field(default=None, max_length=20)
 
 
+class AdminBalanceAdjustRequest(BaseModel):
+    bucket_type: str = Field(..., pattern="^(vip_daily|credit_pack)$")
+    change_type: str = Field(..., pattern="^(grant|deduct)$")
+    amount: Decimal = Field(..., gt=0, decimal_places=2, max_digits=12)
+    reason: str | None = Field(default=None, max_length=500)
+
+
 async def paginated(
     session: AsyncSession,
     statement: Select[tuple[Any, ...]],
@@ -186,6 +194,16 @@ async def paginated(
 
 def page_response(items: list[dict[str, Any]], total: int, page: int, page_size: int) -> dict[str, Any]:
     return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+
+def _estimate_tokens(text: str) -> int:
+    """Rough token estimation: CJK ~1.5 chars/token, ASCII ~4 chars/token."""
+    cjk = sum(1 for c in text if '一' <= c <= '鿿')
+    other = len(text) - cjk
+    return max(1, int(cjk / 1.5 + other / 4))
+
+
+_SYSTEM_PROMPT_TOKEN_ESTIMATE = 500  # rough estimate for system prompt + tools
 
 
 def public(model: Any) -> dict[str, Any]:
@@ -1457,13 +1475,15 @@ async def send_chat_message(
     references = normalize_references(payload.references, mentions)
     refs = await reference_context(session, chat.work_id, references)
 
-    # Pre-check balance with dynamic token estimation
+    # Pre-check balance with improved token estimation
     from app.services.billing_service import pre_check_balance
-    estimated_tokens = len(payload.message) // 3
+    estimated_tokens = _SYSTEM_PROMPT_TOKEN_ESTIMATE
+    estimated_tokens += _estimate_tokens(payload.message)
     for ref in refs:
-        estimated_tokens += len(ref.get("summary", "")) // 3 + len(ref.get("detail", "")) // 3
-    estimated_tokens += len(work.short_intro or "") // 3 + len(work.synopsis or "") // 3
-    estimated_tokens = max(estimated_tokens, 100)
+        estimated_tokens += _estimate_tokens(ref.get("summary", ""))
+        estimated_tokens += _estimate_tokens(ref.get("detail", ""))
+    estimated_tokens += _estimate_tokens(work.short_intro or "")
+    estimated_tokens += _estimate_tokens(work.synopsis or "")
     await pre_check_balance(session, user.id, model, estimated_input_tokens=estimated_tokens)
 
     chat.last_message_preview = payload.message[:120]
@@ -1805,11 +1825,41 @@ async def admin_users(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict[str, Any]:
-    statement = select(User)
+    statement = select(User).options(selectinload(User.point_account))
     if q:
         statement = statement.where(User.email.ilike(f"%{q}%") | User.nickname.ilike(f"%{q}%"))
     rows, total = await paginated(session, statement.order_by(User.created_at.desc()), page, page_size)
-    return page_response([public(row[0]) for row in rows], total, page, page_size)
+    users = [row[0] for row in rows]
+
+    user_ids = [u.id for u in users]
+    latest_subs: dict[str, Any] = {}
+    if user_ids:
+        subs_q = (
+            select(UserSubscription)
+            .where(UserSubscription.user_id.in_(user_ids))
+            .order_by(UserSubscription.created_at.desc())
+        )
+        subs_result = await session.execute(subs_q)
+        for sub in subs_result.scalars():
+            if sub.user_id not in latest_subs:
+                latest_subs[sub.user_id] = sub
+
+    items = []
+    for u in users:
+        item = public(u)
+        account = u.point_account
+        if account:
+            item["points"] = {
+                "vip_daily_points_balance": float(account.vip_daily_points_balance),
+                "credit_pack_points_balance": float(account.credit_pack_points_balance),
+            }
+        else:
+            item["points"] = {"vip_daily_points_balance": 0, "credit_pack_points_balance": 0}
+        sub = latest_subs.get(u.id)
+        item["subscription"] = public(sub) if sub else None
+        items.append(item)
+
+    return page_response(items, total, page, page_size)
 
 
 @router.get("/admin/users/{user_id}")
@@ -1842,6 +1892,35 @@ async def admin_patch_user(
         user.nickname = payload.nickname
     await session.commit()
     return public(user)
+
+
+@router.post("/admin/users/{user_id}/balance")
+async def admin_adjust_balance(
+    user_id: str,
+    payload: AdminBalanceAdjustRequest,
+    _admin: User = Depends(current_admin),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    user = await must_get(session, User, user_id)
+    from app.services.billing_service import admin_adjust_points
+
+    tx = await admin_adjust_points(
+        session=session,
+        user_id=user.id,
+        bucket_type=payload.bucket_type,
+        change_type=payload.change_type,
+        amount=payload.amount,
+        reason=payload.reason,
+    )
+    await session.commit()
+    account = await ensure_point_account(session, user.id)
+    return {
+        "points": {
+            "vip_daily_points_balance": float(account.vip_daily_points_balance),
+            "credit_pack_points_balance": float(account.credit_pack_points_balance),
+        },
+        "transaction_id": tx.id,
+    }
 
 
 @router.get("/admin/models")

@@ -366,3 +366,252 @@ def test_security_helpers() -> None:
     assert read_token(token, "key")[:2] == ("user-id", "admin")
     assert read_token("broken", "key") is None
     assert read_token(token, "other-key") is None
+
+
+# ── Admin User List Enhancement Tests ──
+
+
+async def test_admin_users_list_returns_points(client: AsyncClient) -> None:
+    admin = await admin_headers(client)
+    await auth_headers(client, "u1@example.com")
+    resp = await client.get("/admin/users", headers=admin)
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    u1 = next(i for i in items if i["email"] == "u1@example.com")
+    assert "points" in u1
+    assert u1["points"]["vip_daily_points_balance"] == 0
+    assert u1["points"]["credit_pack_points_balance"] == 0
+
+
+async def test_admin_users_list_returns_subscription_null(client: AsyncClient) -> None:
+    admin = await admin_headers(client)
+    await auth_headers(client, "u2@example.com")
+    resp = await client.get("/admin/users", headers=admin)
+    items = resp.json()["items"]
+    u2 = next(i for i in items if i["email"] == "u2@example.com")
+    assert u2["subscription"] is None
+
+
+async def test_admin_users_list_points_default_zero(client: AsyncClient) -> None:
+    admin = await admin_headers(client)
+    await auth_headers(client, "new@example.com")
+    resp = await client.get("/admin/users?q=new", headers=admin)
+    items = resp.json()["items"]
+    assert len(items) == 1
+    assert items[0]["points"]["vip_daily_points_balance"] == 0
+    assert items[0]["points"]["credit_pack_points_balance"] == 0
+
+
+# ── Admin Balance Adjustment Tests ──
+
+
+async def _get_user_id(client: AsyncClient, admin: dict, email: str) -> str:
+    resp = await client.get(f"/admin/users?q={email}", headers=admin)
+    return next(i["id"] for i in resp.json()["items"] if i["email"] == email)
+
+
+async def test_adjust_grant_credit_pack(client: AsyncClient) -> None:
+    admin = await admin_headers(client)
+    await auth_headers(client, "bal1@example.com")
+    uid = await _get_user_id(client, admin, "bal1@example.com")
+    resp = await client.post(
+        f"/admin/users/{uid}/balance",
+        headers=admin,
+        json={"bucket_type": "credit_pack", "change_type": "grant", "amount": 50.00},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["points"]["credit_pack_points_balance"] == 50.00
+    assert "transaction_id" in data
+
+
+async def test_adjust_grant_vip_daily(client: AsyncClient) -> None:
+    admin = await admin_headers(client)
+    await auth_headers(client, "bal2@example.com")
+    uid = await _get_user_id(client, admin, "bal2@example.com")
+    resp = await client.post(
+        f"/admin/users/{uid}/balance",
+        headers=admin,
+        json={"bucket_type": "vip_daily", "change_type": "grant", "amount": 30.50},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["points"]["vip_daily_points_balance"] == 30.50
+
+
+async def test_adjust_deduct_credit_pack(client: AsyncClient) -> None:
+    admin = await admin_headers(client)
+    await auth_headers(client, "bal3@example.com")
+    uid = await _get_user_id(client, admin, "bal3@example.com")
+    await client.post(
+        f"/admin/users/{uid}/balance",
+        headers=admin,
+        json={"bucket_type": "credit_pack", "change_type": "grant", "amount": 100},
+    )
+    resp = await client.post(
+        f"/admin/users/{uid}/balance",
+        headers=admin,
+        json={"bucket_type": "credit_pack", "change_type": "deduct", "amount": 40},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["points"]["credit_pack_points_balance"] == 60.0
+
+
+async def test_adjust_deduct_vip_daily(client: AsyncClient) -> None:
+    admin = await admin_headers(client)
+    await auth_headers(client, "bal4@example.com")
+    uid = await _get_user_id(client, admin, "bal4@example.com")
+    await client.post(
+        f"/admin/users/{uid}/balance",
+        headers=admin,
+        json={"bucket_type": "vip_daily", "change_type": "grant", "amount": 20},
+    )
+    resp = await client.post(
+        f"/admin/users/{uid}/balance",
+        headers=admin,
+        json={"bucket_type": "vip_daily", "change_type": "deduct", "amount": 15},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["points"]["vip_daily_points_balance"] == 5.0
+
+
+async def test_adjust_deduct_insufficient(client: AsyncClient) -> None:
+    admin = await admin_headers(client)
+    await auth_headers(client, "bal5@example.com")
+    uid = await _get_user_id(client, admin, "bal5@example.com")
+    resp = await client.post(
+        f"/admin/users/{uid}/balance",
+        headers=admin,
+        json={"bucket_type": "credit_pack", "change_type": "deduct", "amount": 1},
+    )
+    assert resp.status_code == 422
+
+
+async def test_adjust_amount_zero(client: AsyncClient) -> None:
+    admin = await admin_headers(client)
+    await auth_headers(client, "bal6@example.com")
+    uid = await _get_user_id(client, admin, "bal6@example.com")
+    resp = await client.post(
+        f"/admin/users/{uid}/balance",
+        headers=admin,
+        json={"bucket_type": "credit_pack", "change_type": "grant", "amount": 0},
+    )
+    assert resp.status_code == 422
+
+
+async def test_adjust_amount_negative(client: AsyncClient) -> None:
+    admin = await admin_headers(client)
+    await auth_headers(client, "bal7@example.com")
+    uid = await _get_user_id(client, admin, "bal7@example.com")
+    resp = await client.post(
+        f"/admin/users/{uid}/balance",
+        headers=admin,
+        json={"bucket_type": "credit_pack", "change_type": "grant", "amount": -5},
+    )
+    assert resp.status_code == 422
+
+
+async def test_adjust_amount_too_many_decimals(client: AsyncClient) -> None:
+    admin = await admin_headers(client)
+    await auth_headers(client, "bal8@example.com")
+    uid = await _get_user_id(client, admin, "bal8@example.com")
+    resp = await client.post(
+        f"/admin/users/{uid}/balance",
+        headers=admin,
+        json={"bucket_type": "credit_pack", "change_type": "grant", "amount": 1.234},
+    )
+    assert resp.status_code == 422
+
+
+async def test_adjust_user_not_found(client: AsyncClient) -> None:
+    admin = await admin_headers(client)
+    resp = await client.post(
+        "/admin/users/nonexistent/balance",
+        headers=admin,
+        json={"bucket_type": "credit_pack", "change_type": "grant", "amount": 10},
+    )
+    assert resp.status_code == 404
+
+
+async def test_adjust_non_admin_forbidden(client: AsyncClient) -> None:
+    user_h = await auth_headers(client, "regular@example.com")
+    resp = await client.post(
+        "/admin/users/fake-id/balance",
+        headers=user_h,
+        json={"bucket_type": "credit_pack", "change_type": "grant", "amount": 10},
+    )
+    assert resp.status_code in (401, 403)
+
+
+async def test_adjust_unauthorized(client: AsyncClient) -> None:
+    resp = await client.post(
+        "/admin/users/fake-id/balance",
+        json={"bucket_type": "credit_pack", "change_type": "grant", "amount": 10},
+    )
+    assert resp.status_code in (401, 403)
+
+
+async def test_adjust_disabled_user(client: AsyncClient) -> None:
+    admin = await admin_headers(client)
+    await auth_headers(client, "dis@example.com")
+    uid = await _get_user_id(client, admin, "dis@example.com")
+    await client.patch(f"/admin/users/{uid}", headers=admin, json={"status": "disabled"})
+    resp = await client.post(
+        f"/admin/users/{uid}/balance",
+        headers=admin,
+        json={"bucket_type": "credit_pack", "change_type": "grant", "amount": 25},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["points"]["credit_pack_points_balance"] == 25.0
+
+
+async def test_adjust_auto_creates_point_account(client: AsyncClient) -> None:
+    admin = await admin_headers(client)
+    await auth_headers(client, "newacct@example.com")
+    uid = await _get_user_id(client, admin, "newacct@example.com")
+    resp = await client.post(
+        f"/admin/users/{uid}/balance",
+        headers=admin,
+        json={"bucket_type": "credit_pack", "change_type": "grant", "amount": 10},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["points"]["credit_pack_points_balance"] == 10.0
+
+
+async def test_adjust_transaction_record_fields(client: AsyncClient) -> None:
+    admin = await admin_headers(client)
+    await auth_headers(client, "txcheck@example.com")
+    uid = await _get_user_id(client, admin, "txcheck@example.com")
+    resp = await client.post(
+        f"/admin/users/{uid}/balance",
+        headers=admin,
+        json={"bucket_type": "credit_pack", "change_type": "grant", "amount": 77.50},
+    )
+    tx_id = resp.json()["transaction_id"]
+    tx_resp = await client.get(f"/admin/credit-transactions/{tx_id}", headers=admin)
+    assert tx_resp.status_code == 200
+    tx = tx_resp.json()
+    assert tx["balance_type"] == "credit_pack"
+    assert tx["change_type"] == "adjust"
+    assert tx["source_type"] == "admin_adjust"
+    assert float(tx["points_change"]) == 77.50
+    assert float(tx["points_after"]) == 77.50
+
+
+async def test_adjust_with_reason(client: AsyncClient) -> None:
+    admin = await admin_headers(client)
+    await auth_headers(client, "reason@example.com")
+    uid = await _get_user_id(client, admin, "reason@example.com")
+    resp = await client.post(
+        f"/admin/users/{uid}/balance",
+        headers=admin,
+        json={
+            "bucket_type": "credit_pack",
+            "change_type": "grant",
+            "amount": 10,
+            "reason": "测试备注",
+        },
+    )
+    assert resp.status_code == 200
+    tx_id = resp.json()["transaction_id"]
+    tx_resp = await client.get(f"/admin/credit-transactions/{tx_id}", headers=admin)
+    assert tx_resp.json()["description"] == "测试备注"

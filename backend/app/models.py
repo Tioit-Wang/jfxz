@@ -274,6 +274,7 @@ class PointTransaction(Base):
     cache_miss_input_multiplier_snapshot: Mapped[Decimal | None] = mapped_column(Numeric(8, 2))
     output_multiplier_snapshot: Mapped[Decimal | None] = mapped_column(Numeric(8, 2))
     balance_after: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    description: Mapped[str | None] = mapped_column(String(500))
     expire_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
 

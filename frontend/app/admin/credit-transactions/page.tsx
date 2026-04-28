@@ -23,9 +23,8 @@ const changeTypeLabels: Record<string, string> = {
 };
 
 const balanceTypeLabels: Record<string, string> = {
-  vip_daily: "月度积分",
-  credit_pack: "加油包",
-  mixed: "组合积分"
+  vip_daily: "VIP 每日积分",
+  credit_pack: "加油包积分",
 };
 
 function ChangeTypeBadge({ type }: { type: string }) {
@@ -275,9 +274,8 @@ export default function AdminCreditTransactionsPage() {
               <SelectContent>
                 <SelectGroup>
                   <SelectItem value="all">全部余额类型</SelectItem>
-                  <SelectItem value="vip_daily">月度积分</SelectItem>
-                  <SelectItem value="credit_pack">加油包</SelectItem>
-                  <SelectItem value="mixed">组合积分</SelectItem>
+                  <SelectItem value="vip_daily">VIP 每日积分</SelectItem>
+                  <SelectItem value="credit_pack">加油包积分</SelectItem>
                 </SelectGroup>
               </SelectContent>
             </Select>
@@ -304,6 +302,7 @@ export default function AdminCreditTransactionsPage() {
                 <SelectGroup>
                   <SelectItem value="all">全部来源</SelectItem>
                   <SelectItem value="plan_vip_daily">VIP 每日发放</SelectItem>
+                  <SelectItem value="vip_daily_expire">VIP 每日清零</SelectItem>
                   <SelectItem value="plan_bundled_credit_pack">套餐积分包</SelectItem>
                   <SelectItem value="credit_pack">积分包购买</SelectItem>
                   <SelectItem value="ai_chat">AI 对话</SelectItem>

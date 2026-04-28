@@ -12,6 +12,7 @@ const titles: Record<string, string> = {
   "/admin/products": "套餐与加油包",
   "/admin/orders": "订单管理",
   "/admin/subscriptions": "订阅管理",
+  "/admin/credit-transactions": "积分流水",
   "/admin/sessions": "会话管理",
   "/admin/configs": "系统配置",
 };

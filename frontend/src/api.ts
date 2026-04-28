@@ -150,10 +150,27 @@ export type ApiSubscription = {
   next_renew_at: string;
 };
 
+export type AdminUserListItem = ApiUser & {
+  points: { vip_daily_points_balance: number; credit_pack_points_balance: number };
+  subscription: ApiSubscription | null;
+};
+
+export type AdminBalanceAdjustInput = {
+  bucket_type: "vip_daily" | "credit_pack";
+  change_type: "grant" | "deduct";
+  amount: number;
+  reason?: string;
+};
+
+export type AdminBalanceAdjustResult = {
+  points: { vip_daily_points_balance: number; credit_pack_points_balance: number };
+  transaction_id: string;
+};
+
 export type BillingProduct = {
   id: string;
   name: string;
-  priceAmount: string;
+  priceAmount: number;
   vipDailyPoints: number;
   bundledCreditPackPoints: number;
   points: number;
@@ -472,7 +489,7 @@ function mapProduct(item: {
   return {
     id: item.id,
     name: item.name,
-    priceAmount: item.price_amount,
+    priceAmount: Number(item.price_amount),
     vipDailyPoints: item.daily_vip_points ?? 0,
     bundledCreditPackPoints: item.bundled_credit_pack_points ?? 0,
     points: item.points ?? 0,
@@ -880,9 +897,9 @@ export class ApiClient {
     return this.request<AiModelOption[]>("/ai/models");
   }
 
-  async listAdminUsers(params: string | AdminListParams = {}): Promise<Paginated<ApiUser>> {
+  async listAdminUsers(params: string | AdminListParams = {}): Promise<Paginated<AdminUserListItem>> {
     const normalized = typeof params === "string" ? { q: params } : params;
-    return this.request<Paginated<ApiUser>>(`/admin/users${this.listQuery(normalized)}`);
+    return this.request<Paginated<AdminUserListItem>>(`/admin/users${this.listQuery(normalized)}`);
   }
 
   async getAdminUser(userId: string): Promise<UserProfile> {
@@ -898,6 +915,13 @@ export class ApiClient {
     return this.request<ApiUser>(`/admin/users/${userId}`, {
       method: "PATCH",
       body: JSON.stringify(input)
+    });
+  }
+
+  async adminAdjustBalance(userId: string, input: AdminBalanceAdjustInput): Promise<AdminBalanceAdjustResult> {
+    return this.request<AdminBalanceAdjustResult>(`/admin/users/${userId}/balance`, {
+      method: "POST",
+      body: JSON.stringify(input),
     });
   }
 

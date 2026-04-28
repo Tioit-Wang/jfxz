@@ -15,5 +15,5 @@ export function generatedMultiplier(cost: string, markupRate: string): string | 
   if (Number.isNaN(costValue) || Number.isNaN(markupValue) || costValue < 0 || markupValue < 0) return null;
   // 除以 10：将"每 1M tokens 成本价"转换为"每 100K tokens 计费倍率"（1M / 100K = 10）
   const multiplier = (costValue * (1 + markupValue / 100)) / 10;
-  return (Math.ceil((multiplier - Number.EPSILON) * 100) / 100).toFixed(2);
+  return (Math.ceil(multiplier * 100) / 100).toFixed(2);
 }

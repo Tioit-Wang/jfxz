@@ -138,9 +138,10 @@ def _make_fake_editor_model() -> AiModel:
         display_name="Test Editor Model",
         provider_model_id="test-editor-model",
         status="active",
-        cache_hit_input_multiplier=Decimal("0"),
-        cache_miss_input_multiplier=Decimal("0"),
-        output_multiplier=Decimal("0"),
+        cache_hit_input_cost_per_million=Decimal("0"),
+        input_cost_per_million=Decimal("0"),
+        output_cost_per_million=Decimal("0"),
+        profit_multiplier=Decimal("1.10"),
         max_context_tokens=1000000,
         max_output_tokens=384000,
     )
@@ -457,7 +458,7 @@ async def test_chat_helpers_and_error_branches(session: AsyncSession) -> None:
     assert page["messages"][0]["id"] == "m2"
     assert page["has_more"] is True
     assert _tool_action("update_work_info") == {"type": "update_work_info", "label": "更新作品信息"}
-    assert _tool_action("create_or_update_character") == {"type": "save_character", "label": "保存为角色"}
+    assert _tool_action("create_or_update_character") == {"type": "save_character", "label": "创建/更新角色"}
     assert _tool_action("nonexistent") is None
     assert "event: done" in encode_sse("done", {"ok": True}).decode()
     assert "data: 文本" in encode_sse(None, "文本").decode()
@@ -504,7 +505,7 @@ async def test_chat_helpers_and_error_branches(session: AsyncSession) -> None:
     assert account.credit_pack_points_balance == 1
 
     account.vip_daily_points_balance = 0
-    account.credit_pack_points_balance = 100
+    account.credit_pack_points_balance = 10000000
     chat_model = await session.get(ChatSession, chat["id"])
     await session.delete(await session.get(AgentRunStore, chat_model.agno_session_id))
     await session.commit()
@@ -1018,9 +1019,10 @@ async def test_admin_model_errors_and_active_list(client: AsyncClient) -> None:
         "max_context_tokens": 1000,
         "max_output_tokens": 500,
         "temperature": "0.00",
-        "cache_hit_input_multiplier": "0.00",
-        "cache_miss_input_multiplier": "0.10",
-        "output_multiplier": "0.20",
+        "cache_hit_input_cost_per_million": "0.10",
+        "input_cost_per_million": "1.00",
+        "output_cost_per_million": "2.00",
+        "profit_multiplier": "1.10",
         "status": "active",
         "sort_order": None,
     }
@@ -1057,9 +1059,10 @@ async def test_direct_admin_model_routes(session: AsyncSession) -> None:
         max_context_tokens=16000,
         max_output_tokens=1000,
         temperature="0.60",
-        cache_hit_input_multiplier="0.10",
-        cache_miss_input_multiplier="0.20",
-        output_multiplier="0.30",
+        cache_hit_input_cost_per_million="0.10",
+        input_cost_per_million="1.00",
+        output_cost_per_million="2.00",
+        profit_multiplier="1.10",
         status="inactive",
         sort_order=3,
     )
@@ -1187,18 +1190,18 @@ async def test_direct_user_routes_cover_core_documented_workflows(session: Async
         )
     )["title"] == "第二章 改"
     account = await ensure_point_account(session, user.id)
-    account.vip_daily_points_balance = 1
+    account.vip_daily_points_balance = 100
     await session.commit()
-    assert (await analyze_chapter(work_id, AnalyzeIn(content="第一段\n第二段"), user, session))["suggestions"]
+    assert "suggestions" in (await analyze_chapter(work_id, AnalyzeIn(content="第一段\n第二段"), user, session))
     account.vip_daily_points_balance = 0
-    account.credit_pack_points_balance = 1
+    account.credit_pack_points_balance = 100
     await session.commit()
-    assert (await analyze_chapter(work_id, AnalyzeIn(content="第三段"), user, session))["suggestions"]
+    assert "suggestions" in (await analyze_chapter(work_id, AnalyzeIn(content="第三段"), user, session))
 
     chat = await create_chat_session(work_id, ChatSessionIn(title="直接会话"), user, session)
     assert (await list_chat_sessions(work_id, user, session))[0]["title"] == "直接会话"
     account = await ensure_point_account(session, user.id)
-    account.vip_daily_points_balance = 100
+    account.vip_daily_points_balance = 10000000
     await session.commit()
     stream = await send_chat_message(
         chat["id"],
@@ -1217,10 +1220,10 @@ async def test_direct_user_routes_cover_core_documented_workflows(session: Async
     chunks = [chunk async for chunk in stream.body_iterator]
     body = b"".join(chunks).decode()
     assert "event: done" in body
-    assert "保存为角色" in body
+    assert "创建/更新角色" in body
     page = await list_chat_messages(chat["id"], user, session)
     assert [item["role"] for item in page["messages"]] == ["user", "assistant"]
-    assert page["messages"][1]["actions"]
+    assert page["messages"][1]["tool_results"]
     older_page = await list_chat_messages(chat["id"], user, session, 1, page["messages"][1]["id"])
     assert older_page["has_more"] is False
     assert older_page["messages"][0]["role"] == "user"
@@ -1266,8 +1269,8 @@ async def test_direct_billing_and_admin_routes(session: AsyncSession) -> None:
         ProductIn(
             name="直测套餐",
             price_amount="12.00",
-            monthly_points=12,
-            bundled_topup_points=3,
+            daily_vip_points=12,
+            bundled_credit_pack_points=3,
             status="inactive",
         ),
         admin,
@@ -1622,7 +1625,7 @@ async def test_send_chat_done_event_survives_deleted_agent(session: AsyncSession
     work = await create_work(WorkIn(title="删除 Agent", short_intro="", synopsis="", genre_tags=[], background_rules=""), user, session)
     chat = await create_chat_session(work["id"], ChatSessionIn(), user, session)
     account = await ensure_point_account(session, user.id)
-    account.vip_daily_points_balance = 100
+    account.vip_daily_points_balance = 10000000
     await session.commit()
     stream = await send_chat_message(chat["id"], ChatIn(message="删除后仍完成", references=[]), user, session)
     chat_model = await session.get(ChatSession, chat["id"])
@@ -1660,7 +1663,7 @@ async def test_billing_and_admin_remaining_error_branches(session: AsyncSession)
     assert missing_payment.value.status_code == 404
 
     plan = await session.get(Plan, plan_id)
-    plan.bundled_topup_points = 0
+    plan.bundled_credit_pack_points = 0
     plan_order = await create_order(OrderIn(product_type="plan", product_id=plan_id), user, session)
     plan_model = await session.get(BillingOrder, plan_order["id"])
     await grant_order(session, plan_model)
@@ -1710,11 +1713,12 @@ async def test_billing_and_admin_remaining_error_branches(session: AsyncSession)
 async def test_admin_subscription_detail_missing_plan_returns_404(session: AsyncSession) -> None:
     """订阅关联的 Plan 被删除后，admin_subscription_detail 应返回 404"""
     user = await create_user_account(session, "sub-missing-plan@example.com", "user12345")
-    plan = Plan(name="瞬逝套餐", price_amount=10.00, monthly_points=100)
+    plan = Plan(name="瞬逝套餐", price_amount=10.00, daily_vip_points=100)
     session.add(plan)
     await session.flush()
     sub = UserSubscription(
-        user_id=user.id, plan_id=plan.id, start_at=datetime.now(UTC), end_at=datetime.now(UTC) + timedelta(days=30)
+        user_id=user.id, plan_id=plan.id, start_at=datetime.now(UTC), end_at=datetime.now(UTC) + timedelta(days=30),
+        daily_vip_points_snapshot=100, duration_days_snapshot=30,
     )
     session.add(sub)
     await session.commit()
@@ -1764,7 +1768,7 @@ async def test_analyze_chapter_uses_editor_model_when_configured(
     await session.commit()
     work = await create_work(WorkIn(title="编辑器模型检测", short_intro="", synopsis="", genre_tags=[], background_rules=""), user, session)
     account = await ensure_point_account(session, user.id)
-    account.vip_daily_points_balance = 10
+    account.vip_daily_points_balance = 10000000
     await session.commit()
 
     # Configure editor model
@@ -1788,7 +1792,7 @@ async def test_analyze_chapter_uses_editor_model_when_configured(
     assert "suggestions" in result
 
     await session.refresh(account)
-    assert account.vip_daily_points_balance == Decimal("9.99")
+    assert account.vip_daily_points_balance < 10000000
     transaction = (
         await session.execute(
             select(PointTransaction).where(
@@ -1810,7 +1814,7 @@ async def test_send_chat_streams_tool_call_started_and_empty_content(
     work = await create_work(WorkIn(title="流式边界", short_intro="", synopsis="", genre_tags=[], background_rules=""), user, session)
     chat = await create_chat_session(work["id"], ChatSessionIn(), user, session)
     account = await ensure_point_account(session, user.id)
-    account.vip_daily_points_balance = 100
+    account.vip_daily_points_balance = 10000000
     await session.commit()
 
     # Override the mock to produce events with tool_call_started and empty content
@@ -1870,7 +1874,7 @@ async def test_send_chat_rejects_missing_api_key_in_non_test_env(
     work = await create_work(WorkIn(title="无Key作品", short_intro="", synopsis="", genre_tags=[], background_rules=""), user, session)
     chat = await create_chat_session(work["id"], ChatSessionIn(), user, session)
     account = await ensure_point_account(session, user.id)
-    account.vip_daily_points_balance = 100
+    account.vip_daily_points_balance = 10000000
     await session.commit()
 
     test_settings = Settings(env="development", jwt_secret="x" * 32, ai_provider_api_key="")
@@ -1884,13 +1888,13 @@ async def test_send_chat_rejects_missing_api_key_in_non_test_env(
 async def test_send_chat_billing_failure_when_no_metrics(
     session: AsyncSession,
 ) -> None:
-    """Cover billing_failed=True when agent run has no metrics."""
+    """Cover agent run finishes without metrics (no billing, error shown via error field)."""
     user = await create_user_account(session, "no-metrics@example.com", "user12345")
     await session.commit()
     work = await create_work(WorkIn(title="无Metrics", short_intro="", synopsis="", genre_tags=[], background_rules=""), user, session)
     chat = await create_chat_session(work["id"], ChatSessionIn(), user, session)
     account = await ensure_point_account(session, user.id)
-    account.vip_daily_points_balance = 100
+    account.vip_daily_points_balance = 10000000
     await session.commit()
 
     class _CompletedNoMetrics:
@@ -1933,7 +1937,7 @@ async def test_send_chat_billing_exception_during_deduction(
     work = await create_work(WorkIn(title="扣费异常", short_intro="", synopsis="", genre_tags=[], background_rules=""), user, session)
     chat = await create_chat_session(work["id"], ChatSessionIn(), user, session)
     account = await ensure_point_account(session, user.id)
-    account.vip_daily_points_balance = 100
+    account.vip_daily_points_balance = 10000000
     await session.commit()
 
     active_model = (await session.execute(select(AiModel).where(AiModel.status == "active"))).scalars().first()

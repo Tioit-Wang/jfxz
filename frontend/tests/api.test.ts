@@ -405,6 +405,7 @@ describe("api client", () => {
       content: "已查询角色。",
       references: [],
       actions: [{ type: "save_character", label: "保存为角色" }],
+      tool_results: [{ tool: "list_characters", display: "列出角色", result: "角色A, 角色B" }],
       created_at: "now"
     };
     const stream = new ReadableStream({
@@ -433,6 +434,10 @@ describe("api client", () => {
     );
 
     expect(result).toMatchObject({ id: "a2", content: "已查询角色。" });
+    expect(result.blocks).toBeDefined();
+    expect(result.blocks!.length).toBe(2);
+    expect(result.blocks![0]).toEqual({ type: "text", text: "已查询角色。" });
+    expect(result.blocks![1]).toMatchObject({ type: "tool_call", tool: "list_characters", status: "completed" });
     expect(chunks).toEqual(["正在", "查询角色。"]);
     expect(toolCalls).toEqual([
       { tool: "list_characters", status: "started" },
@@ -874,5 +879,53 @@ describe("api client", () => {
       expect.objectContaining({ cache: "no-store" })
     );
     globalThis.fetch = originalFetch;
+  });
+
+  it("maps tool_results into blocks on ChatMessage", async () => {
+    const stream = new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder();
+        controller.enqueue(encoder.encode("event: done\ndata: " + JSON.stringify({
+          id: "m1",
+          role: "assistant",
+          content: "已查询角色。",
+          references: [],
+          actions: [],
+          tool_results: [{ tool: "get_character", display: "查询角色", result: "角色信息..." }],
+          created_at: "2025-01-01"
+        }) + "\n\n"));
+        controller.close();
+      }
+    });
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(stream, { status: 200 }));
+    const client = new ApiClient("http://api", fetcher);
+
+    const result = await client.streamChatMessage("s1", "hi", [], [], vi.fn());
+    expect(result.blocks).toBeDefined();
+    expect(result.blocks!.length).toBe(2);
+    expect(result.blocks![0]).toEqual({ type: "text", text: "已查询角色。" });
+    expect(result.blocks![1]).toMatchObject({ type: "tool_call", tool: "get_character", status: "completed" });
+  });
+
+  it("does not set blocks when tool_results is absent", async () => {
+    const stream = new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder();
+        controller.enqueue(encoder.encode("event: done\ndata: " + JSON.stringify({
+          id: "m2",
+          role: "assistant",
+          content: "你好",
+          references: [],
+          actions: [],
+          created_at: "2025-01-01"
+        }) + "\n\n"));
+        controller.close();
+      }
+    });
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(stream, { status: 200 }));
+    const client = new ApiClient("http://api", fetcher);
+
+    const result = await client.streamChatMessage("s1", "hi", [], [], vi.fn());
+    expect(result.blocks).toBeUndefined();
   });
 });

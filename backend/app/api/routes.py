@@ -1239,7 +1239,7 @@ def normalized_run(run: dict[str, Any], index: int) -> dict[str, Any]:
     role = str(run.get("role") or "user")
     if role == "ai":
         role = "assistant"
-    return {
+    result: dict[str, Any] = {
         "id": message_id,
         "role": role,
         "content": str(run.get("content", "")),
@@ -1248,6 +1248,13 @@ def normalized_run(run: dict[str, Any], index: int) -> dict[str, Any]:
         "actions": run.get("actions") or [],
         "created_at": created_at,
     }
+    if run.get("tool_results"):
+        result["tool_results"] = run["tool_results"]
+    if run.get("billing_failed"):
+        result["billing_failed"] = True
+    if run.get("error"):
+        result["error"] = run["error"]
+    return result
 
 
 def message_page(runs: list[dict[str, Any]], limit: int, before: str | None = None) -> dict[str, Any]:

@@ -250,8 +250,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const [selectedModelId, setSelectedModelId] = useState("");
   const [modelStatus, setModelStatus] = useState<"loading" | "ready" | "error">("loading");
 
-  const [activeToolCalls, setActiveToolCalls] = useState<string[]>([]);
-  const [toolResults, setToolResults] = useState<{ tool: string; display: string; result: string }[]>([]);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
 
   const [characterSearch, setCharacterSearch] = useState("");
@@ -833,19 +831,42 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
         chatMentions,
         (chunk) => {
           setMessages((items) =>
-            items.map((item) => (item.id === assistantId ? { ...item, content: `${item.content}${chunk}` } : item))
+            items.map((item) => {
+              if (item.id !== assistantId) return item;
+              const blocks = item.blocks ?? [];
+              const last = blocks[blocks.length - 1];
+              const updatedBlocks = (last && last.type === "text")
+                ? blocks.map((b, i) => i === blocks.length - 1 ? { ...b, text: b.text + chunk } : b)
+                : [...blocks, { type: "text" as const, text: chunk }];
+              return { ...item, content: item.content + chunk, blocks: updatedBlocks };
+            })
           );
         },
         selectedModelId,
         (tool, status, data) => {
-          if (status === "started") {
-            setActiveToolCalls((prev) => prev.includes(tool) ? prev : [...prev, tool]);
-          } else {
-            setActiveToolCalls((prev) => prev.filter((t) => t !== tool));
-            if (data) {
-              setToolResults((prev) => [...prev, { tool, display: data.display ?? toolLabel(tool), result: data.result ?? "" }]);
-            }
-          }
+          setMessages((items) =>
+            items.map((item) => {
+              if (item.id !== assistantId) return item;
+              const blocks = item.blocks ?? [];
+              if (status === "started") {
+                return {
+                  ...item,
+                  blocks: [...blocks, { type: "tool_call", tool, display: data?.display ?? toolLabel(tool), status: "started" as const }],
+                };
+              } else {
+                const startedIdx = blocks.findIndex(
+                  (b) => b.type === "tool_call" && b.tool === tool && b.status === "started"
+                );
+                if (startedIdx === -1) return item;
+                const updated = blocks.map((b, i) =>
+                  i === startedIdx
+                    ? { ...b, status: "completed" as const, result: data?.result }
+                    : b
+                );
+                return { ...item, blocks: updated };
+              }
+            })
+          );
         },
         (errorMessage) => {
           setMessages((items) =>
@@ -854,7 +875,16 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
         },
         controller.signal
       );
-      setMessages((items) => items.map((item) => (item.id === assistantId ? final : item)));
+      setMessages((items) =>
+        items.map((item) => {
+          if (item.id !== assistantId) return item;
+          const streamingBlocks = item.blocks;
+          return {
+            ...final,
+            blocks: streamingBlocks && streamingBlocks.length > 0 ? streamingBlocks : final.blocks,
+          };
+        })
+      );
       setSessions((items) =>
         items.map((session) =>
           session.id === sessionId
@@ -869,12 +899,8 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       );
       setChatStatus("ready");
       setStreamingMessageId(null);
-      setActiveToolCalls([]);
-      setToolResults([]);
     } catch (error) {
       setStreamingMessageId(null);
-      setActiveToolCalls([]);
-      setToolResults([]);
       if (error instanceof DOMException && error.name === "AbortError") {
         setChatStatus("idle");
         return;
@@ -1133,6 +1159,39 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   }
 
   function renderMessageContent(message: ChatMessage) {
+    if (message.blocks && message.blocks.length > 0) {
+      return (
+        <div className="space-y-2">
+          {message.blocks.map((block, index) => {
+            if (block.type === "text") {
+              if (!block.text) return null;
+              return <p key={`text-${index}`}>{block.text}</p>;
+            }
+            const isStarted = block.status === "started";
+            return (
+              <details key={`tool-${index}`} className="rounded-lg border border-blue-200 bg-blue-50/50 text-xs" open={isStarted}>
+                <summary className="flex cursor-pointer items-center gap-1.5 px-3 py-2 font-medium text-blue-700">
+                  {isStarted ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : (
+                    <Check size={12} className="text-green-600" />
+                  )}
+                  {block.display || toolLabel(block.tool)}
+                </summary>
+                {block.result ? (
+                  <div className="border-t border-blue-100 px-3 py-2 text-blue-600">
+                    <p className="line-clamp-6 whitespace-pre-wrap">
+                      {block.result.length > 500 ? `${block.result.slice(0, 500)}...` : block.result}
+                    </p>
+                  </div>
+                ) : null}
+              </details>
+            );
+          })}
+        </div>
+      );
+    }
+
     const mentions = message.mentions
       .filter((mention) => mention.start >= 0 && mention.end > mention.start && mention.end <= message.content.length)
       .sort((left, right) => left.start - right.start);
@@ -1697,31 +1756,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                     )}
                   >
                     {renderMessageContent(message)}
-                    {message.role === "assistant" && message.id === streamingMessageId && activeToolCalls.length > 0 && chatStatus === "streaming" ? (
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        {activeToolCalls.map((tool) => (
-                          <span key={tool} className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-600">
-                            <Loader2 size={12} className="animate-spin" />
-                            {toolLabel(tool)}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-                    {message.role === "assistant" && message.id === streamingMessageId && toolResults.length > 0 ? (
-                      <div className="mt-2 space-y-1.5">
-                        {toolResults.map((result, index) => (
-                          <div key={`tool-result-${index}`} className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs">
-                            <div className="flex items-center gap-1 font-medium text-green-700">
-                              <Check size={12} />
-                              {result.display || toolLabel(result.tool)}
-                            </div>
-                            {result.result ? (
-                              <p className="mt-1 text-green-600 line-clamp-3">{result.result.length > 200 ? `${result.result.slice(0, 200)}...` : result.result}</p>
-                            ) : null}
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
                     {message.role === "assistant" && message.billing_failed ? (
                       <div className="mt-2 flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-700">
                         <AlertCircle size={12} className="shrink-0" />

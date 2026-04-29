@@ -94,10 +94,23 @@ export type ChatAction = {
   label: string;
 };
 
+export type TextBlock = { type: "text"; text: string };
+
+export type ToolCallBlock = {
+  type: "tool_call";
+  tool: string;
+  display: string;
+  status: "started" | "completed";
+  result?: string;
+};
+
+export type ContentBlock = TextBlock | ToolCallBlock;
+
 export type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  blocks?: ContentBlock[];
   mentions: ChatMention[];
   references: ChatReference[];
   actions: ChatAction[];
@@ -548,6 +561,26 @@ function aiModelPayload(input: AdminAiModelInput): Record<string, unknown> {
   };
 }
 
+function buildBlocksFromContentAndToolResults(
+  content: string,
+  toolResults: { tool: string; display: string; result: string }[]
+): ContentBlock[] {
+  const blocks: ContentBlock[] = [];
+  if (content) {
+    blocks.push({ type: "text", text: content });
+  }
+  for (const tr of toolResults) {
+    blocks.push({
+      type: "tool_call",
+      tool: tr.tool,
+      display: tr.display,
+      status: "completed",
+      result: tr.result,
+    });
+  }
+  return blocks;
+}
+
 function mapChatMessage(message: {
   id: string;
   role: "user" | "assistant";
@@ -558,11 +591,15 @@ function mapChatMessage(message: {
   created_at: string;
   billing_failed?: boolean;
   error?: string | null;
+  tool_results?: { tool: string; display: string; result: string }[];
 }): ChatMessage {
   return {
     id: message.id,
     role: message.role,
     content: message.content,
+    blocks: message.tool_results
+      ? buildBlocksFromContentAndToolResults(message.content, message.tool_results)
+      : undefined,
     mentions: message.mentions ?? [],
     references: message.references ?? [],
     actions: message.actions ?? [],

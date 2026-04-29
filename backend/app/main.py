@@ -1,5 +1,9 @@
+import logging
+import logging.handlers
+import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,6 +12,41 @@ from app.api.routes import csrf_protect, router, seed_defaults
 from app.core.config import get_settings
 from app.core.database import SessionLocal, init_database
 from app.services.scheduler_service import start_scheduler, stop_scheduler
+
+LOG_DIR = Path(__file__).resolve().parents[2] / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+
+
+def setup_logging() -> None:
+    """Configure logging: console + rotating file."""
+    log_file = LOG_DIR / "backend.log"
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+
+    # Console handler (INFO+)
+    console = logging.StreamHandler(sys.stdout)
+    console.setLevel(logging.INFO)
+    console.setFormatter(fmt)
+
+    # File handler (DEBUG+)
+    fh = logging.handlers.RotatingFileHandler(
+        log_file, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"
+    )
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(fmt)
+
+    root.handlers.clear()
+    root.addHandler(console)
+    root.addHandler(fh)
+
+    # Quieter uvicorn/watchfiles noise
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    logging.getLogger("watchfiles").setLevel(logging.WARNING)
+
+
+setup_logging()
 
 
 @asynccontextmanager

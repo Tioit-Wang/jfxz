@@ -13,10 +13,12 @@ dependencies = [
   "sqlalchemy[asyncio]>=2.0.40",
   "agno[openai,postgres]>=2.6.3,<3",
   "apscheduler>=3.11.0",
+  "typer>=0.15.0",
   "uvicorn>=0.34.0"
 ]
 
 [project.scripts]
+jfxz = "app.cli:cli"
 jfxz-create-admin = "app.scripts.create_admin:main"
 
 [project.optional-dependencies]

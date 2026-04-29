@@ -7,13 +7,25 @@
     按 Ctrl+C 或关闭窗口即可停止对应服务。
 #>
 
-$ProjectRoot = "C:\Projects\jfxz"
+$ProjectRoot = $PSScriptRoot
 $LogDir = Join-Path $ProjectRoot "logs"
 $null = New-Item -ItemType Directory -Force -Path $LogDir
 
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $BackendLog = Join-Path $LogDir "backend-$timestamp.log"
 $FrontendLog = Join-Path $LogDir "frontend-$timestamp.log"
+
+# Cleanup: kill processes on ports 3000 and 8000
+Write-Host "=== Cleaning up ports 3000 and 8000 ===" -ForegroundColor Yellow
+$portsToClean = @(3000, 8000)
+foreach ($port in $portsToClean) {
+    $pids = netstat -ano | Select-String ":$port\s" | ForEach-Object { ($_ -split '\s+')[-1] }
+    $pids | Get-Unique | Where-Object { $_ -ne "" -and $_ -ne "0" } | ForEach-Object {
+        Write-Host "  Killing PID $_ on port $port" -ForegroundColor Cyan
+        Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue
+    }
+}
+Write-Host "  Port cleanup done." -ForegroundColor Green
 
 # Start backend
 Write-Host "=== Launching backend (FastAPI) ===" -ForegroundColor Green

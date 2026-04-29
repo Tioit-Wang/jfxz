@@ -636,7 +636,7 @@ wheels = [
 [[package]]
 name = "jfxz-backend"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "agno", extra = ["openai", "postgres"] },
     { name = "aiosqlite" },

@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import hmac
 import json
@@ -19,9 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
-from app.core.database import get_session
-
-logger = logging.getLogger(__name__)
+from app.core.database import SessionLocal, get_session
 from app.core.security import (
     hash_password,
     issue_token,
@@ -36,6 +35,7 @@ from app.models import (
     Chapter,
     Character,
     ChatSession,
+    CreditPack,
     GlobalConfig,
     LoginAudit,
     PaymentNotifyLog,
@@ -44,12 +44,13 @@ from app.models import (
     PointAccount,
     PointTransaction,
     SettingItem,
-    CreditPack,
     User,
     UserSubscription,
     Work,
     now,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 REFERENCE_LIMIT = 20
@@ -188,27 +189,46 @@ async def paginated(
     page: int,
     page_size: int,
 ) -> tuple[list[Any], int]:
-    total = await session.scalar(select(func.count()).select_from(statement.order_by(None).subquery()))
+    total = await session.scalar(
+        select(func.count()).select_from(statement.order_by(None).subquery())
+    )
     result = await session.execute(statement.limit(page_size).offset((page - 1) * page_size))
     return result.all(), int(total or 0)
 
 
-def page_response(items: list[dict[str, Any]], total: int, page: int, page_size: int) -> dict[str, Any]:
+def page_response(
+    items: list[dict[str, Any]], total: int, page: int, page_size: int
+) -> dict[str, Any]:
     return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 
 def _estimate_tokens(text: str) -> int:
     """Rough token estimation: CJK ~1.5 chars/token, ASCII ~4 chars/token."""
-    cjk = sum(1 for c in text if '一' <= c <= '鿿')
+    cjk = sum(1 for c in text if "一" <= c <= "鿿")
     other = len(text) - cjk
     return max(1, int(cjk / 1.5 + other / 4))
 
 
 _SYSTEM_PROMPT_TOKEN_ESTIMATE = 500  # rough estimate for system prompt + tools
+_agent_run_locks: dict[tuple[int, str], asyncio.Lock] = {}
+
+
+def _agent_run_lock(session_id: str) -> asyncio.Lock:
+    try:
+        loop_id = id(asyncio.get_running_loop())
+    except RuntimeError:
+        loop_id = 0
+    key = (loop_id, session_id)
+    lock = _agent_run_locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _agent_run_locks[key] = lock
+    return lock
 
 
 def public(model: Any) -> dict[str, Any]:
     from decimal import Decimal as _Decimal
+
     data: dict[str, Any] = {}
     for column in model.__table__.columns:
         value = getattr(model, column.name)
@@ -272,7 +292,9 @@ def set_csrf_cookie(response: Response) -> str:
 
 
 def clear_csrf_cookie(response: Response) -> None:
-    response.delete_cookie(CSRF_COOKIE, path="/", httponly=False, samesite="lax", secure=get_settings().is_production)
+    response.delete_cookie(
+        CSRF_COOKIE, path="/", httponly=False, samesite="lax", secure=get_settings().is_production
+    )
 
 
 def request_origin_allowed(request: Request) -> bool:
@@ -296,14 +318,24 @@ def request_needs_csrf(request: Request) -> bool:
 async def csrf_protect(request: Request, call_next: Any) -> Response:
     cors_headers = _cors_headers(request)
     if request.method in UNSAFE_METHODS and not request_origin_allowed(request):
-        return JSONResponse(status_code=403, content={"detail": "origin not allowed"}, headers=cors_headers)
+        return JSONResponse(
+            status_code=403, content={"detail": "origin not allowed"}, headers=cors_headers
+        )
     if request_needs_csrf(request):
         header_token = request.headers.get("x-csrf-token")
         cookie_token = request.cookies.get(CSRF_COOKIE)
-        if not header_token or not cookie_token or not hmac.compare_digest(header_token, cookie_token):
-            return JSONResponse(status_code=403, content={"detail": "invalid csrf token"}, headers=cors_headers)
+        if (
+            not header_token
+            or not cookie_token
+            or not hmac.compare_digest(header_token, cookie_token)
+        ):
+            return JSONResponse(
+                status_code=403, content={"detail": "invalid csrf token"}, headers=cors_headers
+            )
         if not valid_csrf_token(header_token):
-            return JSONResponse(status_code=403, content={"detail": "invalid csrf token"}, headers=cors_headers)
+            return JSONResponse(
+                status_code=403, content={"detail": "invalid csrf token"}, headers=cors_headers
+            )
     return await call_next(request)
 
 
@@ -326,7 +358,9 @@ async def must_get(session: AsyncSession, model: type[Any], item_id: str) -> Any
     return item
 
 
-async def must_get_in_work(session: AsyncSession, model: type[Any], item_id: str, work_id: str) -> Any:
+async def must_get_in_work(
+    session: AsyncSession, model: type[Any], item_id: str, work_id: str
+) -> Any:
     item = await one(session, select(model).where(model.id == item_id, model.work_id == work_id))
     if item is None:
         raise HTTPException(status_code=404, detail="not found")
@@ -419,7 +453,9 @@ def set_session_cookie(response: Response, name: str, token: str, max_age: int) 
 
 
 def clear_session_cookie(response: Response, name: str) -> None:
-    response.delete_cookie(name, path="/", httponly=True, samesite="lax", secure=get_settings().is_production)
+    response.delete_cookie(
+        name, path="/", httponly=True, samesite="lax", secure=get_settings().is_production
+    )
 
 
 async def user_from_token(session: AsyncSession, token: str | None, token_type: str) -> User:
@@ -442,7 +478,9 @@ async def current_user(
 ) -> User:
     if authorization and authorization.startswith("Bearer ") and not get_settings().is_production:
         return await user_from_token(session, authorization.removeprefix("Bearer "), "user")
-    return await user_from_token(session, jfxz_session or jfxz_admin_session, "user" if jfxz_session else "admin")
+    return await user_from_token(
+        session, jfxz_session or jfxz_admin_session, "user" if jfxz_session else "admin"
+    )
 
 
 async def current_admin(
@@ -468,7 +506,9 @@ async def current_admin(
 async def ensure_point_account(session: AsyncSession, user_id: str) -> PointAccount:
     account = await one(session, select(PointAccount).where(PointAccount.user_id == user_id))
     if account is None:
-        account = PointAccount(user_id=user_id, vip_daily_points_balance=0, credit_pack_points_balance=0)
+        account = PointAccount(
+            user_id=user_id, vip_daily_points_balance=0, credit_pack_points_balance=0
+        )
         session.add(account)
         await session.flush()
     return account
@@ -501,7 +541,9 @@ async def resolve_active_ai_model(session: AsyncSession, model_id: str | None) -
             raise HTTPException(status_code=400, detail="model unavailable")
         return model
     result = await session.execute(
-        statement.order_by(AiModel.sort_order.is_(None), AiModel.sort_order, AiModel.created_at.desc())
+        statement.order_by(
+            AiModel.sort_order.is_(None), AiModel.sort_order, AiModel.created_at.desc()
+        )
     )
     model = result.scalars().first()
     if model is None:
@@ -586,7 +628,9 @@ async def seed_defaults(session: AsyncSession) -> None:
     for group, key, value_type, description, is_required in config_seeds:
         existing_config = await one(
             session,
-            select(GlobalConfig).where(GlobalConfig.config_group == group, GlobalConfig.config_key == key),
+            select(GlobalConfig).where(
+                GlobalConfig.config_group == group, GlobalConfig.config_key == key
+            ),
         )
         if existing_config is None:
             session.add(
@@ -679,7 +723,9 @@ def auth_response(response: Response, user: User, token_type: str) -> dict[str, 
     ttl = settings.admin_session_seconds if token_type == "admin" else settings.user_session_seconds
     cookie_name = ADMIN_COOKIE if token_type == "admin" else USER_COOKIE
     clear_session_cookie(response, USER_COOKIE if token_type == "admin" else ADMIN_COOKIE)
-    token = issue_token(user.id, user.role, settings.jwt_secret, token_type=token_type, ttl_seconds=ttl)
+    token = issue_token(
+        user.id, user.role, settings.jwt_secret, token_type=token_type, ttl_seconds=ttl
+    )
     set_session_cookie(response, cookie_name, token, ttl)
     set_csrf_cookie(response)
     return {"user": public(user)}
@@ -736,7 +782,11 @@ async def authenticate_user(
     if role == "admin":
         statement = statement.where(User.role == "admin")
     user = await one(session, statement)
-    if user is None or user.status != "active" or not verify_password(payload.password, user.password_hash):
+    if (
+        user is None
+        or user.status != "active"
+        or not verify_password(payload.password, user.password_hash)
+    ):
         remember_login_failure(request, email, role)
         await record_login_audit(session, request, email, role, False, "bad_credentials", user)
         await session.commit()
@@ -786,7 +836,9 @@ async def logout(response: Response) -> dict[str, bool]:
 
 
 @router.get("/me")
-async def get_me(user: User = Depends(current_user), session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def get_me(
+    user: User = Depends(current_user), session: AsyncSession = Depends(get_session)
+) -> dict[str, Any]:
     return await profile_payload(session, user)
 
 
@@ -794,14 +846,22 @@ async def profile_payload(session: AsyncSession, user: User) -> dict[str, Any]:
     account = await ensure_point_account(session, user.id)
     subscription = await one(
         session,
-        select(UserSubscription).where(UserSubscription.user_id == user.id).order_by(UserSubscription.created_at.desc()),
+        select(UserSubscription)
+        .where(UserSubscription.user_id == user.id)
+        .order_by(UserSubscription.created_at.desc()),
     )
-    return {"user": public(user), "points": public(account), "subscription": public(subscription) if subscription else None}
+    return {
+        "user": public(user),
+        "points": public(account),
+        "subscription": public(subscription) if subscription else None,
+    }
 
 
 @router.patch("/me")
 async def patch_me(
-    payload: UserPatch, user: User = Depends(current_user), session: AsyncSession = Depends(get_session)
+    payload: UserPatch,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     if payload.nickname is not None:
         user.nickname = payload.nickname
@@ -813,13 +873,17 @@ async def patch_me(
 async def list_works(
     user: User = Depends(current_user), session: AsyncSession = Depends(get_session)
 ) -> list[dict[str, Any]]:
-    result = await session.execute(select(Work).where(Work.user_id == user.id).order_by(Work.updated_at.desc()))
+    result = await session.execute(
+        select(Work).where(Work.user_id == user.id).order_by(Work.updated_at.desc())
+    )
     return [public(item) for item in result.scalars()]
 
 
 @router.post("/works")
 async def create_work(
-    payload: WorkIn, user: User = Depends(current_user), session: AsyncSession = Depends(get_session)
+    payload: WorkIn,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     values = payload.model_dump()
     values["title"] = values["title"].strip() or "未命名作品"
@@ -850,12 +914,16 @@ async def workspace_bootstrap(
     work = await owned_work(session, user.id, work_id)
     profile = await profile_payload(session, user)
 
-    chapters_result = await session.execute(select(Chapter).where(Chapter.work_id == work_id).order_by(Chapter.order_index))
+    chapters_result = await session.execute(
+        select(Chapter).where(Chapter.work_id == work_id).order_by(Chapter.order_index)
+    )
     characters_result = await session.execute(
         select(Character).where(Character.work_id == work_id).order_by(Character.updated_at.desc())
     )
     settings_result = await session.execute(
-        select(SettingItem).where(SettingItem.work_id == work_id).order_by(SettingItem.updated_at.desc())
+        select(SettingItem)
+        .where(SettingItem.work_id == work_id)
+        .order_by(SettingItem.updated_at.desc())
     )
     sessions_result = await session.execute(
         select(ChatSession)
@@ -952,7 +1020,9 @@ async def create_character(
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     await owned_work(session, user.id, work_id)
-    item = Character(work_id=work_id, name=payload.name, summary=payload.summary, detail=payload.detail)
+    item = Character(
+        work_id=work_id, name=payload.name, summary=payload.summary, detail=payload.detail
+    )
     session.add(item)
     await session.commit()
     return public(item)
@@ -1013,7 +1083,11 @@ async def create_setting(
 ) -> dict[str, Any]:
     await owned_work(session, user.id, work_id)
     item = SettingItem(
-        work_id=work_id, type=payload.type or "other", name=payload.name, summary=payload.summary, detail=payload.detail
+        work_id=work_id,
+        type=payload.type or "other",
+        name=payload.name,
+        summary=payload.summary,
+        detail=payload.detail,
     )
     session.add(item)
     await session.commit()
@@ -1054,7 +1128,9 @@ async def list_chapters(
     work_id: str, user: User = Depends(current_user), session: AsyncSession = Depends(get_session)
 ) -> list[dict[str, Any]]:
     await owned_work(session, user.id, work_id)
-    result = await session.execute(select(Chapter).where(Chapter.work_id == work_id).order_by(Chapter.order_index))
+    result = await session.execute(
+        select(Chapter).where(Chapter.work_id == work_id).order_by(Chapter.order_index)
+    )
     return [public(item) for item in result.scalars()]
 
 
@@ -1070,7 +1146,9 @@ async def create_chapter(
     if order_index is None:
         count = await one(session, select(func.count(Chapter.id)).where(Chapter.work_id == work_id))
         order_index = int(count) + 1
-    chapter = Chapter(work_id=work_id, order_index=order_index, **payload.model_dump(exclude={"order_index"}))
+    chapter = Chapter(
+        work_id=work_id, order_index=order_index, **payload.model_dump(exclude={"order_index"})
+    )
     session.add(chapter)
     await session.commit()
     return public(chapter)
@@ -1143,7 +1221,7 @@ async def request_analysis(
         "不要检查人物设定、世界观设定、剧情节奏或文风。"
         "必须只返回 JSON，不要返回 Markdown，不要解释。"
         '返回结构必须严格为：{"suggestions":[{"quote":"原文片段","issue":"问题说明","options":["修改方案"]}]}。'
-        "quote 必须逐字来自用户正文，options 至少一个。没有问题时返回 {\"suggestions\":[]}。"
+        'quote 必须逐字来自用户正文，options 至少一个。没有问题时返回 {"suggestions":[]}。'
     )
     try:
         async with httpx.AsyncClient(timeout=30) as client:
@@ -1213,17 +1291,28 @@ async def analyze_chapter(
     api_key = settings.ai_provider_api_key or ""
     model_id = ai_model.provider_model_id
     from app.services.billing_service import pre_check_balance
-    await pre_check_balance(session, user.id, ai_model, estimated_input_tokens=max(1, len(text) // 3))
+
+    await pre_check_balance(
+        session, user.id, ai_model, estimated_input_tokens=max(1, len(text) // 3)
+    )
 
     try:
         suggestions, usage = await request_analysis(text, base_url, api_key, model_id)
     except Exception:
-        raise HTTPException(status_code=500, detail="AI analysis failed, no charge applied")
+        raise HTTPException(
+            status_code=500, detail="AI analysis failed, no charge applied"
+        ) from None
 
     from app.services.billing_service import deduct_by_usage
+
     await deduct_by_usage(
-        session, user.id, ai_model, usage,
-        work_id=work_id, source_id=work_id, source_type="ai_editor_check",
+        session,
+        user.id,
+        ai_model,
+        usage,
+        work_id=work_id,
+        source_id=work_id,
+        source_type="ai_editor_check",
     )
 
     await session.commit()
@@ -1239,7 +1328,10 @@ async def list_chat_sessions(
 ) -> list[dict[str, Any]]:
     await owned_work(session, user.id, work_id)
     result = await session.execute(
-        select(ChatSession).where(ChatSession.work_id == work_id).order_by(ChatSession.last_active_at.desc()).limit(limit)
+        select(ChatSession)
+        .where(ChatSession.work_id == work_id)
+        .order_by(ChatSession.last_active_at.desc())
+        .limit(limit)
     )
     return [public(item) for item in result.scalars()]
 
@@ -1290,14 +1382,22 @@ def normalized_run(run: dict[str, Any], index: int) -> dict[str, Any]:
     return result
 
 
-def message_page(runs: list[dict[str, Any]], limit: int, before: str | None = None) -> dict[str, Any]:
+def message_page(
+    runs: list[dict[str, Any]], limit: int, before: str | None = None
+) -> dict[str, Any]:
     messages = [normalized_run(run, index) for index, run in enumerate(runs)]
     end = len(messages)
     if before:
-        end = next((index for index, message in enumerate(messages) if message["id"] == before), end)
+        end = next(
+            (index for index, message in enumerate(messages) if message["id"] == before), end
+        )
     start = max(0, end - limit)
     page = messages[start:end]
-    return {"messages": page, "has_more": start > 0, "next_before": page[0]["id"] if start > 0 and page else None}
+    return {
+        "messages": page,
+        "has_more": start > 0,
+        "next_before": page[0]["id"] if start > 0 and page else None,
+    }
 
 
 def normalize_mentions(mentions: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1312,11 +1412,15 @@ def normalize_mentions(mentions: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         if not isinstance(start, int) or not isinstance(end, int) or start < 0 or end <= start:
             continue
-        normalized.append({"type": ref_type, "id": ref_id, "label": label, "start": start, "end": end})
+        normalized.append(
+            {"type": ref_type, "id": ref_id, "label": label, "start": start, "end": end}
+        )
     return normalized
 
 
-def normalize_references(references: list[dict[str, Any]], mentions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def normalize_references(
+    references: list[dict[str, Any]], mentions: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
 
@@ -1342,7 +1446,9 @@ def normalize_references(references: list[dict[str, Any]], mentions: list[dict[s
     return normalized[:REFERENCE_LIMIT]
 
 
-async def reference_context(session: AsyncSession, work_id: str, references: list[dict[str, Any]]) -> list[dict[str, Any]]:
+async def reference_context(
+    session: AsyncSession, work_id: str, references: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     selected_refs: list[dict[str, str]] = []
     seen: set[tuple[str, str]] = set()
     ids_by_type = {"chapter": set(), "character": set(), "setting": set()}
@@ -1365,14 +1471,18 @@ async def reference_context(session: AsyncSession, work_id: str, references: lis
                     "id": ref_id,
                     "name": str(ref.get("name", "")),
                     "summary": str(ref.get("summary") or ref.get("issue") or ""),
-                    "detail": str(ref.get("quote") or ref.get("replacement") or ref.get("detail") or ""),
+                    "detail": str(
+                        ref.get("quote") or ref.get("replacement") or ref.get("detail") or ""
+                    ),
                 }
             )
 
     async def fetch_by_ids(model: type[Any], ids: set[str]) -> dict[str, Any]:
         if not ids:
             return {}
-        result = await session.execute(select(model).where(model.work_id == work_id, model.id.in_(ids)))
+        result = await session.execute(
+            select(model).where(model.work_id == work_id, model.id.in_(ids))
+        )
         return {item.id: item for item in result.scalars()}
 
     chapters = await fetch_by_ids(Chapter, ids_by_type["chapter"])
@@ -1434,8 +1544,9 @@ async def reference_context(session: AsyncSession, work_id: str, references: lis
 
 def encode_sse(event: str | None, data: Any) -> bytes:
     prefix = f"event: {event}\n" if event else ""
-    payload = data if isinstance(data, str) else json.dumps(data, ensure_ascii=False)
+    payload = json.dumps(data, ensure_ascii=False)
     return f"{prefix}data: {payload}\n\n".encode()
+
 
 _TOOL_DISPLAY_NAMES = {
     "get_character": "查询角色",
@@ -1448,10 +1559,15 @@ _TOOL_DISPLAY_NAMES = {
     "delete_setting": "删除设定",
     "get_chapter": "查询章节",
     "list_chapters": "列出章节",
+    "create_chapter": "创建章节",
     "update_chapter_summary": "更新章节提要",
+    "update_chapter_content": "更新章节正文",
     "get_work_info": "查询作品信息",
     "update_work_info": "更新作品信息",
 }
+
+# 详情查询工具返回完整数据，需要截断以节省 token
+_DETAIL_TOOLS = {"get_chapter", "get_character", "get_setting", "get_work_info"}
 
 
 @router.get("/chat-sessions/{session_id}/messages")
@@ -1483,7 +1599,10 @@ async def send_chat_message(
 
     settings = get_settings()
     if settings.env != "test" and not settings.ai_provider_api_key:  # pragma: no cover
-        raise HTTPException(status_code=503, detail="AI provider not configured, please set JFXZ_AI_PROVIDER_API_KEY")
+        raise HTTPException(
+            status_code=503,
+            detail="AI provider not configured, please set JFXZ_AI_PROVIDER_API_KEY",
+        )
 
     # Context collection (before pre-check so we can estimate tokens accurately)
     work = await owned_work(session, user.id, chat.work_id)
@@ -1493,6 +1612,7 @@ async def send_chat_message(
 
     # Pre-check balance with improved token estimation
     from app.services.billing_service import pre_check_balance
+
     estimated_tokens = _SYSTEM_PROMPT_TOKEN_ESTIMATE
     estimated_tokens += _estimate_tokens(payload.message)
     for ref in refs:
@@ -1505,17 +1625,6 @@ async def send_chat_message(
     chat.last_message_preview = payload.message[:120]
     chat.last_active_at = now()
 
-    # Ensure AgentRunStore exists (dual-write for compatibility)
-    agent = await session.get(AgentRunStore, chat.agno_session_id)
-    if agent is None:
-        agent = AgentRunStore(session_id=chat.agno_session_id, user_id=user.id, runs=[])
-        session.add(agent)
-        await session.flush()
-
-    current_runs = agent.runs or []
-    if not current_runs and chat.title == "新的对话":
-        chat.title = payload.message[:24] or "新的对话"
-
     user_message = {
         "id": str(uuid4()),
         "role": "user",
@@ -1524,19 +1633,26 @@ async def send_chat_message(
         "references": references,
         "created_at": now().isoformat(),
     }
-    agent.runs = [*current_runs, user_message]
-    await session.commit()
+    run_lock = _agent_run_lock(chat.agno_session_id)
+    async with run_lock:
+        # Ensure AgentRunStore exists (dual-write for compatibility)
+        agent = await session.get(AgentRunStore, chat.agno_session_id)
+        if agent is None:
+            agent = AgentRunStore(session_id=chat.agno_session_id, user_id=user.id, runs=[])
+            session.add(agent)
+            await session.flush()
+        else:
+            await session.refresh(agent)
 
-    # Build Agno Agent
+        current_runs = agent.runs or []
+        if not current_runs and chat.title == "新的对话":
+            chat.title = payload.message[:24] or "新的对话"
+
+        agent.runs = [*current_runs, user_message]
+        await session.commit()
+
+    # Build Agno Agent with its own DB session for tool isolation
     from app.services.agent_service import create_agent
-    agno_agent = create_agent(
-        model=model,
-        work=work,
-        refs=refs,
-        db_session=session,
-        work_id=chat.work_id,
-        agno_session_id=chat.agno_session_id,
-    )
 
     # Collect full response for persistence
     full_content_parts: list[str] = []
@@ -1549,104 +1665,147 @@ async def send_chat_message(
         nonlocal billing_failed
         completed_event = None
         error_messages: list[str] = []
-        event_stream = agno_agent.arun(
-            payload.message,
-            stream=True,
-            stream_events=True,
-        )
-        async for event in event_stream:
-            if event.event == RunEvent.run_content:
-                content = event.content
-                if content:
-                    full_content_parts.append(content)
-                    yield encode_sse(None, content)
-            elif event.event == RunEvent.tool_call_started:
-                tool_name = event.tool.tool_name if event.tool else ""
-                display = _TOOL_DISPLAY_NAMES.get(tool_name, tool_name)
-                yield encode_sse("tool_call", {"tool": tool_name, "display": display, "status": "started"})
-            elif event.event == RunEvent.tool_call_completed:
-                tool_name = event.tool.tool_name if event.tool else ""
-                display = _TOOL_DISPLAY_NAMES.get(tool_name, tool_name)
-                result_text = ""
-                if event.tool and hasattr(event.tool, "result") and event.tool.result:
-                    result_text = str(event.tool.result)[:500]
-                tool_results.append({"tool": tool_name, "display": display, "result": result_text})
-                yield encode_sse("tool_result", {
-                    "tool": tool_name,
-                    "display": display,
-                    "status": "completed",
-                    "result": result_text,
-                })
-            elif event.event == RunEvent.run_error:
-                error_msg = str(event.content) if event.content else "Agent run failed"
-                logger.error("agent run error for chat %s: %s", chat.id, error_msg)
-                error_messages.append(error_msg)
-                yield encode_sse("error", {"message": error_msg})
-            elif event.event == RunEvent.tool_call_error:
-                tool_name = event.tool.tool_name if event.tool else ""
-                error_msg = str(event.content) if event.content else "Tool call failed"
-                logger.error("tool call error for chat %s, tool=%s: %s", chat.id, tool_name, error_msg)
-                error_messages.append(error_msg)
-                yield encode_sse("error", {"message": f"Tool '{tool_name}' failed: {error_msg}"})
-            elif event.event == RunEvent.run_completed:
-                completed_event = event
+        async with SessionLocal() as tool_session:
+            agno_agent = create_agent(
+                model=model,
+                work=work,
+                refs=refs,
+                db_session=session,
+                tool_db_session=tool_session,
+                work_id=chat.work_id,
+                agno_session_id=chat.agno_session_id,
+            )
+            event_stream = agno_agent.arun(
+                payload.message,
+                stream=True,
+                stream_events=True,
+            )
+            async for event in event_stream:
+                if event.event == RunEvent.run_content:
+                    content = event.content
+                    if content:
+                        full_content_parts.append(content)
+                        yield encode_sse("text", content)
+                elif event.event == RunEvent.tool_call_started:
+                    tool_name = event.tool.tool_name if event.tool else ""
+                    display = _TOOL_DISPLAY_NAMES.get(tool_name, tool_name)
+                    yield encode_sse(
+                        "tool_call", {"tool": tool_name, "display": display, "status": "started"}
+                    )
+                elif event.event == RunEvent.tool_call_completed:
+                    tool_name = event.tool.tool_name if event.tool else ""
+                    display = _TOOL_DISPLAY_NAMES.get(tool_name, tool_name)
+                    result_text = ""
+                    if event.tool and hasattr(event.tool, "result") and event.tool.result:
+                        raw = str(event.tool.result)
+                        result_text = raw[:1000] if tool_name in _DETAIL_TOOLS else raw
+                    tool_results.append(
+                        {"tool": tool_name, "display": display, "result": result_text}
+                    )
+                    yield encode_sse(
+                        "tool_result",
+                        {
+                            "tool": tool_name,
+                            "display": display,
+                            "status": "completed",
+                            "result": result_text,
+                        },
+                    )
+                elif event.event == RunEvent.run_error:
+                    error_msg = str(event.content) if event.content else "Agent run failed"
+                    logger.error("agent run error for chat %s: %s", chat.id, error_msg)
+                    error_messages.append(error_msg)
+                    yield encode_sse("error", {"message": error_msg})
+                elif event.event == RunEvent.tool_call_error:
+                    tool_name = event.tool.tool_name if event.tool else ""
+                    error_msg = str(event.content) if event.content else "Tool call failed"
+                    logger.error(
+                        "tool call error for chat %s, tool=%s: %s", chat.id, tool_name, error_msg
+                    )
+                    error_messages.append(error_msg)
+                    yield encode_sse(
+                        "error", {"message": f"Tool '{tool_name}' failed: {error_msg}"}
+                    )
+                elif event.event == RunEvent.run_completed:
+                    completed_event = event
 
-        # Stream complete -- persist and bill
-        full_content = "".join(full_content_parts)
+            # Stream complete -- persist and bill
+            full_content = "".join(full_content_parts)
 
-        # Deduct by actual usage
-        from app.services.billing_service import deduct_by_usage
-        try:
-            if completed_event and hasattr(completed_event, 'metrics') and completed_event.metrics:
-                metrics = completed_event.metrics
-                usage = {
-                    "prompt_tokens": getattr(metrics, 'input_tokens', 0) or 0,
-                    "completion_tokens": getattr(metrics, 'output_tokens', 0) or 0,
-                    "cached_tokens": getattr(metrics, 'cache_read_tokens', 0) or 0,
-                }
-                await deduct_by_usage(
-                    session, user.id, model, usage,
-                    work_id=chat.work_id,
-                    source_id=chat.id,
-                    source_type="ai_chat",
-                )
-            else:
-                logger.warning("no metrics from agent run, billing skipped for chat %s", chat.id)
-        except Exception:
-            billing_failed = True
-            logger.warning("billing deduction failed after agent stream", exc_info=True)
+            # Deduct by actual usage
+            from app.services.billing_service import deduct_by_usage
 
-        # Persist assistant message to AgentRunStore.runs
-        if not full_content and error_messages:
-            full_content = ""
-        assistant_message = {
-            "id": str(uuid4()),
-            "role": "assistant",
-            "content": full_content,
-            "mentions": [],
-            "references": references,
-            "tool_results": tool_results,
-            "billing_failed": billing_failed,
-            "error": "; ".join(error_messages) if error_messages else None,
-            "created_at": now().isoformat(),
-        }
-        fresh_agent = await session.get(AgentRunStore, chat.agno_session_id)
-        if fresh_agent is not None:
-            fresh_agent.runs = [*(fresh_agent.runs or []), assistant_message]
-        chat.last_message_preview = full_content[:120]
-        chat.last_active_at = now()
-        await session.commit()
+            try:
+                if (
+                    completed_event
+                    and hasattr(completed_event, "metrics")
+                    and completed_event.metrics
+                ):
+                    metrics = completed_event.metrics
+                    usage = {
+                        "prompt_tokens": getattr(metrics, "input_tokens", 0) or 0,
+                        "completion_tokens": getattr(metrics, "output_tokens", 0) or 0,
+                        "cached_tokens": getattr(metrics, "cache_read_tokens", 0) or 0,
+                    }
+                    await deduct_by_usage(
+                        session,
+                        user.id,
+                        model,
+                        usage,
+                        work_id=chat.work_id,
+                        source_id=chat.id,
+                        source_type="ai_chat",
+                    )
+                else:
+                    logger.warning(
+                        "no metrics from agent run, billing skipped for chat %s", chat.id
+                    )
+            except Exception:
+                billing_failed = True
+                logger.warning("billing deduction failed after agent stream", exc_info=True)
 
-        yield encode_sse("done", assistant_message)
+            # Persist assistant message to AgentRunStore.runs
+            if not full_content and error_messages:
+                full_content = ""
+            assistant_message = {
+                "id": str(uuid4()),
+                "role": "assistant",
+                "content": full_content,
+                "mentions": [],
+                "references": references,
+                "tool_results": tool_results,
+                "billing_failed": billing_failed,
+                "error": "; ".join(error_messages) if error_messages else None,
+                "created_at": now().isoformat(),
+            }
+            async with run_lock:
+                fresh_agent = await session.get(AgentRunStore, chat.agno_session_id)
+                if fresh_agent is not None:
+                    await session.refresh(fresh_agent)
+                    fresh_agent.runs = [*(fresh_agent.runs or []), assistant_message]
+                chat.last_message_preview = full_content[:120]
+                chat.last_active_at = now()
+                await session.commit()
+
+            yield encode_sse("done", assistant_message)
 
     return StreamingResponse(stream_reply(), media_type="text/event-stream")
 
 
 @router.get("/billing/products")
-async def billing_products(session: AsyncSession = Depends(get_session)) -> dict[str, list[dict[str, Any]]]:
-    plans = await session.execute(select(Plan).where(Plan.status == "active").order_by(Plan.sort_order))
-    packs = await session.execute(select(CreditPack).where(CreditPack.status == "active").order_by(CreditPack.sort_order))
-    return {"plans": [public(item) for item in plans.scalars()], "credit_packs": [public(item) for item in packs.scalars()]}
+async def billing_products(
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, list[dict[str, Any]]]:
+    plans = await session.execute(
+        select(Plan).where(Plan.status == "active").order_by(Plan.sort_order)
+    )
+    packs = await session.execute(
+        select(CreditPack).where(CreditPack.status == "active").order_by(CreditPack.sort_order)
+    )
+    return {
+        "plans": [public(item) for item in plans.scalars()],
+        "credit_packs": [public(item) for item in packs.scalars()],
+    }
 
 
 async def product_snapshot(
@@ -1655,7 +1814,13 @@ async def product_snapshot(
     """Return (name, amount, daily_vip_points, bundled_credit_pack_points, credit_pack_points)."""
     if product_type == "plan":
         product = await must_get(session, Plan, product_id)
-        return product.name, product.price_amount, product.daily_vip_points, product.bundled_credit_pack_points, 0
+        return (
+            product.name,
+            product.price_amount,
+            product.daily_vip_points,
+            product.bundled_credit_pack_points,
+            0,
+        )
     if product_type == "credit_pack":
         product = await must_get(session, CreditPack, product_id)
         return product.name, product.price_amount, 0, 0, product.points
@@ -1664,7 +1829,9 @@ async def product_snapshot(
 
 @router.post("/billing/orders")
 async def create_order(
-    payload: OrderIn, user: User = Depends(current_user), session: AsyncSession = Depends(get_session)
+    payload: OrderIn,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     name, amount, daily_vip, bundled_pack, pack_points = await product_snapshot(
         session, payload.product_type, payload.product_id
@@ -1839,7 +2006,11 @@ async def simulate_paid(
     order = await confirm_verified_payment(
         session,
         payment,
-        {"trade_status": "TRADE_SUCCESS", "out_trade_no": order.order_no, "total_amount": str(order.amount)},
+        {
+            "trade_status": "TRADE_SUCCESS",
+            "out_trade_no": order.order_no,
+            "total_amount": str(order.amount),
+        },
         f"ALI{uuid4().hex[:16]}",
         Decimal(str(order.amount)),
     )
@@ -1858,7 +2029,9 @@ async def admin_users(
     statement = select(User).options(selectinload(User.point_account))
     if q:
         statement = statement.where(User.email.ilike(f"%{q}%") | User.nickname.ilike(f"%{q}%"))
-    rows, total = await paginated(session, statement.order_by(User.created_at.desc()), page, page_size)
+    rows, total = await paginated(
+        session, statement.order_by(User.created_at.desc()), page, page_size
+    )
     users = [row[0] for row in rows]
 
     user_ids = [u.id for u in users]
@@ -1894,15 +2067,23 @@ async def admin_users(
 
 @router.get("/admin/users/{user_id}")
 async def admin_user_detail(
-    user_id: str, _admin: User = Depends(current_admin), session: AsyncSession = Depends(get_session)
+    user_id: str,
+    _admin: User = Depends(current_admin),
+    session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     user = await must_get(session, User, user_id)
     account = await ensure_point_account(session, user.id)
     sub = await one(
         session,
-        select(UserSubscription).where(UserSubscription.user_id == user.id).order_by(UserSubscription.created_at.desc()),
+        select(UserSubscription)
+        .where(UserSubscription.user_id == user.id)
+        .order_by(UserSubscription.created_at.desc()),
     )
-    return {"user": public(user), "points": public(account), "subscription": public(sub) if sub else None}
+    return {
+        "user": public(user),
+        "points": public(account),
+        "subscription": public(sub) if sub else None,
+    }
 
 
 @router.patch("/admin/users/{user_id}")
@@ -1996,7 +2177,9 @@ async def admin_models(
         statement = statement.where(AiModel.max_output_tokens <= output_max)
     rows, total = await paginated(
         session,
-        statement.order_by(AiModel.sort_order.is_(None), AiModel.sort_order, AiModel.created_at.desc()),
+        statement.order_by(
+            AiModel.sort_order.is_(None), AiModel.sort_order, AiModel.created_at.desc()
+        ),
         page,
         page_size,
     )
@@ -2009,7 +2192,9 @@ async def admin_create_model(
     _admin: User = Depends(current_admin),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    existing = await one(session, select(AiModel).where(AiModel.provider_model_id == payload.provider_model_id))
+    existing = await one(
+        session, select(AiModel).where(AiModel.provider_model_id == payload.provider_model_id)
+    )
     if existing is not None:
         raise HTTPException(status_code=409, detail="provider model id already exists")
     item = AiModel(**payload.model_dump())
@@ -2028,7 +2213,9 @@ async def admin_update_model(
     item = await must_get(session, AiModel, model_id)
     existing = await one(
         session,
-        select(AiModel).where(AiModel.provider_model_id == payload.provider_model_id, AiModel.id != item.id),
+        select(AiModel).where(
+            AiModel.provider_model_id == payload.provider_model_id, AiModel.id != item.id
+        ),
     )
     if existing is not None:
         raise HTTPException(status_code=409, detail="provider model id already exists")
@@ -2057,12 +2244,17 @@ async def admin_products(
             statement = statement.where(model.name.ilike(f"%{q}%"))
         if status:
             statement = statement.where(model.status == status)
-        rows, total = await paginated(session, statement.order_by(model.sort_order, model.created_at.desc()), page, page_size)
+        rows, total = await paginated(
+            session, statement.order_by(model.sort_order, model.created_at.desc()), page, page_size
+        )
         return page_response([public(row[0]) for row in rows], total, page, page_size)
 
     plans = await session.execute(select(Plan).order_by(Plan.sort_order))
     packs = await session.execute(select(CreditPack).order_by(CreditPack.sort_order))
-    return {"plans": [public(item) for item in plans.scalars()], "credit_packs": [public(item) for item in packs.scalars()]}
+    return {
+        "plans": [public(item) for item in plans.scalars()],
+        "credit_packs": [public(item) for item in packs.scalars()],
+    }
 
 
 @router.post("/admin/products/{kind}")
@@ -2149,11 +2341,11 @@ async def admin_cost_preview(
 
     model = await must_get(session, AiModel, payload.model_id)
     from app.services.billing_service import get_points_per_cny
+
     points_per_cny = await get_points_per_cny(session)
 
     # 售价（元/百万token）= 成本价 × 盈利倍率
     input_selling = model.input_cost_per_million * model.profit_multiplier
-    cache_hit_selling = model.cache_hit_input_cost_per_million * model.profit_multiplier
     output_selling = model.output_cost_per_million * model.profit_multiplier
 
     # 每积分成本（元）= 售价（元/百万token）× 积分汇率 / 1M
@@ -2162,9 +2354,7 @@ async def admin_cost_preview(
     output_point_cost = output_selling * points_per_cny / ONE_MILLION
 
     # 混合成本（写作场景偏重输出，权重 40%输入 / 60%输出）
-    blended_point_cost = (
-        Decimal("0.4") * input_point_cost + Decimal("0.6") * output_point_cost
-    )
+    blended_point_cost = Decimal("0.4") * input_point_cost + Decimal("0.6") * output_point_cost
 
     bundled = payload.bundled_credit_pack_points
     daily = payload.daily_vip_points
@@ -2198,7 +2388,9 @@ async def admin_cost_preview(
         scenarios.append(s)
 
     conclusion: dict[str, Any] = {
-        "credit_pack_exceeds_price": bool(price is not None and price > 0 and credit_pack_cost > price),
+        "credit_pack_exceeds_price": bool(
+            price is not None and price > 0 and credit_pack_cost > price
+        ),
         "min_total_cost": round(float(credit_pack_cost), 2),
         "breakeven_utilization": None,
         "suggested_max_bundled": None,
@@ -2217,9 +2409,7 @@ async def admin_cost_preview(
             available = price - credit_pack_cost
             breakeven_pct = float(available / monthly_max_cost * 100)
             conclusion["breakeven_utilization"] = round(breakeven_pct, 1)
-            conclusion["warning"] = (
-                f"用户VIP日权益使用率超过{round(breakeven_pct, 1)}%时开始亏损"
-            )
+            conclusion["warning"] = f"用户VIP日权益使用率超过{round(breakeven_pct, 1)}%时开始亏损"
 
     return {
         "model": {
@@ -2234,14 +2424,20 @@ async def admin_cost_preview(
             "blended_cost": round(float(blended_point_cost), 6),
             "input_cost": round(float(input_point_cost), 6),
             "output_cost": round(float(output_point_cost), 6),
-            "tokens_per_point_output": int(ONE_MILLION / float(output_selling * points_per_cny)) if output_selling * points_per_cny > 0 else 0,
-            "tokens_per_point_input": int(ONE_MILLION / float(input_selling * points_per_cny)) if input_selling * points_per_cny > 0 else 0,
+            "tokens_per_point_output": int(ONE_MILLION / float(output_selling * points_per_cny))
+            if output_selling * points_per_cny > 0
+            else 0,
+            "tokens_per_point_input": int(ONE_MILLION / float(input_selling * points_per_cny))
+            if input_selling * points_per_cny > 0
+            else 0,
             "note": "混合成本 = 40%输入 + 60%输出权重（写作场景偏重输出）",
         },
         "credit_pack": {
             "points": bundled,
             "cash_cost": round(float(credit_pack_cost), 2),
-            "cost_vs_price_pct": f"{round(float(credit_pack_cost / price * 100))}%" if price and price > 0 else None,
+            "cost_vs_price_pct": f"{round(float(credit_pack_cost / price * 100))}%"
+            if price and price > 0
+            else None,
         },
         "daily_vip": {
             "points_per_day": daily,
@@ -2278,7 +2474,9 @@ async def admin_orders(
         statement = statement.where(BillingOrder.status == status)
     if product_type:
         statement = statement.where(BillingOrder.product_type == product_type)
-    rows_result, total = await paginated(session, statement.order_by(BillingOrder.created_at.desc()), page, page_size)
+    rows_result, total = await paginated(
+        session, statement.order_by(BillingOrder.created_at.desc()), page, page_size
+    )
     rows = []
     for order, email in rows_result:
         data = public(order)
@@ -2289,11 +2487,17 @@ async def admin_orders(
 
 @router.get("/admin/orders/{order_id}")
 async def admin_order_detail(
-    order_id: str, _admin: User = Depends(current_admin), session: AsyncSession = Depends(get_session)
+    order_id: str,
+    _admin: User = Depends(current_admin),
+    session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     order = await must_get(session, BillingOrder, order_id)
-    payments = await session.execute(select(PaymentRecord).where(PaymentRecord.order_id == order.id))
-    grants = await session.execute(select(PointTransaction).where(PointTransaction.source_id == order.id))
+    payments = await session.execute(
+        select(PaymentRecord).where(PaymentRecord.order_id == order.id)
+    )
+    grants = await session.execute(
+        select(PointTransaction).where(PointTransaction.source_id == order.id)
+    )
     return {
         "order": public(order),
         "payments": [public(item) for item in payments.scalars()],
@@ -2318,10 +2522,14 @@ async def admin_subscriptions(
     )
     if q:
         like = f"%{q}%"
-        statement = statement.where(or_(User.email.ilike(like), User.nickname.ilike(like), Plan.name.ilike(like)))
+        statement = statement.where(
+            or_(User.email.ilike(like), User.nickname.ilike(like), Plan.name.ilike(like))
+        )
     if status:
         statement = statement.where(UserSubscription.status == status)
-    rows_result, total = await paginated(session, statement.order_by(UserSubscription.created_at.desc()), page, page_size)
+    rows_result, total = await paginated(
+        session, statement.order_by(UserSubscription.created_at.desc()), page, page_size
+    )
     rows = []
     for subscription, email, plan_name, order_no in rows_result:
         data = public(subscription)
@@ -2334,12 +2542,16 @@ async def admin_subscriptions(
 
 @router.get("/admin/subscriptions/{subscription_id}")
 async def admin_subscription_detail(
-    subscription_id: str, _admin: User = Depends(current_admin), session: AsyncSession = Depends(get_session)
+    subscription_id: str,
+    _admin: User = Depends(current_admin),
+    session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     subscription = await must_get(session, UserSubscription, subscription_id)
     user = await must_get(session, User, subscription.user_id)
     plan = await must_get(session, Plan, subscription.plan_id)
-    order = await session.get(BillingOrder, subscription.order_id) if subscription.order_id else None
+    order = (
+        await session.get(BillingOrder, subscription.order_id) if subscription.order_id else None
+    )
     return {
         "subscription": public(subscription),
         "user": public(user),
@@ -2364,9 +2576,16 @@ async def admin_sessions(
     if q:
         like = f"%{q}%"
         statement = statement.where(
-            or_(ChatSession.title.ilike(like), User.email.ilike(like), User.nickname.ilike(like), Work.title.ilike(like))
+            or_(
+                ChatSession.title.ilike(like),
+                User.email.ilike(like),
+                User.nickname.ilike(like),
+                Work.title.ilike(like),
+            )
         )
-    rows_result, total = await paginated(session, statement.order_by(ChatSession.last_active_at.desc()), page, page_size)
+    rows_result, total = await paginated(
+        session, statement.order_by(ChatSession.last_active_at.desc()), page, page_size
+    )
     rows = []
     for chat, email, work_title in rows_result:
         data = public(chat)
@@ -2378,7 +2597,9 @@ async def admin_sessions(
 
 @router.get("/admin/sessions/{session_id}")
 async def admin_session_detail(
-    session_id: str, _admin: User = Depends(current_admin), session: AsyncSession = Depends(get_session)
+    session_id: str,
+    _admin: User = Depends(current_admin),
+    session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     chat = await must_get(session, ChatSession, session_id)
     agent = await session.get(AgentRunStore, chat.agno_session_id)
@@ -2396,9 +2617,14 @@ async def admin_configs(
     statement = select(GlobalConfig)
     if group:
         statement = statement.where(GlobalConfig.config_group == group)
-    rows_result, total = await paginated(session, statement.order_by(GlobalConfig.config_group, GlobalConfig.config_key), page, page_size)
+    rows_result, total = await paginated(
+        session,
+        statement.order_by(GlobalConfig.config_group, GlobalConfig.config_key),
+        page,
+        page_size,
+    )
     rows = []
-    for item, in rows_result:
+    for (item,) in rows_result:
         rows.append(public_config(item))
     return page_response(rows, total, page, page_size)
 
@@ -2455,7 +2681,9 @@ async def admin_credit_transactions(
 
     if q:
         like = f"%{_escape_like(q)}%"
-        statement = statement.where(or_(User.email.ilike(like, escape="\\"), User.nickname.ilike(like, escape="\\")))
+        statement = statement.where(
+            or_(User.email.ilike(like, escape="\\"), User.nickname.ilike(like, escape="\\"))
+        )
     if balance_type:
         statement = statement.where(PointTransaction.bucket_type == balance_type)
     if change_type:

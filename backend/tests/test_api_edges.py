@@ -461,7 +461,7 @@ async def test_chat_helpers_and_error_branches(session: AsyncSession) -> None:
     assert _tool_action("create_or_update_character") == {"type": "save_character", "label": "创建/更新角色"}
     assert _tool_action("nonexistent") is None
     assert "event: done" in encode_sse("done", {"ok": True}).decode()
-    assert "data: 文本" in encode_sse(None, "文本").decode()
+    assert 'data: "文本"' in encode_sse(None, "文本").decode()
     from app.services.agent_service import build_system_prompt
     work_obj = await session.get(Work, work_id)
     prompt = build_system_prompt(work_obj, [])
@@ -1219,6 +1219,7 @@ async def test_direct_user_routes_cover_core_documented_workflows(session: Async
     )
     chunks = [chunk async for chunk in stream.body_iterator]
     body = b"".join(chunks).decode()
+    assert "event: text" in body
     assert "event: done" in body
     assert "创建/更新角色" in body
     page = await list_chat_messages(chat["id"], user, session)

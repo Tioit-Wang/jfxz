@@ -20,6 +20,7 @@ import {
   Save,
   Search,
   Settings,
+  Sparkles,
   Trash2,
   Users,
   Wand2,
@@ -67,6 +68,8 @@ import { Input } from "@/components/ui/input";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { BillingDialog } from "@/components/billing/BillingDialog";
+import { PaymentDialog } from "@/components/billing/PaymentDialog";
 import { cn } from "@/lib/utils";
 import { formatToken } from "@/lib/format";
 import { applySuggestion, type Chapter, type Work, wordCount } from "@/domain";
@@ -276,9 +279,11 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const [nicknameDraft, setNicknameDraft] = useState("");
   const [accountStatus, setAccountStatus] = useState<"idle" | "loading" | "saving" | "error">("idle");
   const [billingOpen, setBillingOpen] = useState(false);
+  const [paymentOpen, setPaymentOpen] = useState(false);
   const [billingProducts, setBillingProducts] = useState<BillingProducts>({ plans: [], creditPacks: [] });
   const [billingOrder, setBillingOrder] = useState<BillingOrder | null>(null);
   const [billingStatus, setBillingStatus] = useState<"idle" | "loading" | "creating" | "paid" | "error">("idle");
+  const [showPointsDetail, setShowPointsDetail] = useState(false);
   const [workspaceDefaultLayout, setWorkspaceDefaultLayout] = useState<Layout | undefined>(() => readWorkspaceLayout(bookId));
   const [workspaceLayoutLoaded, setWorkspaceLayoutLoaded] = useState(false);
 
@@ -1134,6 +1139,8 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   }
 
   async function createOrder(productType: "plan" | "credit_pack", productId: string) {
+    setBillingOpen(false);
+    setPaymentOpen(true);
     setBillingStatus("creating");
     try {
       setBillingOrder(await client.createBillingOrder(productType, productId));
@@ -1524,42 +1531,126 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
           ) : null}
         </div>
 
-        <div className="border-t border-border bg-card p-4">
-          <button className="group mb-3 flex w-full items-center justify-between text-left" onClick={() => void openAccount()} aria-label="账户中心">
-            <div className="flex items-center gap-2">
-              <div className="relative flex h-8 w-8 items-center justify-center rounded-full bg-primary text-sm font-medium text-primary-foreground shadow-sm">
-                {(profile?.user.nickname || profile?.user.email || "U").slice(0, 1).toUpperCase()}
-                <div className="absolute -bottom-1 -right-1 rounded-full border border-background bg-background p-0.5 shadow-sm">
-                  <Crown size={8} className="text-foreground" />
+        {/* VIP 会员卡 */}
+        <div className="border-t border-border/60 bg-muted/20 p-4">
+          <div
+            className={cn(
+              "group relative cursor-pointer overflow-hidden rounded-2xl border p-4 transition-all duration-300",
+              profile?.subscription
+                ? "border-amber-200/50 bg-gradient-to-br from-amber-50/50 via-background to-orange-50/30 hover:border-amber-300/60 hover:shadow-[0_4px_20px_-8px_rgba(245,158,11,0.2)]"
+                : "border-border bg-card hover:border-primary/30 hover:shadow-md"
+            )}
+            onClick={() => setShowPointsDetail((v) => !v)}
+          >
+            {/* 装饰性背景光效 */}
+            {profile?.subscription && (
+              <div className="absolute -right-6 -top-6 h-24 w-24 rounded-full bg-gradient-to-br from-amber-400/20 to-orange-500/20 blur-2xl transition-all group-hover:scale-110" />
+            )}
+            
+            {/* 用户信息 + 余量文字/开通按钮 */}
+            <div className="relative flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className={cn(
+                  "relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white shadow-sm ring-2 ring-background",
+                  profile?.subscription 
+                    ? "bg-gradient-to-br from-amber-400 to-orange-500 shadow-amber-500/20"
+                    : "bg-gradient-to-br from-slate-400 to-slate-500"
+                )}>
+                  {(profile?.user.nickname || profile?.user.email || "U").slice(0, 1).toUpperCase()}
+                  {profile?.subscription && (
+                    <div className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-white shadow-sm">
+                      <Crown size={10} className="text-amber-500" />
+                    </div>
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <span className="block truncate text-sm font-bold text-foreground">
+                    {profile?.user.nickname || "账户中心"}
+                  </span>
+                  <span className={cn(
+                    "block text-[11px] font-medium",
+                    profile?.subscription ? "text-amber-600" : "text-muted-foreground"
+                  )}>
+                    {profile?.subscription ? "尊享 VIP 创作中" : "免费版体验中"}
+                  </span>
                 </div>
               </div>
-              <div>
-                <span className="block text-sm font-medium text-foreground transition-colors group-hover:text-foreground">
-                  {profile?.user.nickname || "账户中心"}
-                </span>
-                <span className="block text-[10px] font-medium text-muted-foreground">
-                  {profile?.subscription ? "订阅生效中" : "未订阅套餐"}
-                </span>
+              {showPointsDetail ? (
+                <button
+                  className={cn(
+                    "inline-flex shrink-0 items-center gap-1 rounded-full px-3 py-1.5 text-[11px] font-bold shadow-sm transition-all active:scale-[0.97]",
+                    profile?.subscription
+                      ? "bg-gradient-to-r from-amber-500 to-orange-500 text-white hover:from-amber-600 hover:to-orange-600 hover:shadow-amber-500/25"
+                      : "bg-primary text-primary-foreground hover:bg-primary/90"
+                  )}
+                  onClick={(e) => { e.stopPropagation(); void openBilling(); }}
+                >
+                  <Sparkles size={12} className={profile?.subscription ? "text-amber-100" : ""} />
+                  {profile?.subscription ? "续费套餐" : "升级解锁"}
+                </button>
+              ) : (
+                <div className="shrink-0 text-right text-[11px] tabular-nums leading-relaxed text-muted-foreground">
+                  <div className="font-medium text-foreground">
+                    <Zap size={10} className="mb-0.5 mr-0.5 inline text-amber-500" />
+                    {(profile?.points.vipDailyPoints ?? 0) + (profile?.points.creditPackPoints ?? 0)}
+                  </div>
+                  <div className="text-[10px] opacity-70">可用积分</div>
+                </div>
+              )}
+            </div>
+
+            {/* 积分进度条（展开时显示） */}
+            <div
+              className={cn(
+                "relative overflow-hidden transition-all duration-500 ease-in-out",
+                showPointsDetail ? "mt-5 max-h-48 opacity-100" : "max-h-0 opacity-0"
+              )}
+            >
+              <div className="space-y-4">
+                {/* VIP 积分 */}
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between text-xs">
+                    <span className="flex items-center gap-1.5 font-medium text-foreground">
+                      <div className="flex rounded bg-amber-100 p-0.5 text-amber-600">
+                        <Crown size={12} />
+                      </div>
+                      每日畅写积分
+                    </span>
+                    <span className="tabular-nums font-semibold text-foreground">
+                      {(profile?.points.vipDailyPoints ?? 0).toFixed(1)} <span className="text-[10px] text-muted-foreground font-normal">/日</span>
+                    </span>
+                  </div>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted/60 shadow-inner">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-amber-400 to-orange-400 transition-all duration-1000 ease-out"
+                      style={{ width: `${Math.min(100, ((profile?.points.vipDailyPoints ?? 0) / 2000) * 100)}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* 加油包积分 */}
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between text-xs">
+                    <span className="flex items-center gap-1.5 font-medium text-foreground">
+                      <div className="flex rounded bg-blue-100 p-0.5 text-blue-600">
+                        <Zap size={12} />
+                      </div>
+                      永久灵感加油包
+                    </span>
+                    <span className="tabular-nums font-semibold text-foreground">
+                      {(profile?.points.creditPackPoints ?? 0).toFixed(1)} <span className="text-[10px] text-muted-foreground font-normal">点</span>
+                    </span>
+                  </div>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted/60 shadow-inner">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-blue-400 to-cyan-400 transition-all duration-1000 ease-out"
+                      style={{ width: `${Math.min(100, ((profile?.points.creditPackPoints ?? 0) / 2000) * 100)}%` }}
+                    />
+                  </div>
+                </div>
               </div>
             </div>
-            <Settings size={16} className="text-gray-400 transition-colors group-hover:text-gray-600" />
-          </button>
-          <button className="w-full rounded-lg border border-border bg-muted p-3 text-left" onClick={() => void openBilling()} aria-label="套餐与积分">
-            <div className="mb-2 flex items-center justify-between text-xs">
-              <span className="flex items-center text-muted-foreground">
-                <Zap size={12} className="mr-1 text-foreground" />
-                可用积分
-              </span>
-              <span className="font-semibold text-foreground">{profile?.points.totalPoints ?? 0}</span>
-            </div>
-            <div className="mb-1.5 h-1.5 w-full rounded-full bg-border">
-              <div className="h-1.5 rounded-full bg-primary" style={{ width: `${Math.min(100, ((profile?.points.totalPoints ?? 0) / 2000) * 100)}%` }} />
-            </div>
-            <div className="flex justify-between text-[10px] text-muted-foreground">
-              <span>VIP 每日: {profile?.points.vipDailyPoints ?? 0}</span>
-              <span>加油包: {profile?.points.creditPackPoints ?? 0}</span>
-            </div>
-          </button>
+          </div>
         </div>
       </aside>
         </ResizablePanel>
@@ -1614,9 +1705,9 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                 />
 
                 <div className="group relative mb-10">
-                  <div className="absolute -left-4 top-3 h-8 w-1 rounded-full bg-gray-200 transition-colors group-hover:bg-gray-300" />
+                  <div className="absolute -left-4 top-3 bottom-3 w-1 rounded-full bg-gray-200 transition-colors group-hover:bg-gray-300" />
                   <div className="relative min-h-[60px] rounded-xl border border-transparent bg-muted p-4 text-sm text-muted-foreground transition-all group-hover:border-border">
-                    <div className="whitespace-pre-wrap pr-10 leading-relaxed">
+                    <div className="whitespace-pre-wrap pr-10 leading-relaxed line-clamp-3 break-words">
                       {summary || <span className="text-gray-400">尚未填写章节提要，点击右侧编辑...</span>}
                     </div>
                     <button
@@ -2135,59 +2226,24 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={billingOpen} onOpenChange={setBillingOpen}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>套餐与积分</DialogTitle>
-            <DialogDescription>购买套餐或加油包后，权益会在支付成功后到账。</DialogDescription>
-          </DialogHeader>
-          <div className="max-h-[66vh] overflow-y-auto pr-1">
-            {billingStatus === "loading" ? <p className="py-8 text-center text-sm text-muted-foreground">商品加载中...</p> : null}
-            {billingStatus === "error" ? <p className="rounded-lg border bg-muted p-3 text-sm text-muted-foreground">计费请求失败，请稍后重试。</p> : null}
-            <div className="grid gap-3 md:grid-cols-2">
-              {[...billingProducts.plans.map((item) => ({ ...item, productType: "plan" as const })), ...billingProducts.creditPacks.map((item) => ({ ...item, productType: "credit_pack" as const }))].map((item) => (
-                <div key={item.id} className="rounded-lg border bg-card p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h3 className="font-medium">{item.name}</h3>
-                      <p className="mt-1 text-sm text-muted-foreground">¥{item.priceAmount}</p>
-                    </div>
-                    <Badge variant="secondary">{item.productType === "plan" ? "套餐" : "加油包"}</Badge>
-                  </div>
-                  <p className="mt-3 text-sm text-muted-foreground">
-                    {item.productType === "plan"
-                      ? `VIP 每日 ${item.vipDailyPoints} 点，附赠积分包 ${item.bundledCreditPackPoints} 点`
-                      : `${item.points} 点（永久有效）`}
-                  </p>
-                  <Button className="mt-4 w-full" size="sm" onClick={() => void createOrder(item.productType, item.id)} disabled={billingStatus === "creating"}>
-                    {billingStatus === "creating" ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Zap data-icon="inline-start" />}
-                    创建订单
-                  </Button>
-                </div>
-              ))}
-            </div>
-            {billingOrder ? (
-              <div className="mt-4 rounded-lg border bg-muted p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium">{billingOrder.productName}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">订单号：{billingOrder.orderNo}</p>
-                  </div>
-                  <Badge>{billingOrder.status}</Badge>
-                </div>
-                <p className="mt-3 break-all rounded-md bg-background p-3 text-xs text-muted-foreground">
-                  {billingOrder.qrCode || "等待支付二维码"}
-                </p>
-                {testPaymentEnabled ? (
-                  <Button className="mt-3" size="sm" variant="outline" onClick={() => void simulateOrderPaid()} disabled={billingStatus === "creating" || billingOrder.status === "paid"}>
-                    模拟支付成功
-                  </Button>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-        </DialogContent>
-      </Dialog>
+      <BillingDialog
+        open={billingOpen}
+        onOpenChange={setBillingOpen}
+        products={billingProducts}
+        loading={billingStatus === "loading"}
+        error={billingStatus === "error"}
+        purchasing={billingStatus === "creating"}
+        onPurchase={(type, id) => void createOrder(type, id)}
+      />
+
+      <PaymentDialog
+        open={paymentOpen}
+        onOpenChange={setPaymentOpen}
+        order={billingOrder}
+        creating={billingStatus === "creating" && !billingOrder}
+        onSimulatePaid={() => void simulateOrderPaid()}
+        testEnabled={testPaymentEnabled}
+      />
 
     </div>
   );

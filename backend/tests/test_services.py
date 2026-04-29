@@ -193,6 +193,7 @@ class TestJfxzTools:
 
         created = json.loads(await tools.create_or_update_character("苏白", "主角", "详情"))
         assert created["name"] == "苏白"
+        assert created["detail"] == "详情"
         char_id = created["id"]
 
         listed = json.loads(await tools.list_characters())
@@ -203,6 +204,7 @@ class TestJfxzTools:
 
         updated = json.loads(await tools.create_or_update_character("苏白改", "主角改", "新详情", character_id=char_id))
         assert updated["name"] == "苏白改"
+        assert updated["detail"] == "新详情"
 
         not_found = json.loads(await tools.get_character("nonexistent"))
         assert "error" in not_found
@@ -211,6 +213,7 @@ class TestJfxzTools:
         created = json.loads(await tools.create_or_update_setting("魔法体系", "设定摘要", "设定详情", "world"))
         assert created["name"] == "魔法体系"
         assert created["type"] == "world"
+        assert created["detail"] == "设定详情"
         setting_id = created["id"]
 
         listed = json.loads(await tools.list_settings())
@@ -238,6 +241,13 @@ class TestJfxzTools:
         updated = json.loads(await tools.update_chapter_summary(chapter.id, "新摘要"))
         assert updated["summary"] == "新摘要"
 
+        long_content = "新正文" * 100
+        content_result = json.loads(await tools.update_chapter_content(chapter.id, long_content))
+        assert content_result["new_content_preview"] == long_content[:200]
+        assert "new_content" not in content_result
+        assert content_result["new_content_length"] == len(long_content)
+        assert content_result["preview_truncated"] is True
+
         not_found = json.loads(await tools.get_chapter("nonexistent"))
         assert "error" in not_found
 
@@ -245,13 +255,15 @@ class TestJfxzTools:
         info = json.loads(await tools.get_work_info())
         assert info["title"] == "测试作品"
 
-        updated = json.loads(await tools.update_work_info(title="新标题", short_intro="新简介"))
-        assert updated["title"] == "新标题"
-        assert updated["short_intro"] == "新简介"
+        updated = json.loads(await tools.update_work_info("short_intro", "新简介"))
+        assert updated["field"] == "short_intro"
+        assert updated["value"] == "新简介"
 
-        partial = json.loads(await tools.update_work_info(synopsis="新梗概"))
-        assert partial["synopsis"] == "新梗概"
-        assert partial["title"] == "新标题"
+        partial = json.loads(await tools.update_work_info("synopsis", "新梗概"))
+        assert partial["field"] == "synopsis"
+        refreshed = json.loads(await tools.get_work_info())
+        assert refreshed["short_intro"] == "新简介"
+        assert refreshed["synopsis"] == "新梗概"
 
     async def test_update_character_not_found(self, tools: JfxzTools) -> None:
         result = json.loads(await tools.create_or_update_character("x", "y", character_id="nonexistent"))
@@ -294,16 +306,17 @@ class TestJfxzTools:
 
     async def test_update_work_info_not_found(self, session: AsyncSession) -> None:
         tools = JfxzTools(db=session, work_id="nonexistent-work")
-        result = json.loads(await tools.update_work_info(title="x"))
+        result = json.loads(await tools.update_work_info("short_intro", "x"))
         assert "error" in result
 
     async def test_update_work_info_all_fields(self, tools: JfxzTools) -> None:
-        updated = json.loads(await tools.update_work_info(
-            title="全标题", short_intro="全简介", synopsis="全梗概",
-            focus_requirements="全重点", forbidden_requirements="全禁忌",
-        ))
-        assert updated["focus_requirements"] == "全重点"
-        assert updated["forbidden_requirements"] == "全禁忌"
+        focus = json.loads(await tools.update_work_info("focus_requirements", "全重点"))
+        forbidden = json.loads(await tools.update_work_info("forbidden_requirements", "全禁忌"))
+        assert focus["field"] == "focus_requirements"
+        assert forbidden["field"] == "forbidden_requirements"
+        refreshed = json.loads(await tools.get_work_info())
+        assert refreshed["focus_requirements"] == "全重点"
+        assert refreshed["forbidden_requirements"] == "全禁忌"
 
 
 # ---- billing_service tests ----

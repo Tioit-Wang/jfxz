@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AiModel, PointAccount, PointTransaction
+from app.models import AiModel, GlobalConfig, PointAccount, PointTransaction
 
 ZERO = Decimal("0")
 MIN_COST = Decimal("0.01")
@@ -23,21 +23,35 @@ async def _ensure_point_account(session: AsyncSession, user_id: str) -> PointAcc
 
 
 _ONE_MILLION = Decimal("1000000")
-_HUNDRED = Decimal("100")
 _CENTS = Decimal("0.01")
+_DEFAULT_POINTS_PER_CNY = Decimal("10000")
+
+
+async def get_points_per_cny(session: AsyncSession) -> Decimal:
+    """读取 billing.points_per_cny 配置，默认 10000。"""
+    result = await session.execute(
+        select(GlobalConfig.integer_value).where(
+            GlobalConfig.config_group == "billing",
+            GlobalConfig.config_key == "points_per_cny",
+        )
+    )
+    val = result.scalar_one_or_none()
+    return Decimal(str(val)) if val is not None else _DEFAULT_POINTS_PER_CNY
 
 
 def _calculate_cost(
     cache_hit_tokens: int,
     cache_miss_tokens: int,
     completion_tokens: int,
-    cache_hit_multiplier: Decimal,
-    cache_miss_multiplier: Decimal,
-    output_multiplier: Decimal,
+    input_cost_per_million: Decimal,
+    cache_hit_input_cost_per_million: Decimal,
+    output_cost_per_million: Decimal,
+    profit_multiplier: Decimal,
+    points_per_cny: Decimal,
 ) -> Decimal:
-    hit_cost = (Decimal(cache_hit_tokens) / _ONE_MILLION) * _HUNDRED * cache_hit_multiplier
-    miss_cost = (Decimal(cache_miss_tokens) / _ONE_MILLION) * _HUNDRED * cache_miss_multiplier
-    out_cost = (Decimal(completion_tokens) / _ONE_MILLION) * _HUNDRED * output_multiplier
+    hit_cost = (Decimal(cache_hit_tokens) / _ONE_MILLION) * cache_hit_input_cost_per_million * profit_multiplier * points_per_cny
+    miss_cost = (Decimal(cache_miss_tokens) / _ONE_MILLION) * input_cost_per_million * profit_multiplier * points_per_cny
+    out_cost = (Decimal(completion_tokens) / _ONE_MILLION) * output_cost_per_million * profit_multiplier * points_per_cny
     raw_cost = hit_cost + miss_cost + out_cost
     return raw_cost.quantize(_CENTS, rounding="ROUND_CEILING")
 
@@ -57,14 +71,17 @@ async def pre_check_balance(
 ) -> None:
     account = await _ensure_point_account(session, user_id)
 
+    points_per_cny = await get_points_per_cny(session)
     estimated_output = int(model.max_output_tokens * PRE_CHECK_OUTPUT_RATIO)
     max_cost = _calculate_cost(
         cache_hit_tokens=0,
         cache_miss_tokens=estimated_input_tokens,
         completion_tokens=estimated_output,
-        cache_hit_multiplier=model.cache_hit_input_multiplier,
-        cache_miss_multiplier=model.cache_miss_input_multiplier,
-        output_multiplier=model.output_multiplier,
+        input_cost_per_million=model.input_cost_per_million,
+        cache_hit_input_cost_per_million=model.cache_hit_input_cost_per_million,
+        output_cost_per_million=model.output_cost_per_million,
+        profit_multiplier=model.profit_multiplier,
+        points_per_cny=points_per_cny,
     )
 
     total_balance = account.vip_daily_points_balance + account.credit_pack_points_balance
@@ -118,14 +135,17 @@ async def deduct_by_usage(
     completion_tokens = int(usage.get("completion_tokens", 0))
     cache_miss_tokens = max(0, prompt_tokens - cache_hit_tokens)
 
+    points_per_cny = await get_points_per_cny(session)
     cost = _cost_to_deduct(
         _calculate_cost(
             cache_hit_tokens=cache_hit_tokens,
             cache_miss_tokens=cache_miss_tokens,
             completion_tokens=completion_tokens,
-            cache_hit_multiplier=model.cache_hit_input_multiplier,
-            cache_miss_multiplier=model.cache_miss_input_multiplier,
-            output_multiplier=model.output_multiplier,
+            input_cost_per_million=model.input_cost_per_million,
+            cache_hit_input_cost_per_million=model.cache_hit_input_cost_per_million,
+            output_cost_per_million=model.output_cost_per_million,
+            profit_multiplier=model.profit_multiplier,
+            points_per_cny=points_per_cny,
         )
     )
 
@@ -156,9 +176,11 @@ async def deduct_by_usage(
         prompt_cache_hit_tokens=cache_hit_tokens,
         prompt_cache_miss_tokens=cache_miss_tokens,
         completion_tokens=completion_tokens,
-        cache_hit_input_multiplier_snapshot=model.cache_hit_input_multiplier,
-        cache_miss_input_multiplier_snapshot=model.cache_miss_input_multiplier,
-        output_multiplier_snapshot=model.output_multiplier,
+        input_cost_per_million_snapshot=model.input_cost_per_million,
+        cache_hit_input_cost_per_million_snapshot=model.cache_hit_input_cost_per_million,
+        output_cost_per_million_snapshot=model.output_cost_per_million,
+        profit_multiplier_snapshot=model.profit_multiplier,
+        points_per_cny_snapshot=points_per_cny,
     )
 
     if vip_deduction > ZERO:

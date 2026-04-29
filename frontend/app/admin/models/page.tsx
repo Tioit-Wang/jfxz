@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, Calculator, ChevronDown, ChevronRight, Minus, Plus, Search } from "lucide-react";
+import { AlertCircle, Minus, Plus, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ApiError, type AdminAiModel, type AdminAiModelInput, type AdminModelListParams } from "@/api";
@@ -14,7 +14,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { generatedMultiplier } from "@/model-billing";
 import { formatToken } from "@/lib/format";
 import { AdminPagination } from "../_components";
 import { adminClient } from "../admin-utils";
@@ -31,13 +30,10 @@ type ModelForm = {
   maxContextTokens: string;
   maxOutputTokens: string;
   temperature: string;
-  cacheHitInputMultiplier: string;
-  cacheMissInputMultiplier: string;
-  outputMultiplier: string;
-  cacheHitCost: string;
-  cacheMissCost: string;
-  outputCost: string;
-  markupRate: string;
+  inputCostPerMillion: string;
+  cacheHitInputCostPerMillion: string;
+  outputCostPerMillion: string;
+  profitMultiplier: string;
   status: "active" | "inactive";
   sortOrder: string;
 };
@@ -52,13 +48,10 @@ const emptyForm: ModelForm = {
   maxContextTokens: "64000",
   maxOutputTokens: "4096",
   temperature: "0.70",
-  cacheHitInputMultiplier: "0.00",
-  cacheMissInputMultiplier: "0.00",
-  outputMultiplier: "0.00",
-  cacheHitCost: "",
-  cacheMissCost: "",
-  outputCost: "",
-  markupRate: "10",
+  inputCostPerMillion: "1.00",
+  cacheHitInputCostPerMillion: "0.10",
+  outputCostPerMillion: "2.00",
+  profitMultiplier: "1.10",
   status: "active",
   sortOrder: ""
 };
@@ -86,13 +79,10 @@ function modelToForm(model: AdminAiModel): ModelForm {
     maxContextTokens: asString(model.max_context_tokens),
     maxOutputTokens: asString(model.max_output_tokens),
     temperature: asString(model.temperature),
-    cacheHitInputMultiplier: asString(model.cache_hit_input_multiplier),
-    cacheMissInputMultiplier: asString(model.cache_miss_input_multiplier),
-    outputMultiplier: asString(model.output_multiplier),
-    cacheHitCost: "",
-    cacheMissCost: "",
-    outputCost: "",
-    markupRate: "10",
+    inputCostPerMillion: asString(model.input_cost_per_million),
+    cacheHitInputCostPerMillion: asString(model.cache_hit_input_cost_per_million),
+    outputCostPerMillion: asString(model.output_cost_per_million),
+    profitMultiplier: asString(model.profit_multiplier),
     status: model.status,
     sortOrder: model.sort_order == null ? "" : asString(model.sort_order)
   };
@@ -109,9 +99,10 @@ function formPayload(form: ModelForm): AdminAiModelInput {
     maxContextTokens: Number(form.maxContextTokens),
     maxOutputTokens: Number(form.maxOutputTokens),
     temperature: form.temperature,
-    cacheHitInputMultiplier: form.cacheHitInputMultiplier,
-    cacheMissInputMultiplier: form.cacheMissInputMultiplier,
-    outputMultiplier: form.outputMultiplier,
+    inputCostPerMillion: form.inputCostPerMillion,
+    cacheHitInputCostPerMillion: form.cacheHitInputCostPerMillion,
+    outputCostPerMillion: form.outputCostPerMillion,
+    profitMultiplier: form.profitMultiplier,
     status: form.status,
     sortOrder: form.sortOrder.trim() ? Number(form.sortOrder) : null
   };
@@ -128,9 +119,10 @@ function statusPayload(model: AdminAiModel, status: "active" | "inactive"): Admi
     maxContextTokens: model.max_context_tokens,
     maxOutputTokens: model.max_output_tokens,
     temperature: asString(model.temperature),
-    cacheHitInputMultiplier: asString(model.cache_hit_input_multiplier),
-    cacheMissInputMultiplier: asString(model.cache_miss_input_multiplier),
-    outputMultiplier: asString(model.output_multiplier),
+    inputCostPerMillion: asString(model.input_cost_per_million),
+    cacheHitInputCostPerMillion: asString(model.cache_hit_input_cost_per_million),
+    outputCostPerMillion: asString(model.output_cost_per_million),
+    profitMultiplier: asString(model.profit_multiplier),
     status,
     sortOrder: model.sort_order
   };
@@ -176,7 +168,7 @@ function TokenDisplay({ value }: { value: number }) {
   return <span className="font-mono text-xs">{display}</span>;
 }
 
-function MultiplierDisplay({ value }: { value: string }) {
+function CostDisplay({ value }: { value: string }) {
   const num = parseFloat(value);
   if (isNaN(num)) return <span className="text-xs text-muted-foreground">—</span>;
   return (
@@ -193,7 +185,6 @@ export default function AdminModelsPage() {
   const [loadError, setLoadError] = useState(false);
   const [form, setForm] = useState<ModelForm | null>(null);
   const [statusTarget, setStatusTarget] = useState<AdminAiModel | null>(null);
-  const [showCalculator, setShowCalculator] = useState(false);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [logicMin, setLogicMin] = useState("");
@@ -261,24 +252,6 @@ export default function AdminModelsPage() {
     setForm({ ...emptyForm });
   }
 
-  function applyGeneratedMultipliers() {
-    if (!form) return;
-    const cacheHit = generatedMultiplier(form.cacheHitCost, form.markupRate);
-    const cacheMiss = generatedMultiplier(form.cacheMissCost, form.markupRate);
-    const output = generatedMultiplier(form.outputCost, form.markupRate);
-    if (!cacheHit || !cacheMiss || !output) {
-      toast.error("请填写有效的成本价和加价率");
-      return;
-    }
-    setForm({
-      ...form,
-      cacheHitInputMultiplier: cacheHit,
-      cacheMissInputMultiplier: cacheMiss,
-      outputMultiplier: output
-    });
-    toast.success("计费倍率已生成");
-  }
-
   function validateForm(nextForm: ModelForm): string | null {
     if (!nextForm.displayName.trim()) return "请填写模型名称";
     if (!nextForm.providerModelId.trim()) return "请填写平台调用 ID";
@@ -288,8 +261,10 @@ export default function AdminModelsPage() {
     if (Number(nextForm.maxOutputTokens) <= 0 || Number.isNaN(Number(nextForm.maxOutputTokens))) return "最大输出必须大于 0";
     const temperature = Number(nextForm.temperature);
     if (Number.isNaN(temperature) || temperature < 0 || temperature > 2) return "temperature 必须在 0 到 2 之间";
-    const multipliers = [nextForm.cacheHitInputMultiplier, nextForm.cacheMissInputMultiplier, nextForm.outputMultiplier].map(Number);
-    if (multipliers.some((item) => Number.isNaN(item) || item < 0)) return "计费倍率不能为负数";
+    const costs = [nextForm.inputCostPerMillion, nextForm.cacheHitInputCostPerMillion, nextForm.outputCostPerMillion].map(Number);
+    if (costs.some((item) => Number.isNaN(item) || item < 0)) return "成本价不能为负数";
+    const profitMultiplier = Number(nextForm.profitMultiplier);
+    if (Number.isNaN(profitMultiplier) || profitMultiplier < 0) return "盈利倍率不能为负数";
     if (nextForm.sortOrder.trim() && Number.isNaN(Number(nextForm.sortOrder))) return "排序值必须是数字";
     return null;
   }
@@ -479,7 +454,7 @@ export default function AdminModelsPage() {
                         <TableHead className="w-[180px]">评分</TableHead>
                         <TableHead className="w-[120px]">上下文</TableHead>
                         <TableHead className="w-[100px]">输出</TableHead>
-                        <TableHead className="w-[120px]">计费倍率</TableHead>
+                        <TableHead className="w-[120px]">成本价</TableHead>
                         <TableHead className="w-[60px]">排序</TableHead>
                         <TableHead className="w-[80px]">状态</TableHead>
                         <TableHead className="w-[140px] text-right">操作</TableHead>
@@ -526,16 +501,20 @@ export default function AdminModelsPage() {
                           <TableCell>
                             <div className="flex flex-col gap-0.5 text-xs">
                               <div className="flex items-center justify-between">
-                                <span className="text-muted-foreground">命中</span>
-                                <MultiplierDisplay value={model.cache_hit_input_multiplier} />
+                                <span className="text-muted-foreground">输入</span>
+                                <CostDisplay value={model.input_cost_per_million} />
                               </div>
                               <div className="flex items-center justify-between">
-                                <span className="text-muted-foreground">未命中</span>
-                                <MultiplierDisplay value={model.cache_miss_input_multiplier} />
+                                <span className="text-muted-foreground">缓存</span>
+                                <CostDisplay value={model.cache_hit_input_cost_per_million} />
                               </div>
                               <div className="flex items-center justify-between">
                                 <span className="text-muted-foreground">输出</span>
-                                <MultiplierDisplay value={model.output_multiplier} />
+                                <CostDisplay value={model.output_cost_per_million} />
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-muted-foreground">盈利</span>
+                                <CostDisplay value={model.profit_multiplier} />
                               </div>
                             </div>
                           </TableCell>
@@ -708,103 +687,45 @@ export default function AdminModelsPage() {
               </div>
 
               <div className="space-y-3">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">计费倍率</h3>
-                <div className="rounded-md border bg-muted/30 p-3">
-                  <button
-                    type="button"
-                    className="flex w-full items-center gap-2 text-left"
-                    onClick={() => setShowCalculator(!showCalculator)}
-                  >
-                    {showCalculator ? <ChevronDown className="size-3.5 text-muted-foreground" /> : <ChevronRight className="size-3.5 text-muted-foreground" />}
-                    <div className="flex-1">
-                      <p className="text-xs font-medium">按成本价快速生成</p>
-                      {!showCalculator && (
-                        <p className="text-[11px] text-muted-foreground">点击展开，填写成本价和加价率后自动生成倍率</p>
-                      )}
-                    </div>
-                    {showCalculator && (
-                      <Button type="button" variant="secondary" size="sm" className="h-8 shrink-0 text-xs" onClick={(e) => { e.stopPropagation(); applyGeneratedMultipliers(); }}>
-                        <Calculator className="size-3.5" />
-                        生成倍率
-                      </Button>
-                    )}
-                  </button>
-                  {showCalculator && (
-                    <div className="mt-3 grid gap-2 md:grid-cols-4">
-                      <Field>
-                        <FieldLabel htmlFor="model-cache-hit-cost">命中成本</FieldLabel>
-                        <Input
-                          id="model-cache-hit-cost"
-                          inputMode="decimal"
-                          value={form.cacheHitCost}
-                          onChange={(event) => setForm({ ...form, cacheHitCost: event.target.value })}
-                          placeholder="0.10"
-                          className="h-8 font-mono text-xs"
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor="model-cache-miss-cost">未命中成本</FieldLabel>
-                        <Input
-                          id="model-cache-miss-cost"
-                          inputMode="decimal"
-                          value={form.cacheMissCost}
-                          onChange={(event) => setForm({ ...form, cacheMissCost: event.target.value })}
-                          placeholder="12"
-                          className="h-8 font-mono text-xs"
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor="model-output-cost">输出成本</FieldLabel>
-                        <Input
-                          id="model-output-cost"
-                          inputMode="decimal"
-                          value={form.outputCost}
-                          onChange={(event) => setForm({ ...form, outputCost: event.target.value })}
-                          placeholder="24"
-                          className="h-8 font-mono text-xs"
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor="model-markup-rate">加价率 %</FieldLabel>
-                        <Input
-                          id="model-markup-rate"
-                          inputMode="decimal"
-                          value={form.markupRate}
-                          onChange={(event) => setForm({ ...form, markupRate: event.target.value })}
-                          className="h-8 font-mono text-xs"
-                        />
-                      </Field>
-                    </div>
-                  )}
-                </div>
-                <div className="grid gap-3 md:grid-cols-3">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">成本定价</h3>
+                <div className="grid gap-3 md:grid-cols-2">
                   <Field>
-                    <FieldLabel htmlFor="model-cache-hit">缓存命中输入倍率</FieldLabel>
+                    <FieldLabel htmlFor="model-input-cost">输入成本价（元/百万token）</FieldLabel>
                     <Input
-                      id="model-cache-hit"
+                      id="model-input-cost"
                       inputMode="decimal"
-                      value={form.cacheHitInputMultiplier}
-                      onChange={(event) => setForm({ ...form, cacheHitInputMultiplier: event.target.value })}
+                      value={form.inputCostPerMillion}
+                      onChange={(event) => setForm({ ...form, inputCostPerMillion: event.target.value })}
                       className="font-mono"
                     />
                   </Field>
                   <Field>
-                    <FieldLabel htmlFor="model-cache-miss">缓存未命中输入倍率</FieldLabel>
+                    <FieldLabel htmlFor="model-cache-hit-cost">缓存命中成本价（元/百万token）</FieldLabel>
                     <Input
-                      id="model-cache-miss"
+                      id="model-cache-hit-cost"
                       inputMode="decimal"
-                      value={form.cacheMissInputMultiplier}
-                      onChange={(event) => setForm({ ...form, cacheMissInputMultiplier: event.target.value })}
+                      value={form.cacheHitInputCostPerMillion}
+                      onChange={(event) => setForm({ ...form, cacheHitInputCostPerMillion: event.target.value })}
                       className="font-mono"
                     />
                   </Field>
                   <Field>
-                    <FieldLabel htmlFor="model-output-multiplier">输出倍率</FieldLabel>
+                    <FieldLabel htmlFor="model-output-cost">输出成本价（元/百万token）</FieldLabel>
                     <Input
-                      id="model-output-multiplier"
+                      id="model-output-cost"
                       inputMode="decimal"
-                      value={form.outputMultiplier}
-                      onChange={(event) => setForm({ ...form, outputMultiplier: event.target.value })}
+                      value={form.outputCostPerMillion}
+                      onChange={(event) => setForm({ ...form, outputCostPerMillion: event.target.value })}
+                      className="font-mono"
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="model-profit-multiplier">盈利倍率</FieldLabel>
+                    <Input
+                      id="model-profit-multiplier"
+                      inputMode="decimal"
+                      value={form.profitMultiplier}
+                      onChange={(event) => setForm({ ...form, profitMultiplier: event.target.value })}
                       className="font-mono"
                     />
                   </Field>

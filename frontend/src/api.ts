@@ -225,6 +225,53 @@ export type AdminProductInput = {
   sortOrder?: number | null;
 };
 
+export type CostPreviewIn = {
+  modelId: string;
+  bundledCreditPackPoints: number;
+  dailyVipPoints: number;
+  durationDays?: number;
+  priceAmount?: string;
+};
+
+export type CostPreviewScenario = {
+  utilizationPct: number;
+  vipPointsUsed: number;
+  vipCost: number;
+  totalCost: number;
+  revenue: number | null;
+  profit: number | null;
+  marginPct: number | null;
+};
+
+export type CostPreviewOut = {
+  model: {
+    id: string;
+    displayName: string;
+    inputCostPerMillion: number;
+    cacheHitInputCostPerMillion: number;
+    outputCostPerMillion: number;
+    profitMultiplier: number;
+  };
+  perPoint: {
+    blendedCost: number;
+    inputCost: number;
+    outputCost: number;
+    tokensPerPointOutput: number;
+    tokensPerPointInput: number;
+    note: string;
+  };
+  creditPack: { points: number; cashCost: number; costVsPricePct: string | null };
+  dailyVip: { pointsPerDay: number; monthlyPointsMax: number; monthlyCostMax: number };
+  scenarios: CostPreviewScenario[];
+  conclusion: {
+    creditPackExceedsPrice: boolean;
+    minTotalCost: number;
+    breakevenUtilization: number | null;
+    suggestedMaxBundled: number | null;
+    warning: string;
+  };
+};
+
 export type AiModelOption = {
   id: string;
   display_name: string;
@@ -234,7 +281,6 @@ export type AiModelOption = {
   knowledge_score: number;
   max_context_tokens: number;
   max_output_tokens: number;
-  output_multiplier: string;
   temperature: string;
   status: "active" | "inactive";
   sort_order: number | null;
@@ -242,8 +288,10 @@ export type AiModelOption = {
 
 export type AdminAiModel = AiModelOption & {
   provider_model_id: string;
-  cache_hit_input_multiplier: string;
-  cache_miss_input_multiplier: string;
+  input_cost_per_million: string;
+  cache_hit_input_cost_per_million: string;
+  output_cost_per_million: string;
+  profit_multiplier: string;
   created_at: string;
   updated_at: string;
 };
@@ -258,9 +306,10 @@ export type AdminAiModelInput = {
   maxContextTokens: number;
   maxOutputTokens: number;
   temperature: string;
-  cacheHitInputMultiplier: string;
-  cacheMissInputMultiplier: string;
-  outputMultiplier: string;
+  inputCostPerMillion: string;
+  cacheHitInputCostPerMillion: string;
+  outputCostPerMillion: string;
+  profitMultiplier: string;
   status: "active" | "inactive";
   sortOrder?: number | null;
 };
@@ -326,9 +375,11 @@ export type AdminCreditTransaction = {
   cache_hit_input_tokens?: number;
   cache_miss_input_tokens?: number;
   output_tokens?: number;
-  cache_hit_input_multiplier_snapshot?: string;
-  cache_miss_input_multiplier_snapshot?: string;
-  output_multiplier_snapshot?: string;
+  input_cost_per_million_snapshot?: string;
+  cache_hit_input_cost_per_million_snapshot?: string;
+  output_cost_per_million_snapshot?: string;
+  profit_multiplier_snapshot?: string;
+  points_per_cny_snapshot?: string;
   platform_call_id?: string;
   points_change: number;
   points_after: number;
@@ -553,9 +604,10 @@ function aiModelPayload(input: AdminAiModelInput): Record<string, unknown> {
     max_context_tokens: input.maxContextTokens,
     max_output_tokens: input.maxOutputTokens,
     temperature: input.temperature,
-    cache_hit_input_multiplier: input.cacheHitInputMultiplier,
-    cache_miss_input_multiplier: input.cacheMissInputMultiplier,
-    output_multiplier: input.outputMultiplier,
+    input_cost_per_million: input.inputCostPerMillion,
+    cache_hit_input_cost_per_million: input.cacheHitInputCostPerMillion,
+    output_cost_per_million: input.outputCostPerMillion,
+    profit_multiplier: input.profitMultiplier,
     status: input.status,
     sort_order: input.sortOrder ?? null
   };
@@ -1015,6 +1067,69 @@ export class ApiClient {
 
   async deleteAdminProduct(kind: AdminProductKind, itemId: string): Promise<void> {
     await this.request<{ ok: boolean }>(`/admin/products/${kind}/${itemId}`, { method: "DELETE" });
+  }
+
+  async previewPlanCost(input: CostPreviewIn): Promise<CostPreviewOut> {
+    const raw = await this.request<Record<string, unknown>>("/admin/cost-preview", {
+      method: "POST",
+      body: JSON.stringify({
+        model_id: input.modelId,
+        bundled_credit_pack_points: input.bundledCreditPackPoints,
+        daily_vip_points: input.dailyVipPoints,
+        duration_days: input.durationDays ?? 31,
+        price_amount: input.priceAmount ?? null,
+      }),
+    });
+    const m = raw.model as Record<string, unknown>;
+    const pp = raw.per_point as Record<string, unknown>;
+    const cp = raw.credit_pack as Record<string, unknown>;
+    const dv = raw.daily_vip as Record<string, unknown>;
+    const rawScenarios = raw.scenarios as Array<Record<string, unknown>>;
+    const conc = raw.conclusion as Record<string, unknown>;
+    return {
+      model: {
+        id: m.id as string,
+        displayName: m.display_name as string,
+        inputCostPerMillion: m.input_cost_per_million as number,
+        cacheHitInputCostPerMillion: m.cache_hit_input_cost_per_million as number,
+        outputCostPerMillion: m.output_cost_per_million as number,
+        profitMultiplier: m.profit_multiplier as number,
+      },
+      perPoint: {
+        blendedCost: pp.blended_cost as number,
+        inputCost: pp.input_cost as number,
+        outputCost: pp.output_cost as number,
+        tokensPerPointOutput: pp.tokens_per_point_output as number,
+        tokensPerPointInput: pp.tokens_per_point_input as number,
+        note: pp.note as string,
+      },
+      creditPack: {
+        points: cp.points as number,
+        cashCost: cp.cash_cost as number,
+        costVsPricePct: cp.cost_vs_price_pct as string | null,
+      },
+      dailyVip: {
+        pointsPerDay: dv.points_per_day as number,
+        monthlyPointsMax: dv.monthly_points_max as number,
+        monthlyCostMax: dv.monthly_cost_max as number,
+      },
+      scenarios: rawScenarios.map((s) => ({
+        utilizationPct: s.utilization_pct as number,
+        vipPointsUsed: s.vip_points_used as number,
+        vipCost: s.vip_cost as number,
+        totalCost: s.total_cost as number,
+        revenue: (s.revenue as number) ?? null,
+        profit: (s.profit as number) ?? null,
+        marginPct: (s.margin_pct as number) ?? null,
+      })),
+      conclusion: {
+        creditPackExceedsPrice: conc.credit_pack_exceeds_price as boolean,
+        minTotalCost: conc.min_total_cost as number,
+        breakevenUtilization: (conc.breakeven_utilization as number) ?? null,
+        suggestedMaxBundled: (conc.suggested_max_bundled as number) ?? null,
+        warning: conc.warning as string,
+      },
+    };
   }
 
   async listAdminCreditTransactions(params: CreditTransactionListParams = {}): Promise<Paginated<AdminCreditTransaction>> {

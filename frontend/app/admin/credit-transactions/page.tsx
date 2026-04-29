@@ -130,12 +130,16 @@ function DetailContent({ tx }: { tx: AdminCreditTransaction }) {
             <span className="font-mono text-xs">{tx.cache_miss_input_tokens?.toLocaleString() ?? "—"} tokens</span>
             <span className="text-muted-foreground">输出</span>
             <span className="font-mono text-xs">{tx.output_tokens?.toLocaleString() ?? "—"} tokens</span>
-            <span className="text-muted-foreground">命中输入倍率</span>
-            <span className="font-mono text-xs">{tx.cache_hit_input_multiplier_snapshot ?? "—"}</span>
-            <span className="text-muted-foreground">未命中输入倍率</span>
-            <span className="font-mono text-xs">{tx.cache_miss_input_multiplier_snapshot ?? "—"}</span>
-            <span className="text-muted-foreground">输出倍率</span>
-            <span className="font-mono text-xs">{tx.output_multiplier_snapshot ?? "—"}</span>
+            <span className="text-muted-foreground">输入成本价</span>
+            <span className="font-mono text-xs">{tx.input_cost_per_million_snapshot ?? "—"}</span>
+            <span className="text-muted-foreground">缓存命中成本价</span>
+            <span className="font-mono text-xs">{tx.cache_hit_input_cost_per_million_snapshot ?? "—"}</span>
+            <span className="text-muted-foreground">输出成本价</span>
+            <span className="font-mono text-xs">{tx.output_cost_per_million_snapshot ?? "—"}</span>
+            <span className="text-muted-foreground">盈利倍率</span>
+            <span className="font-mono text-xs">{tx.profit_multiplier_snapshot ?? "—"}</span>
+            <span className="text-muted-foreground">积分汇率</span>
+            <span className="font-mono text-xs">{tx.points_per_cny_snapshot ?? "—"}</span>
           </div>
         </section>
       ) : null}

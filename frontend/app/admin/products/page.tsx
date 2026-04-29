@@ -1,9 +1,9 @@
 "use client";
 
-import { AlertCircle, Plus, Search, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { AlertCircle, ChevronDown, ChevronUp, Plus, Search, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { type AdminProductInput, type AdminProductKind } from "@/api";
+import { type AdminProductInput, type AdminProductKind, type AiModelOption, type CostPreviewOut } from "@/api";
 import { AdminPagination, StatusBadge } from "../_components";
 import { adminClient, money } from "../admin-utils";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -114,6 +114,54 @@ export default function AdminProductsPage() {
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const pageSize = 10;
+
+  // Cost preview state
+  const [models, setModels] = useState<AiModelOption[]>([]);
+  const [selectedModelId, setSelectedModelId] = useState<string>("");
+  const [costPreview, setCostPreview] = useState<CostPreviewOut | null>(null);
+  const [costPreviewLoading, setCostPreviewLoading] = useState(false);
+  const [costPreviewOpen, setCostPreviewOpen] = useState(false);
+  const costPreviewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Load models for cost preview selector
+  useEffect(() => {
+    client.listAiModels().then((list) => {
+      setModels(list);
+      if (list.length > 0 && !selectedModelId) {
+        setSelectedModelId(list[0].id);
+      }
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Debounced cost preview fetch
+  useEffect(() => {
+    if (!form || form.kind !== "plans" || !selectedModelId) {
+      setCostPreview(null);
+      return;
+    }
+    if (costPreviewTimer.current) clearTimeout(costPreviewTimer.current);
+    costPreviewTimer.current = setTimeout(async () => {
+      setCostPreviewLoading(true);
+      try {
+        const result = await client.previewPlanCost({
+          modelId: selectedModelId,
+          bundledCreditPackPoints: Number(form.bundledCreditPackPoints || 0),
+          dailyVipPoints: Number(form.vipDailyPoints || 0),
+          durationDays: 31,
+          priceAmount: form.priceAmount || undefined,
+        });
+        setCostPreview(result);
+      } catch {
+        setCostPreview(null);
+      } finally {
+        setCostPreviewLoading(false);
+      }
+    }, 500);
+    return () => {
+      if (costPreviewTimer.current) clearTimeout(costPreviewTimer.current);
+    };
+  }, [form?.bundledCreditPackPoints, form?.vipDailyPoints, form?.priceAmount, form?.kind, selectedModelId, client]);
 
   async function load(kind = activeKind, nextPage = page) {
     setLoading(true);
@@ -392,6 +440,7 @@ export default function AdminProductsPage() {
             <DialogDescription>保存后会立即影响用户端可见商品。</DialogDescription>
           </DialogHeader>
           {form ? (
+            <>
             <FieldGroup>
               <Field><FieldLabel htmlFor="product-name">名称</FieldLabel><Input id="product-name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></Field>
               <Field><FieldLabel htmlFor="product-price">价格</FieldLabel><Input id="product-price" value={form.priceAmount} onChange={(event) => setForm({ ...form, priceAmount: event.target.value })} /></Field>
@@ -413,6 +462,123 @@ export default function AdminProductsPage() {
                 </Select>
               </Field>
             </FieldGroup>
+
+            {/* ── Cost Preview (plan only) ── */}
+            {form.kind === "plans" && (
+              <div className="border-t pt-4">
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between text-sm font-medium text-muted-foreground hover:text-foreground"
+                  onClick={() => setCostPreviewOpen(!costPreviewOpen)}
+                >
+                  <span>成本预览</span>
+                  {costPreviewOpen ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+                </button>
+                {costPreviewOpen && (
+                  <div className="mt-3 space-y-3 rounded-md border bg-muted/30 p-3 text-xs">
+                    {/* Model selector */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground shrink-0">选择模型:</span>
+                      <Select value={selectedModelId} onValueChange={setSelectedModelId}>
+                        <SelectTrigger className="h-8 w-48 text-xs">
+                          <SelectValue placeholder="选择模型" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {models.map((m) => (
+                            <SelectItem key={m.id} value={m.id}>{m.display_name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {costPreviewLoading ? (
+                      <div className="py-4 text-center text-muted-foreground">加载中…</div>
+                    ) : costPreview ? (
+                      <>
+                        {/* Model cost info */}
+                        <div className="rounded border bg-background p-2 space-y-1">
+                          <div className="font-medium">{costPreview.model.displayName} 成本信息</div>
+                          <div className="text-muted-foreground">
+                            输出成本价 {costPreview.model.outputCostPerMillion} 元/百万token
+                          </div>
+                          <div className="text-muted-foreground">
+                            输入成本价 {costPreview.model.inputCostPerMillion} 元/百万token
+                          </div>
+                          <div className="text-muted-foreground">
+                            每积分 ≈ {costPreview.perPoint.tokensPerPointOutput.toLocaleString()} 输出tokens / {costPreview.perPoint.tokensPerPointInput.toLocaleString()} 输入tokens
+                          </div>
+                          <div>
+                            混合成本: <span className="font-mono font-medium">{costPreview.perPoint.blendedCost}</span> 元/分
+                            <span className="text-muted-foreground">（{costPreview.perPoint.note}）</span>
+                          </div>
+                        </div>
+
+                        {/* Credit pack fixed cost */}
+                        <div className="rounded border bg-background p-2">
+                          <div className="font-medium">固定成本（加油包全部消耗）</div>
+                          <div className="mt-1">
+                            <span className="font-mono">{costPreview.creditPack.points.toLocaleString()}分</span>
+                            <span className="text-muted-foreground"> → </span>
+                            <span className="font-mono font-medium">{costPreview.creditPack.cashCost}元</span>
+                            {costPreview.creditPack.costVsPricePct && (
+                              <span className="ml-1 text-muted-foreground">(占售价{costPreview.creditPack.costVsPricePct})</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Daily VIP variable cost */}
+                        <div className="rounded border bg-background p-2">
+                          <div className="font-medium">
+                            可变成本（VIP日权益 × 使用率）
+                          </div>
+                          <div className="mt-1 text-muted-foreground">
+                            日{costPreview.dailyVip.pointsPerDay.toLocaleString()}分 × 31天 = 月上限 {costPreview.dailyVip.monthlyPointsMax.toLocaleString()} 分
+                          </div>
+                          <Table className="mt-2 text-xs">
+                            <TableHeader>
+                              <TableRow className="hover:bg-transparent">
+                                <TableHead className="h-7 py-1">使用率</TableHead>
+                                <TableHead className="h-7 py-1 text-right">月消耗分</TableHead>
+                                <TableHead className="h-7 py-1 text-right">变动成本</TableHead>
+                                <TableHead className="h-7 py-1 text-right">总成本</TableHead>
+                                {costPreview.scenarios[0]?.marginPct != null && (
+                                  <TableHead className="h-7 py-1 text-right">利润率</TableHead>
+                                )}
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {costPreview.scenarios.map((s) => (
+                                <TableRow key={s.utilizationPct} className="hover:bg-transparent">
+                                  <TableCell className="py-0.5 font-mono">{s.utilizationPct}%</TableCell>
+                                  <TableCell className="py-0.5 text-right font-mono">{s.vipPointsUsed.toLocaleString()}</TableCell>
+                                  <TableCell className="py-0.5 text-right font-mono">{s.vipCost}</TableCell>
+                                  <TableCell className="py-0.5 text-right font-mono">{s.totalCost}</TableCell>
+                                  {s.marginPct != null && (
+                                    <TableCell className={`py-0.5 text-right font-mono ${s.marginPct < 0 ? "text-destructive" : "text-emerald-600"}`}>
+                                      {s.marginPct}%
+                                    </TableCell>
+                                  )}
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+
+                        {/* Conclusion / warning */}
+                        {costPreview.conclusion.warning && (
+                          <div className={`rounded border p-2 text-xs ${costPreview.conclusion.creditPackExceedsPrice ? "border-destructive/50 bg-destructive/5 text-destructive" : "border-amber-500/50 bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-300"}`}>
+                            ⚠ {costPreview.conclusion.warning}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="py-4 text-center text-muted-foreground">无法加载成本预览</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+            </>
           ) : null}
           <DialogFooter>
             <Button variant="outline" onClick={() => setForm(null)}>取消</Button>

@@ -1,19 +1,23 @@
 /**
- * 根据模型成本和加价率计算计费倍率。
+ * 根据成本价和盈利倍率计算售价（积分/百万token）。
  *
- * 当成本为 "0" 时，返回的倍率为 "0.00"，表示该模型为免费模型（multiplier=0 是合法值，
- * 代表免费使用，不需要计费）。
+ * 当成本为 "0" 时，返回 0，表示该模型为免费模型。
  *
- * @param cost - 每 1M tokens 的成本价（字符串形式）
- * @param markupRate - 加价率百分比（字符串形式，如 "10" 表示 10%）
- * @returns 计费倍率字符串（保留两位小数），或 null 表示输入无效
+ * @param costPerMillion - 每 1M tokens 的成本价（元）
+ * @param profitMultiplier - 盈利倍率（如 "1.10" 表示 10% 利润）
+ * @param pointsPerCny - 积分汇率，1元对应多少积分（默认 10000）
+ * @returns 售价（积分/百万token），或 null 表示输入无效
  */
-export function generatedMultiplier(cost: string, markupRate: string): string | null {
-  if (!cost.trim() || !markupRate.trim()) return null;
-  const costValue = Number(cost);
-  const markupValue = Number(markupRate || "0");
-  if (Number.isNaN(costValue) || Number.isNaN(markupValue) || costValue < 0 || markupValue < 0) return null;
-  // 除以 10：将"每 1M tokens 成本价"转换为"每 100K tokens 计费倍率"（1M / 100K = 10）
-  const multiplier = (costValue * (1 + markupValue / 100)) / 10;
-  return (Math.ceil(multiplier * 100) / 100).toFixed(2);
+export function calculateSellingPrice(
+  costPerMillion: string,
+  profitMultiplier: string,
+  pointsPerCny: string = "10000",
+): number | null {
+  if (!costPerMillion.trim() || !profitMultiplier.trim()) return null;
+  const cost = Number(costPerMillion);
+  const profit = Number(profitMultiplier);
+  const rate = Number(pointsPerCny);
+  if (Number.isNaN(cost) || Number.isNaN(profit) || Number.isNaN(rate)) return null;
+  if (cost < 0 || profit < 0 || rate <= 0) return null;
+  return cost * profit * rate;
 }

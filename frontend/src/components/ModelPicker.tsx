@@ -75,9 +75,6 @@ export function ModelPicker({ models, selectedId, onSelect }: ModelPickerProps) 
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-medium">{model.display_name}</span>
-                    <span className={cn("text-[10px]", active ? "text-blue-400" : "text-gray-300")}>
-                      ×{Number(model.output_multiplier).toFixed(1)}
-                    </span>
                   </div>
                   <div className={cn("mt-1 flex gap-2 text-[10px]", active ? "text-blue-500" : "text-gray-400")}>
                     <span>逻辑 {model.logic_score}</span>

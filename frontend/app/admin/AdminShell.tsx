@@ -14,6 +14,7 @@ export default function AdminShell({ children }: Readonly<{ children: ReactNode 
   const router = useRouter();
   const [ready, setReady] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [forbidden, setForbidden] = useState(false);
 
   useEffect(() => {
     if (pathname === "/admin/login") {
@@ -29,10 +30,21 @@ export default function AdminShell({ children }: Readonly<{ children: ReactNode 
           setProfile(p);
           return;
         }
-        router.replace("/admin/login");
+        setForbidden(true);
       })
       .catch(() => router.replace("/admin/login"));
   }, [pathname, router]);
+
+  if (forbidden) {
+    return (
+      <main className="grid min-h-screen place-items-center">
+        <div className="text-center space-y-2">
+          <h1 className="text-3xl font-bold text-destructive">无权限访问</h1>
+          <p className="text-muted-foreground">你的账号没有管理后台的访问权限。</p>
+        </div>
+      </main>
+    );
+  }
 
   if (pathname === "/admin/login") {
     return <>{children}</>;

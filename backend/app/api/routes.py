@@ -149,9 +149,10 @@ class AiModelIn(BaseModel):
     max_context_tokens: int = Field(gt=0)
     max_output_tokens: int = Field(gt=0)
     temperature: Decimal = Field(default=Decimal("0.70"), ge=Decimal("0"), le=Decimal("2"))
-    cache_hit_input_multiplier: Decimal = Field(ge=Decimal("0"))
-    cache_miss_input_multiplier: Decimal = Field(ge=Decimal("0"))
-    output_multiplier: Decimal = Field(ge=Decimal("0"))
+    input_cost_per_million: Decimal = Field(ge=Decimal("0"))
+    cache_hit_input_cost_per_million: Decimal = Field(ge=Decimal("0"))
+    output_cost_per_million: Decimal = Field(ge=Decimal("0"))
+    profit_multiplier: Decimal = Field(default=Decimal("1.10"), ge=Decimal("1"))
     status: Literal["active", "inactive"] = "active"
     sort_order: int | None = None
 
@@ -222,8 +223,10 @@ def public(model: Any) -> dict[str, Any]:
 def public_ai_model(model: AiModel) -> dict[str, Any]:
     data = public(model)
     data.pop("provider_model_id", None)
-    data.pop("cache_hit_input_multiplier", None)
-    data.pop("cache_miss_input_multiplier", None)
+    data.pop("input_cost_per_million", None)
+    data.pop("cache_hit_input_cost_per_million", None)
+    data.pop("output_cost_per_million", None)
+    data.pop("profit_multiplier", None)
     return data
 
 
@@ -444,13 +447,19 @@ async def current_user(
 
 async def current_admin(
     jfxz_admin_session: Annotated[str | None, Cookie(alias=ADMIN_COOKIE)] = None,
+    jfxz_session: Annotated[str | None, Cookie(alias=USER_COOKIE)] = None,
     authorization: Annotated[str | None, Header()] = None,
     session: AsyncSession = Depends(get_session),
 ) -> User:
     if authorization and authorization.startswith("Bearer ") and not get_settings().is_production:
         user = await user_from_token(session, authorization.removeprefix("Bearer "), "admin")
     else:
-        user = await user_from_token(session, jfxz_admin_session, "admin")
+        if jfxz_admin_session:
+            user = await user_from_token(session, jfxz_admin_session, "admin")
+        elif jfxz_session:
+            user = await user_from_token(session, jfxz_session, "user")
+        else:
+            raise HTTPException(status_code=401, detail="missing token")
     if user.role != "admin":
         raise HTTPException(status_code=403, detail="admin required")
     return user
@@ -516,29 +525,50 @@ async def seed_defaults(session: AsyncSession) -> None:
                 Plan(
                     name="创作月卡",
                     price_amount=Decimal("29.00"),
-                    daily_vip_points=1000,
-                    bundled_credit_pack_points=200,
+                    daily_vip_points=10000,
+                    bundled_credit_pack_points=2000,
                     sort_order=1,
                 ),
                 Plan(
                     name="专业月卡",
                     price_amount=Decimal("69.00"),
-                    daily_vip_points=3000,
-                    bundled_credit_pack_points=800,
+                    daily_vip_points=30000,
+                    bundled_credit_pack_points=8000,
                     sort_order=2,
+                ),
+                Plan(
+                    name="至尊月卡",
+                    price_amount=Decimal("129.00"),
+                    daily_vip_points=50000,
+                    bundled_credit_pack_points=15000,
+                    sort_order=3,
                 ),
             ]
         )
 
     existing_topups = await one(session, select(func.count(CreditPack.id)))
     if not existing_topups:
-        session.add(
-            CreditPack(
-                name="灵感积分包",
-                price_amount=Decimal("19.00"),
-                points=1200,
-                sort_order=1,
-            )
+        session.add_all(
+            [
+                CreditPack(
+                    name="灵感补给包",
+                    price_amount=Decimal("19.00"),
+                    points=10000,
+                    sort_order=1,
+                ),
+                CreditPack(
+                    name="创意扩充包",
+                    price_amount=Decimal("49.00"),
+                    points=30000,
+                    sort_order=2,
+                ),
+                CreditPack(
+                    name="创作畅享包",
+                    price_amount=Decimal("129.00"),
+                    points=100000,
+                    sort_order=3,
+                ),
+            ]
         )
 
     config_seeds = [
@@ -551,6 +581,7 @@ async def seed_defaults(session: AsyncSession) -> None:
         ("payment.alipay_f2f", "timeout_express", "string", "alipay f2f timeout_express", True),
         ("payment.alipay_f2f", "extra_options", "json", "alipay f2f extra_options", True),
         ("ai.editor_check", "model_id", "string", "editor check ai model id", False),
+        ("billing", "points_per_cny", "integer", "积分汇率，1元人民币对应的积分数", False),
     ]
     for group, key, value_type, description, is_required in config_seeds:
         existing_config = await one(
@@ -582,9 +613,10 @@ async def seed_defaults(session: AsyncSession) -> None:
                     max_context_tokens=1000000,
                     max_output_tokens=384000,
                     temperature=Decimal("0.70"),
-                    cache_hit_input_multiplier=Decimal("0.11"),
-                    cache_miss_input_multiplier=Decimal("0.11"),
-                    output_multiplier=Decimal("0.22"),
+                    input_cost_per_million=Decimal("1"),
+                    cache_hit_input_cost_per_million=Decimal("0.1"),
+                    output_cost_per_million=Decimal("2"),
+                    profit_multiplier=Decimal("1.1"),
                     sort_order=1,
                 ),
                 AiModel(
@@ -597,9 +629,10 @@ async def seed_defaults(session: AsyncSession) -> None:
                     max_context_tokens=1000000,
                     max_output_tokens=384000,
                     temperature=Decimal("0.70"),
-                    cache_hit_input_multiplier=Decimal("0.02"),
-                    cache_miss_input_multiplier=Decimal("1.32"),
-                    output_multiplier=Decimal("2.64"),
+                    input_cost_per_million=Decimal("12"),
+                    cache_hit_input_cost_per_million=Decimal("0.1"),
+                    output_cost_per_million=Decimal("24"),
+                    profit_multiplier=Decimal("1.1"),
                     sort_order=2,
                 ),
             ]
@@ -1579,7 +1612,6 @@ async def send_chat_message(
                 )
             else:
                 logger.warning("no metrics from agent run, billing skipped for chat %s", chat.id)
-                billing_failed = True
         except Exception:
             billing_failed = True
             logger.warning("billing deduction failed after agent stream", exc_info=True)
@@ -2097,6 +2129,128 @@ async def admin_delete_product(
     item.status = "inactive"
     await session.commit()
     return {"ok": True}
+
+
+class CostPreviewIn(BaseModel):
+    model_id: str
+    bundled_credit_pack_points: int = Field(ge=0)
+    daily_vip_points: int = Field(ge=0)
+    duration_days: int = Field(default=31, ge=1, le=365)
+    price_amount: Decimal | None = Field(default=None, ge=0)
+
+
+@router.post("/admin/cost-preview")
+async def admin_cost_preview(
+    payload: CostPreviewIn,
+    _admin: User = Depends(current_admin),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """基于选定模型的成本价计算套餐积分分配的现金成本余量。"""
+
+    model = await must_get(session, AiModel, payload.model_id)
+    from app.services.billing_service import get_points_per_cny
+    points_per_cny = await get_points_per_cny(session)
+
+    # 售价（元/百万token）= 成本价 × 盈利倍率
+    input_selling = model.input_cost_per_million * model.profit_multiplier
+    cache_hit_selling = model.cache_hit_input_cost_per_million * model.profit_multiplier
+    output_selling = model.output_cost_per_million * model.profit_multiplier
+
+    # 每积分成本（元）= 售价（元/百万token）× 积分汇率 / 1M
+    ONE_MILLION = Decimal("1000000")
+    input_point_cost = input_selling * points_per_cny / ONE_MILLION
+    output_point_cost = output_selling * points_per_cny / ONE_MILLION
+
+    # 混合成本（写作场景偏重输出，权重 40%输入 / 60%输出）
+    blended_point_cost = (
+        Decimal("0.4") * input_point_cost + Decimal("0.6") * output_point_cost
+    )
+
+    bundled = payload.bundled_credit_pack_points
+    daily = payload.daily_vip_points
+    duration = payload.duration_days
+    price = payload.price_amount
+
+    credit_pack_cost = Decimal(bundled) * blended_point_cost
+    monthly_max_points = daily * duration
+    monthly_max_cost = Decimal(monthly_max_points) * blended_point_cost
+
+    utilization_rates = [1, 5, 10, 20, 30, 50, 100]
+    scenarios = []
+    for rate in utilization_rates:
+        used_points = int(monthly_max_points * rate / 100)
+        vip_cost = Decimal(used_points) * blended_point_cost
+        total_cost = credit_pack_cost + vip_cost
+
+        s = {
+            "utilization_pct": rate,
+            "vip_points_used": used_points,
+            "vip_cost": round(float(vip_cost), 2),
+            "total_cost": round(float(total_cost), 2),
+            "revenue": float(price) if price is not None else None,
+            "profit": None,
+            "margin_pct": None,
+        }
+        if price is not None and price > 0:
+            profit = price - total_cost
+            s["profit"] = round(float(profit), 2)
+            s["margin_pct"] = round(float(profit / price * 100), 1)
+        scenarios.append(s)
+
+    conclusion: dict[str, Any] = {
+        "credit_pack_exceeds_price": bool(price is not None and price > 0 and credit_pack_cost > price),
+        "min_total_cost": round(float(credit_pack_cost), 2),
+        "breakeven_utilization": None,
+        "suggested_max_bundled": None,
+        "warning": "",
+    }
+
+    if price is not None and price > 0 and blended_point_cost > 0:
+        suggested_max = int(price / blended_point_cost)
+        conclusion["suggested_max_bundled"] = suggested_max
+        if credit_pack_cost > price:
+            conclusion["warning"] = (
+                f"附赠加油包成本({round(float(credit_pack_cost), 2)}元)"
+                f"已超过售价({price}元)，建议降至{suggested_max}分以内"
+            )
+        elif credit_pack_cost < price and monthly_max_cost > 0:
+            available = price - credit_pack_cost
+            breakeven_pct = float(available / monthly_max_cost * 100)
+            conclusion["breakeven_utilization"] = round(breakeven_pct, 1)
+            conclusion["warning"] = (
+                f"用户VIP日权益使用率超过{round(breakeven_pct, 1)}%时开始亏损"
+            )
+
+    return {
+        "model": {
+            "id": model.id,
+            "display_name": model.display_name,
+            "input_cost_per_million": float(model.input_cost_per_million),
+            "cache_hit_input_cost_per_million": float(model.cache_hit_input_cost_per_million),
+            "output_cost_per_million": float(model.output_cost_per_million),
+            "profit_multiplier": float(model.profit_multiplier),
+        },
+        "per_point": {
+            "blended_cost": round(float(blended_point_cost), 6),
+            "input_cost": round(float(input_point_cost), 6),
+            "output_cost": round(float(output_point_cost), 6),
+            "tokens_per_point_output": int(ONE_MILLION / float(output_selling * points_per_cny)) if output_selling * points_per_cny > 0 else 0,
+            "tokens_per_point_input": int(ONE_MILLION / float(input_selling * points_per_cny)) if input_selling * points_per_cny > 0 else 0,
+            "note": "混合成本 = 40%输入 + 60%输出权重（写作场景偏重输出）",
+        },
+        "credit_pack": {
+            "points": bundled,
+            "cash_cost": round(float(credit_pack_cost), 2),
+            "cost_vs_price_pct": f"{round(float(credit_pack_cost / price * 100))}%" if price and price > 0 else None,
+        },
+        "daily_vip": {
+            "points_per_day": daily,
+            "monthly_points_max": monthly_max_points,
+            "monthly_cost_max": round(float(monthly_max_cost), 2),
+        },
+        "scenarios": scenarios,
+        "conclusion": conclusion,
+    }
 
 
 @router.get("/admin/orders")

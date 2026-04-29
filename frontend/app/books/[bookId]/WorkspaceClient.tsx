@@ -1,5 +1,6 @@
 "use client";
 
+import { diffLines, type Change } from "diff";
 import {
   AlertCircle,
   BookOpen,
@@ -30,6 +31,10 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Streamdown } from "streamdown";
+import { code } from "@streamdown/code";
+import { cjk } from "@streamdown/cjk";
+import "streamdown/styles.css";
 import { useGroupRef, usePanelRef, type Layout } from "react-resizable-panels";
 import {
   ApiClient,
@@ -176,12 +181,16 @@ const TOOL_LABELS: Record<string, string> = {
   get_character: "查询角色",
   list_characters: "列出角色",
   create_or_update_character: "创建角色",
+  delete_character: "删除角色",
   get_setting: "查询设定",
   list_settings: "列出设定",
   create_or_update_setting: "创建设定",
+  delete_setting: "删除设定",
   get_chapter: "查询章节",
   list_chapters: "列出章节",
+  create_chapter: "创建章节",
   update_chapter_summary: "更新提要",
+  update_chapter_content: "更新正文",
   get_work_info: "查看作品",
   update_work_info: "更新作品",
 };
@@ -222,6 +231,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const [settings, setSettings] = useState<NamedContent[]>([]);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("chapters");
   const [activeChapterId, setActiveChapterId] = useState("");
+  const activeChapterIdRef = useRef("");
   const activeChapter = useMemo(
     () => chapters.find((chapter) => chapter.id === activeChapterId) ?? chapters[0],
     [activeChapterId, chapters]
@@ -257,6 +267,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
 
   const [characterSearch, setCharacterSearch] = useState("");
   const [activeCharacterId, setActiveCharacterId] = useState("");
+  const activeCharacterIdRef = useRef("");
   const [characterMode, setCharacterMode] = useState<CharacterMode>("detail");
   const [characterDraft, setCharacterDraft] = useState<CharacterDraft>({ name: "", summary: "", detail: "" });
   const [characterStatus, setCharacterStatus] = useState<CharacterStatus>("ready");
@@ -268,6 +279,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const [settingSearch, setSettingSearch] = useState("");
   const [settingType, setSettingType] = useState("all");
   const [activeSettingId, setActiveSettingId] = useState("");
+  const activeSettingIdRef = useRef("");
   const [settingMode, setSettingMode] = useState<SettingMode>("detail");
   const [settingDraft, setSettingDraft] = useState<SettingDraft>({ name: "", summary: "", detail: "", type: "other" });
   const [settingStatus, setSettingStatus] = useState<SettingStatus>("ready");
@@ -320,6 +332,18 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       return matchesQuery && matchesType;
     });
   }, [settingSearch, settingType, settings]);
+
+  useEffect(() => {
+    activeChapterIdRef.current = activeChapterId;
+  }, [activeChapterId]);
+
+  useEffect(() => {
+    activeCharacterIdRef.current = activeCharacterId;
+  }, [activeCharacterId]);
+
+  useEffect(() => {
+    activeSettingIdRef.current = activeSettingId;
+  }, [activeSettingId]);
 
   const allReferenceItems = useMemo<ChatReference[]>(() => {
     const chapterRefs = chapters
@@ -841,7 +865,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
               const blocks = item.blocks ?? [];
               const last = blocks[blocks.length - 1];
               const updatedBlocks = (last && last.type === "text")
-                ? blocks.map((b, i) => i === blocks.length - 1 ? { ...b, text: b.text + chunk } : b)
+                ? blocks.map((b, i) => i === blocks.length - 1 && b.type === "text" ? { ...b, text: b.text + chunk } : b)
                 : [...blocks, { type: "text" as const, text: chunk }];
               return { ...item, content: item.content + chunk, blocks: updatedBlocks };
             })
@@ -872,6 +896,158 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
               }
             })
           );
+
+          // Sync workspace data when tool execution completes
+          if (status === "completed" && data?.result) {
+            try {
+              const result = JSON.parse(data.result);
+
+              switch (tool) {
+                case "create_or_update_character": {
+                  if (result.id && result.name) {
+                    const mapped: NamedContent = {
+                      id: result.id,
+                      name: result.name,
+                      summary: result.summary ?? "",
+                      detail: result.detail ?? "",
+                      type: result.type,
+                      updatedAt: result.updated_at ?? "",
+                    };
+                    setCharacters((prev) => {
+                      const exists = prev.some((c) => c.id === mapped.id);
+                      return exists ? prev.map((c) => (c.id === mapped.id ? mapped : c)) : [mapped, ...prev];
+                    });
+                    setActiveCharacterId(mapped.id);
+                  }
+                  break;
+                }
+                case "delete_character": {
+                  if (result.success && result.character_id) {
+                    const deletedId = result.character_id as string;
+                    setCharacters((prev) => {
+                      const remaining = prev.filter((c) => c.id !== deletedId);
+                      if (activeCharacterIdRef.current === deletedId) {
+                        setActiveCharacterId(remaining[0]?.id ?? "");
+                      }
+                      return remaining;
+                    });
+                  }
+                  break;
+                }
+                case "create_or_update_setting": {
+                  if (result.id && result.name) {
+                    const mapped: NamedContent = {
+                      id: result.id,
+                      name: result.name,
+                      summary: result.summary ?? "",
+                      detail: result.detail ?? "",
+                      type: result.type,
+                      updatedAt: result.updated_at ?? "",
+                    };
+                    setSettings((prev) => {
+                      const exists = prev.some((s) => s.id === mapped.id);
+                      return exists ? prev.map((s) => (s.id === mapped.id ? mapped : s)) : [mapped, ...prev];
+                    });
+                    setActiveSettingId(mapped.id);
+                  }
+                  break;
+                }
+                case "delete_setting": {
+                  if (result.success && result.setting_id) {
+                    const deletedId = result.setting_id as string;
+                    setSettings((prev) => {
+                      const remaining = prev.filter((s) => s.id !== deletedId);
+                      if (activeSettingIdRef.current === deletedId) {
+                        setActiveSettingId(remaining[0]?.id ?? "");
+                      }
+                      return remaining;
+                    });
+                  }
+                  break;
+                }
+                case "update_chapter_content": {
+                  const chapterId = result.chapter_id as string;
+                  const newTitle = result.title as string;
+                  if (chapterId) {
+                    void client.listChapters(bookId).then((freshChapters) => {
+                      setChapters(freshChapters);
+                      const freshChapter = freshChapters.find((chapter) => chapter.id === chapterId);
+                      if (freshChapter && activeChapterIdRef.current === chapterId) {
+                        setTitle(freshChapter.title);
+                        setSummary(freshChapter.summary);
+                        setSummaryDraft(freshChapter.summary);
+                        setContent(freshChapter.content);
+                        setStatus("saved");
+                      }
+                    }).catch(() => {
+                      if (!newTitle) return;
+                      setChapters((prev) =>
+                        prev.map((ch) => (ch.id === chapterId ? { ...ch, title: newTitle } : ch))
+                      );
+                      if (activeChapterIdRef.current === chapterId) {
+                        setTitle(newTitle);
+                      }
+                    });
+                  }
+                  break;
+                }
+                case "update_chapter_summary": {
+                  if (result.id) {
+                    const chapterId = result.id as string;
+                    const newSummary = (result.summary as string) ?? "";
+                    setChapters((prev) =>
+                      prev.map((ch) => (ch.id === chapterId ? { ...ch, summary: newSummary } : ch))
+                    );
+                    if (activeChapterIdRef.current === chapterId) {
+                      setSummary(newSummary);
+                      setSummaryDraft(newSummary);
+                    }
+                  }
+                  break;
+                }
+                case "create_chapter": {
+                  if (result.id && result.title) {
+                    const newChapter = {
+                      id: result.id,
+                      order: result.order_index,
+                      title: result.title,
+                      content: "",
+                      summary: result.summary ?? "",
+                    };
+                    setChapters((prev) => {
+                      const exists = prev.some((ch) => ch.id === newChapter.id);
+                      if (exists) return prev;
+                      const inserted = [...prev, newChapter].sort((a, b) => a.order - b.order);
+                      return inserted;
+                    });
+                    setActiveChapterId(newChapter.id);
+                    setTitle(newChapter.title);
+                    setContent("");
+                    setSummary(newChapter.summary);
+                    setSummaryDraft(newChapter.summary);
+                  }
+                  break;
+                }
+                case "update_work_info": {
+                  const field = result.field as string;
+                  const value = result.value as string;
+                  setWork((prev) => {
+                    if (!prev) return prev;
+                    const updates: Partial<Work> = {};
+                    if (field === "short_intro") updates.shortIntro = value;
+                    else if (field === "synopsis") updates.synopsis = value;
+                    else if (field === "background_rules") updates.backgroundRules = value;
+                    else if (field === "focus_requirements") updates.focusRequirements = value;
+                    else if (field === "forbidden_requirements") updates.forbiddenRequirements = value;
+                    return { ...prev, ...updates };
+                  });
+                  break;
+                }
+              }
+            } catch {
+              // JSON parse failure — ignore silently
+            }
+          }
         },
         (errorMessage) => {
           setMessages((items) =>
@@ -884,10 +1060,8 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
         items.map((item) => {
           if (item.id !== assistantId) return item;
           const streamingBlocks = item.blocks;
-          return {
-            ...final,
-            blocks: streamingBlocks && streamingBlocks.length > 0 ? streamingBlocks : final.blocks,
-          };
+          if (!streamingBlocks || streamingBlocks.length === 0) return { ...final };
+          return { ...final, blocks: streamingBlocks };
         })
       );
       setSessions((items) =>
@@ -1165,14 +1339,57 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     }
   }
 
+  const streamdownPlugins = useMemo(() => ({ code, cjk }), []);
+
+  function renderMarkdown(text: string, isStreaming = false) {
+    return (
+      <Streamdown animated plugins={streamdownPlugins} isAnimating={isStreaming}>
+        {text}
+      </Streamdown>
+    );
+  }
+
+  function renderDiffResult(resultStr: string) {
+    let oldContent = "";
+    let newContent = "";
+    try {
+      const parsed = JSON.parse(resultStr);
+      oldContent = parsed.old_content_preview ?? parsed.old_content ?? "";
+      newContent = parsed.new_content_preview ?? parsed.new_content ?? "";
+    } catch {
+      return <p className="whitespace-pre-wrap">{resultStr}</p>;
+    }
+    const changes: Change[] = diffLines(oldContent, newContent);
+    return (
+      <div className="max-h-60 overflow-auto font-mono text-[11px] leading-relaxed">
+        {changes.map((change, i) => {
+          const lines = change.value.split("\n").filter((line, idx, arr) => idx < arr.length - 1 || line !== "");
+          return lines.map((line, j) => {
+            const key = `${i}-${j}`;
+            if (change.added) {
+              return <div key={key} className="bg-green-100 text-green-800 px-2">+ {line}</div>;
+            }
+            if (change.removed) {
+              return <div key={key} className="bg-red-100 text-red-800 px-2">- {line}</div>;
+            }
+            return <div key={key} className="px-2 text-gray-500">  {line}</div>;
+          });
+        })}
+      </div>
+    );
+  }
+
   function renderMessageContent(message: ChatMessage) {
+    const isStreaming = message.id === streamingMessageId;
+
+    // Render with blocks (streaming + completed messages with tool calls)
     if (message.blocks && message.blocks.length > 0) {
       return (
         <div className="space-y-2">
           {message.blocks.map((block, index) => {
             if (block.type === "text") {
               if (!block.text) return null;
-              return <p key={`text-${index}`}>{block.text}</p>;
+              return <div key={`text-${index}`} className="chat-md">{renderMarkdown(block.text, isStreaming)}</div>;
             }
             const isStarted = block.status === "started";
             return (
@@ -1186,11 +1403,17 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                   {block.display || toolLabel(block.tool)}
                 </summary>
                 {block.result ? (
-                  <div className="border-t border-blue-100 px-3 py-2 text-blue-600">
-                    <p className="line-clamp-6 whitespace-pre-wrap">
-                      {block.result.length > 500 ? `${block.result.slice(0, 500)}...` : block.result}
-                    </p>
-                  </div>
+                  block.tool === "update_chapter_content" ? (
+                    <div className="border-t border-blue-100 px-3 py-2">
+                      {renderDiffResult(block.result)}
+                    </div>
+                  ) : (
+                    <div className="border-t border-blue-100 px-3 py-2 text-blue-600">
+                      <p className="line-clamp-6 whitespace-pre-wrap">
+                        {block.result.length > 500 ? `${block.result.slice(0, 500)}...` : block.result}
+                      </p>
+                    </div>
+                  )
                 ) : null}
               </details>
             );
@@ -1199,10 +1422,13 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       );
     }
 
+    // Render without blocks (simple messages, user messages with mentions)
     const mentions = message.mentions
       .filter((mention) => mention.start >= 0 && mention.end > mention.start && mention.end <= message.content.length)
       .sort((left, right) => left.start - right.start);
-    if (!mentions.length) return <p>{message.content}</p>;
+
+    if (!mentions.length) return <div className="chat-md">{renderMarkdown(message.content, isStreaming)}</div>;
+
     let cursor = 0;
     return (
       <p>

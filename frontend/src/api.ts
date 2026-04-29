@@ -1233,6 +1233,9 @@ export class ApiClient {
         references?: ChatReference[];
         actions?: ChatAction[];
         created_at: string;
+        billing_failed?: boolean;
+        error?: string | null;
+        tool_results?: { tool: string; display: string; result: string }[];
       }>;
       has_more: boolean;
       next_before: string | null;
@@ -1301,8 +1304,11 @@ export class ApiClient {
           } catch {
             // Ignore malformed tool events
           }
-        } else {
-          onChunk(event.data);
+        } else if (event.event === "text" || event.event === null) {
+          const text = parseSseText(event.data);
+          if (text !== null) {
+            onChunk(text);
+          }
         }
       }
     }
@@ -1328,6 +1334,11 @@ export class ApiClient {
           }
         } catch {
           // Ignore malformed tool events
+        }
+      } else if ((event.event === "text" || event.event === null) && event.data) {
+        const text = parseSseText(event.data);
+        if (text !== null) {
+          onChunk(text);
         }
       }
     }
@@ -1405,4 +1416,13 @@ function parseSseEvent(text: string): { event: string | null; data: string } {
     }
   }
   return { event, data: data.join("\n") };
+}
+
+function parseSseText(data: string): string | null {
+  try {
+    const text = JSON.parse(data);
+    return typeof text === "string" ? text : null;
+  } catch {
+    return data;
+  }
 }

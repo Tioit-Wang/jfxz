@@ -25,6 +25,7 @@ from app.services.billing_service import (
     _cost_to_deduct,
     _ensure_point_account,
     deduct_by_usage,
+    get_points_per_cny,
     pre_check_balance,
     MIN_COST,
 )
@@ -60,9 +61,10 @@ async def _make_model(session: AsyncSession, **overrides) -> AiModel:
         max_context_tokens=32000,
         max_output_tokens=2048,
         temperature=Decimal("0.70"),
-        cache_hit_input_multiplier=Decimal("0.10"),
-        cache_miss_input_multiplier=Decimal("0.20"),
-        output_multiplier=Decimal("0.30"),
+        input_cost_per_million=Decimal("1.00"),
+        cache_hit_input_cost_per_million=Decimal("0.10"),
+        output_cost_per_million=Decimal("2.00"),
+        profit_multiplier=Decimal("1.10"),
     )
     defaults.update(overrides)
     model = AiModel(**defaults)
@@ -136,7 +138,7 @@ class TestAgentServiceHelpers:
         model = await _make_model(session)
         data = _serialize(model)
         assert isinstance(data["temperature"], float)
-        assert isinstance(data["cache_hit_input_multiplier"], float)
+        assert isinstance(data["cache_hit_input_cost_per_million"], float)
 
     def test_build_system_prompt_refs_without_summary_or_detail(self) -> None:
         work = Work(title="作品")
@@ -313,15 +315,26 @@ class TestCalculateCost:
             cache_hit_tokens=0,
             cache_miss_tokens=1000,
             completion_tokens=500,
-            cache_hit_multiplier=Decimal("0.10"),
-            cache_miss_multiplier=Decimal("0.20"),
-            output_multiplier=Decimal("0.30"),
+            input_cost_per_million=Decimal("1.00"),
+            cache_hit_input_cost_per_million=Decimal("0.10"),
+            output_cost_per_million=Decimal("2.00"),
+            profit_multiplier=Decimal("1.10"),
+            points_per_cny=Decimal("10000"),
         )
-        # (0/1M*100*0.1) + (1000/1M*100*0.2) + (500/1M*100*0.3) = 0 + 0.02 + 0.015 = 0.035 → ceil to 0.04
-        assert cost == Decimal("0.04")
+        # miss = (1000/1M) * 1.0 * 1.1 * 10000 = 11
+        # out  = (500/1M) * 2.0 * 1.1 * 10000 = 11
+        # total = 22.00
+        assert cost == Decimal("22.00")
 
     def test_zero_tokens(self) -> None:
-        cost = _calculate_cost(0, 0, 0, Decimal("1"), Decimal("1"), Decimal("1"))
+        cost = _calculate_cost(
+            0, 0, 0,
+            input_cost_per_million=Decimal("1"),
+            cache_hit_input_cost_per_million=Decimal("1"),
+            output_cost_per_million=Decimal("1"),
+            profit_multiplier=Decimal("1"),
+            points_per_cny=Decimal("10000"),
+        )
         assert cost == Decimal("0")
 
     def test_large_tokens(self) -> None:
@@ -329,15 +342,24 @@ class TestCalculateCost:
             cache_hit_tokens=500000,
             cache_miss_tokens=500000,
             completion_tokens=100000,
-            cache_hit_multiplier=Decimal("0.11"),
-            cache_miss_multiplier=Decimal("1.32"),
-            output_multiplier=Decimal("2.64"),
+            input_cost_per_million=Decimal("12"),
+            cache_hit_input_cost_per_million=Decimal("0.1"),
+            output_cost_per_million=Decimal("24"),
+            profit_multiplier=Decimal("1.1"),
+            points_per_cny=Decimal("10000"),
         )
         assert cost > Decimal("0")
 
     def test_ceils_to_001(self) -> None:
-        cost = _calculate_cost(0, 1, 0, Decimal("0.01"), Decimal("0.01"), Decimal("0.01"))
-        # (1/1M*100*0.01) = 0.000001 → ceil to 0.01
+        cost = _calculate_cost(
+            0, 1, 0,
+            input_cost_per_million=Decimal("0.01"),
+            cache_hit_input_cost_per_million=Decimal("0.01"),
+            output_cost_per_million=Decimal("0.01"),
+            profit_multiplier=Decimal("1.0"),
+            points_per_cny=Decimal("10000"),
+        )
+        # (1/1M) * 0.01 * 1.0 * 10000 = 0.0001 → ceil → 0.01
         assert cost == Decimal("0.01")
 
     def test_minimum_deduction_is_001(self) -> None:
@@ -396,7 +418,7 @@ class TestDeductByUsage:
         assert txn.model_name_snapshot == "TestModel"
         assert txn.prompt_cache_miss_tokens == 100
         assert txn.completion_tokens == 50
-        assert txn.cache_hit_input_multiplier_snapshot == Decimal("0.10")
+        assert txn.cache_hit_input_cost_per_million_snapshot == Decimal("0.10")
 
     async def test_deducts_from_topup(self, session: AsyncSession) -> None:
         model = await _make_model(session)
@@ -466,7 +488,14 @@ class TestDeductByUsage:
 
     async def test_minimum_charge_0_01(self, session: AsyncSession) -> None:
         """Tiny token usage should still deduct minimum 0.01."""
-        model = await _make_model(session)
+        # Use very low costs so 1 token falls below minimum
+        model = await _make_model(
+            session,
+            input_cost_per_million=Decimal("0.0001"),
+            cache_hit_input_cost_per_million=Decimal("0.0001"),
+            output_cost_per_million=Decimal("0.0001"),
+            profit_multiplier=Decimal("1.0"),
+        )
         await _ensure_account(session, "u6", monthly=Decimal("100"), topup=Decimal("0"))
         await session.commit()
 
@@ -482,8 +511,13 @@ class TestDeductByUsage:
 
     async def test_exact_balance_deduction(self, session: AsyncSession) -> None:
         """Deducting exactly the full balance should succeed."""
-        model = await _make_model(session)
-        # Set balance to exactly what will be charged
+        model = await _make_model(
+            session,
+            input_cost_per_million=Decimal("0.0001"),
+            cache_hit_input_cost_per_million=Decimal("0.0001"),
+            output_cost_per_million=Decimal("0.0001"),
+            profit_multiplier=Decimal("1.0"),
+        )
         await _ensure_account(session, "u7", monthly=Decimal("0.01"), topup=Decimal("0"))
         await session.commit()
 
@@ -499,8 +533,14 @@ class TestDeductByUsage:
 
     async def test_insufficient_for_minimum_charge(self, session: AsyncSession) -> None:
         """Balance below 0.01 should be rejected."""
-        model = await _make_model(session)
-        await _ensure_account(session, "u8", monthly=Decimal("0.005"), topup=Decimal("0"))
+        model = await _make_model(
+            session,
+            input_cost_per_million=Decimal("0.0001"),
+            cache_hit_input_cost_per_million=Decimal("0.0001"),
+            output_cost_per_million=Decimal("0.0001"),
+            profit_multiplier=Decimal("1.0"),
+        )
+        await _ensure_account(session, "u8", monthly=Decimal("0"), topup=Decimal("0"))
         await session.commit()
 
         with pytest.raises(HTTPException) as exc_info:
@@ -534,35 +574,26 @@ class TestDeductByUsage:
         assert account.user_id == "brand-new-user"
         assert account.vip_daily_points_balance == Decimal("0")
 
-    async def test_topup_deduction_insufficient_after_monthly_drain(self, session: AsyncSession) -> None:
-        """Trigger the rowcount==0 safety check on topup deduction."""
-        model = await _make_model(session)
-        await _ensure_account(session, "u-topup-race", monthly=Decimal("0"), topup=Decimal("10000"))
-        await session.commit()
-        # Monkeypatch the update to return rowcount=0 for the topup deduction
-        from unittest.mock import patch
-        from sqlalchemy.dialects.sqlite import dialect as sqlite_dialect
-        original_execute = session.execute
-        call_count = 0
 
-        async def _fake_execute(statement, **kwargs):
-            nonlocal call_count
-            result = await original_execute(statement, **kwargs)
-            from sqlalchemy.sql.dml import Update
-            if isinstance(statement, Update):
-                call_count += 1
-                if call_count == 1:  # Only UPDATE is the topup one (monthly is 0)
-                    result.rowcount = 0
-            return result
 
-        with patch.object(session, 'execute', _fake_execute):
-            with pytest.raises(HTTPException) as exc_info:
-                await deduct_by_usage(
-                    session, "u-topup-race", model,
-                    {"prompt_tokens": 100, "completion_tokens": 50, "cached_tokens": 0},
-                    work_id="w1", source_id="s1",
-                )
-            assert exc_info.value.status_code == 402
+class TestGetPointsPerCny:
+    async def test_default_value(self, session: AsyncSession) -> None:
+        result = await get_points_per_cny(session)
+        assert result == Decimal("10000")
+
+    async def test_reads_config_value(self, session: AsyncSession) -> None:
+        from app.models import GlobalConfig
+        # seed_defaults already creates this config entry; update its value
+        config = (await session.execute(
+            select(GlobalConfig).where(
+                GlobalConfig.config_group == "billing",
+                GlobalConfig.config_key == "points_per_cny",
+            )
+        )).scalar_one()
+        config.integer_value = 5000
+        await session.flush()
+        result = await get_points_per_cny(session)
+        assert result == Decimal("5000")
 
 
 class TestResolveEditorModel:

@@ -491,9 +491,11 @@ class TestDetailEndpoint:
             prompt_cache_hit_tokens=100,
             prompt_cache_miss_tokens=200,
             completion_tokens=50,
-            cache_hit_input_multiplier_snapshot=Decimal("0.5"),
-            cache_miss_input_multiplier_snapshot=Decimal("1.0"),
-            output_multiplier_snapshot=Decimal("1.5"),
+            input_cost_per_million_snapshot=Decimal("1.0"),
+            cache_hit_input_cost_per_million_snapshot=Decimal("0.5"),
+            output_cost_per_million_snapshot=Decimal("2.0"),
+            profit_multiplier_snapshot=Decimal("1.1"),
+            points_per_cny_snapshot=Decimal("10000"),
         )
         session.add(tx)
         await session.flush()

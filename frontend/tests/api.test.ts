@@ -771,9 +771,10 @@ describe("api client", () => {
       max_context_tokens: 64000,
       max_output_tokens: 4096,
       temperature: "0.70",
-      cache_hit_input_multiplier: "0.11",
-      cache_miss_input_multiplier: "0.11",
-      output_multiplier: "0.22",
+      input_cost_per_million: "1.00",
+      cache_hit_input_cost_per_million: "0.50",
+      output_cost_per_million: "2.00",
+      profit_multiplier: "1.10",
       status: "active",
       sort_order: 1,
       created_at: "now",
@@ -802,9 +803,10 @@ describe("api client", () => {
       maxContextTokens: 32000,
       maxOutputTokens: 2048,
       temperature: "0.80",
-      cacheHitInputMultiplier: "0.10",
-      cacheMissInputMultiplier: "0.20",
-      outputMultiplier: "0.30",
+      inputCostPerMillion: "1.00",
+      cacheHitInputCostPerMillion: "0.50",
+      outputCostPerMillion: "2.00",
+      profitMultiplier: "1.10",
       status: "active" as const,
       sortOrder: 9
     };
@@ -846,7 +848,7 @@ describe("api client", () => {
     expect(JSON.parse(calls[2][1]?.body as string)).toMatchObject({
       display_name: "测试模型",
       provider_model_id: "test-model",
-      cache_hit_input_multiplier: "0.10"
+      cache_hit_input_cost_per_million: "0.50"
     });
   });
 

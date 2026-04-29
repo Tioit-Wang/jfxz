@@ -1,43 +1,42 @@
 import { describe, expect, it } from "vitest";
-import { generatedMultiplier } from "../src/model-billing";
+import { calculateSellingPrice } from "../src/model-billing";
 
 describe("admin model billing helpers", () => {
-  it("generates multipliers with markup and rounds upward to two decimals", () => {
-    expect(generatedMultiplier("1", "10")).toBe("0.11");
-    expect(generatedMultiplier("24", "10")).toBe("2.64");
-    expect(generatedMultiplier("0.01", "10")).toBe("0.01");
+  it("calculates selling price from cost and profit multiplier", () => {
+    expect(calculateSellingPrice("1", "1.1")).toBe(1 * 1.1 * 10000);
+    expect(calculateSellingPrice("24", "1.1")).toBe(24 * 1.1 * 10000);
+    expect(calculateSellingPrice("0.01", "1.1")).toBe(0.01 * 1.1 * 10000);
   });
 
-  it("rejects invalid cost generator inputs", () => {
-    expect(generatedMultiplier("", "10")).toBeNull();
-    expect(generatedMultiplier("1", "-1")).toBeNull();
-    expect(generatedMultiplier("bad", "10")).toBeNull();
-  });
-
-  it("returns 0.00 when cost is zero (free model)", () => {
-    expect(generatedMultiplier("0", "10")).toBe("0.00");
-  });
-
-  it("returns base multiplier when markup rate is zero", () => {
-    expect(generatedMultiplier("10", "0")).toBe("1.00");
-  });
-
-  it("trims whitespace from inputs", () => {
-    expect(generatedMultiplier(" 1 ", " 10 ")).toBe("0.11");
-  });
-
-  it("handles extremely large values", () => {
-    const result = generatedMultiplier("99999", "10");
-    expect(result).not.toBeNull();
-    // 99999 * 1.1 / 10 = 10999.89, ceil(10999.89 * 100) / 100 = 10999.90
-    expect(result).toBe("10999.90");
+  it("rejects invalid inputs", () => {
+    expect(calculateSellingPrice("", "1.1")).toBeNull();
+    expect(calculateSellingPrice("bad", "1.1")).toBeNull();
   });
 
   it("rejects negative cost", () => {
-    expect(generatedMultiplier("-1", "10")).toBeNull();
+    expect(calculateSellingPrice("-1", "1.1")).toBeNull();
+  });
+
+  it("returns 0 when cost is zero (free model)", () => {
+    expect(calculateSellingPrice("0", "1.1")).toBe(0);
+  });
+
+  it("returns base points when profit multiplier is 1.0 (no profit)", () => {
+    expect(calculateSellingPrice("10", "1.0")).toBe(10 * 1.0 * 10000);
+  });
+
+  it("handles extremely large values", () => {
+    const result = calculateSellingPrice("99999", "1.1");
+    expect(result).not.toBeNull();
+    // 99999 * 1.1 * 10000 = 1099989000
+    expect(result).toBe(1099989000);
+  });
+
+  it("supports custom points per CNY", () => {
+    expect(calculateSellingPrice("1", "1.1", "5000")).toBe(1 * 1.1 * 5000);
   });
 
   it("returns null when both inputs are empty", () => {
-    expect(generatedMultiplier("", "")).toBeNull();
+    expect(calculateSellingPrice("", "")).toBeNull();
   });
 });

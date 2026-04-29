@@ -56,7 +56,9 @@ async def _process_subscription(session: AsyncSession, sub_id: str) -> None:
         await grant_vip_daily_points(session, sub.user_id, daily_points, source_id=sub.id)
         logger.info(
             "Granted %d VIP daily points to user %s (sub %s)",
-            daily_points, sub.user_id, sub.id,
+            daily_points,
+            sub.user_id,
+            sub.id,
         )
 
 

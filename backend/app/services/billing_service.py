@@ -49,9 +49,24 @@ def _calculate_cost(
     profit_multiplier: Decimal,
     points_per_cny: Decimal,
 ) -> Decimal:
-    hit_cost = (Decimal(cache_hit_tokens) / _ONE_MILLION) * cache_hit_input_cost_per_million * profit_multiplier * points_per_cny
-    miss_cost = (Decimal(cache_miss_tokens) / _ONE_MILLION) * input_cost_per_million * profit_multiplier * points_per_cny
-    out_cost = (Decimal(completion_tokens) / _ONE_MILLION) * output_cost_per_million * profit_multiplier * points_per_cny
+    hit_cost = (
+        (Decimal(cache_hit_tokens) / _ONE_MILLION)
+        * cache_hit_input_cost_per_million
+        * profit_multiplier
+        * points_per_cny
+    )
+    miss_cost = (
+        (Decimal(cache_miss_tokens) / _ONE_MILLION)
+        * input_cost_per_million
+        * profit_multiplier
+        * points_per_cny
+    )
+    out_cost = (
+        (Decimal(completion_tokens) / _ONE_MILLION)
+        * output_cost_per_million
+        * profit_multiplier
+        * points_per_cny
+    )
     raw_cost = hit_cost + miss_cost + out_cost
     return raw_cost.quantize(_CENTS, rounding="ROUND_CEILING")
 
@@ -188,26 +203,30 @@ async def deduct_by_usage(
         await session.flush()
 
         balance_after = account.vip_daily_points_balance + account.credit_pack_points_balance
-        session.add(PointTransaction(
-            user_id=user_id,
-            bucket_type="vip_daily",
-            points_delta=-vip_deduction,
-            balance_after=balance_after,
-            **common_fields,
-        ))
+        session.add(
+            PointTransaction(
+                user_id=user_id,
+                bucket_type="vip_daily",
+                points_delta=-vip_deduction,
+                balance_after=balance_after,
+                **common_fields,
+            )
+        )
 
     if pack_deduction > ZERO:
         account.credit_pack_points_balance -= pack_deduction
         await session.flush()
 
         balance_after = account.vip_daily_points_balance + account.credit_pack_points_balance
-        session.add(PointTransaction(
-            user_id=user_id,
-            bucket_type="credit_pack",
-            points_delta=-pack_deduction,
-            balance_after=balance_after,
-            **common_fields,
-        ))
+        session.add(
+            PointTransaction(
+                user_id=user_id,
+                bucket_type="credit_pack",
+                points_delta=-pack_deduction,
+                balance_after=balance_after,
+                **common_fields,
+            )
+        )
 
 
 async def grant_vip_daily_points(
@@ -222,15 +241,17 @@ async def grant_vip_daily_points(
     await session.flush()
 
     balance_after = await _get_total_balance(session, user_id)
-    session.add(PointTransaction(
-        user_id=user_id,
-        bucket_type="vip_daily",
-        change_type="grant",
-        source_type="plan_vip_daily",
-        source_id=source_id,
-        points_delta=Decimal(str(points)),
-        balance_after=balance_after,
-    ))
+    session.add(
+        PointTransaction(
+            user_id=user_id,
+            bucket_type="vip_daily",
+            change_type="grant",
+            source_type="plan_vip_daily",
+            source_id=source_id,
+            points_delta=Decimal(str(points)),
+            balance_after=balance_after,
+        )
+    )
 
 
 async def expire_vip_daily_points(
@@ -250,15 +271,17 @@ async def expire_vip_daily_points(
     await session.flush()
 
     balance_after = await _get_total_balance(session, user_id)
-    session.add(PointTransaction(
-        user_id=user_id,
-        bucket_type="vip_daily",
-        change_type="expire",
-        source_type="vip_daily_expire",
-        source_id=source_id,
-        points_delta=-actual,
-        balance_after=balance_after,
-    ))
+    session.add(
+        PointTransaction(
+            user_id=user_id,
+            bucket_type="vip_daily",
+            change_type="expire",
+            source_type="vip_daily_expire",
+            source_id=source_id,
+            points_delta=-actual,
+            balance_after=balance_after,
+        )
+    )
 
 
 async def grant_credit_pack_points(
@@ -273,15 +296,17 @@ async def grant_credit_pack_points(
     await session.flush()
 
     balance_after = await _get_total_balance(session, user_id)
-    session.add(PointTransaction(
-        user_id=user_id,
-        bucket_type="credit_pack",
-        change_type="grant",
-        source_type="credit_pack",
-        source_id=source_id,
-        points_delta=Decimal(str(points)),
-        balance_after=balance_after,
-    ))
+    session.add(
+        PointTransaction(
+            user_id=user_id,
+            bucket_type="credit_pack",
+            change_type="grant",
+            source_type="credit_pack",
+            source_id=source_id,
+            points_delta=Decimal(str(points)),
+            balance_after=balance_after,
+        )
+    )
 
 
 async def admin_adjust_points(
@@ -315,10 +340,15 @@ async def admin_adjust_points(
                 PointAccount.user_id == user_id,
                 balance_col >= amount,
             )
-            .values(**{
-                ("vip_daily_points_balance" if bucket_type == "vip_daily"
-                 else "credit_pack_points_balance"): balance_col - amount,
-            })
+            .values(
+                **{
+                    (
+                        "vip_daily_points_balance"
+                        if bucket_type == "vip_daily"
+                        else "credit_pack_points_balance"
+                    ): balance_col - amount,
+                }
+            )
         )
         if result.rowcount == 0:
             raise HTTPException(status_code=422, detail="insufficient balance")

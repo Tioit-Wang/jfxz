@@ -51,7 +51,9 @@ def password_needs_rehash(password_hash: str) -> bool:
         return True
 
 
-def issue_token(user_id: str, role: str, secret: str, token_type: str = "user", ttl_seconds: int = 86400) -> str:
+def issue_token(
+    user_id: str, role: str, secret: str, token_type: str = "user", ttl_seconds: int = 86400
+) -> str:
     issued_at = datetime.now(UTC)
     payload = {
         "sub": user_id,
@@ -65,17 +67,23 @@ def issue_token(user_id: str, role: str, secret: str, token_type: str = "user", 
     encoded_header = _b64encode(json.dumps(header, separators=(",", ":")).encode("utf-8"))
     encoded_payload = _b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
     signing_input = f"{encoded_header}.{encoded_payload}"
-    signature = hmac.new(secret.encode("utf-8"), signing_input.encode("ascii"), hashlib.sha256).digest()
+    signature = hmac.new(
+        secret.encode("utf-8"), signing_input.encode("ascii"), hashlib.sha256
+    ).digest()
     return f"{signing_input}.{_b64encode(signature)}"
 
 
-def read_token(token: str, secret: str, token_type: str | None = None) -> tuple[str, str, dict[str, Any]] | None:
+def read_token(
+    token: str, secret: str, token_type: str | None = None
+) -> tuple[str, str, dict[str, Any]] | None:
     parts = token.split(".")
     if len(parts) != 3:
         return None
     encoded_header, encoded_payload, signature = parts
     signing_input = f"{encoded_header}.{encoded_payload}"
-    expected = _b64encode(hmac.new(secret.encode("utf-8"), signing_input.encode("ascii"), hashlib.sha256).digest())
+    expected = _b64encode(
+        hmac.new(secret.encode("utf-8"), signing_input.encode("ascii"), hashlib.sha256).digest()
+    )
     if not hmac.compare_digest(signature, expected):
         return None
     try:

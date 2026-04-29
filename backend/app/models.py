@@ -120,7 +120,9 @@ class ChatSession(Base, TimestampMixin):
     title: Mapped[str] = mapped_column(String(200))
     source_type: Mapped[str] = mapped_column(String(30), default="manual")
     last_message_preview: Mapped[str | None] = mapped_column(Text)
-    last_active_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+    last_active_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now, index=True
+    )
 
 
 class AgentRunStore(Base):
@@ -203,7 +205,9 @@ class PaymentRecord(Base, TimestampMixin):
     __tablename__ = "payment_records"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
-    order_id: Mapped[str] = mapped_column(ForeignKey("billing_orders.id", ondelete="CASCADE"), index=True)
+    order_id: Mapped[str] = mapped_column(
+        ForeignKey("billing_orders.id", ondelete="CASCADE"), index=True
+    )
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     channel: Mapped[str] = mapped_column(String(30), default="alipay_f2f", index=True)
     out_trade_no: Mapped[str] = mapped_column(String(50), unique=True)
@@ -250,7 +254,9 @@ class PointAccount(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True)
     vip_daily_points_balance: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
-    credit_pack_points_balance: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
+    credit_pack_points_balance: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2), default=Decimal("0")
+    )
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
 
@@ -272,7 +278,9 @@ class PointTransaction(Base):
     prompt_cache_miss_tokens: Mapped[int | None] = mapped_column(Integer)
     completion_tokens: Mapped[int | None] = mapped_column(Integer)
     input_cost_per_million_snapshot: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
-    cache_hit_input_cost_per_million_snapshot: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
+    cache_hit_input_cost_per_million_snapshot: Mapped[Decimal | None] = mapped_column(
+        Numeric(10, 4)
+    )
     output_cost_per_million_snapshot: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
     profit_multiplier_snapshot: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
     points_per_cny_snapshot: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))

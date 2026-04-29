@@ -107,9 +107,7 @@ async def _set_user_status(identifier: str, new_status: str) -> tuple[User, str]
         return user, old_status
 
 
-async def _reset_password(
-    identifier: str, password: str | None
-) -> tuple[User, str]:
+async def _reset_password(identifier: str, password: str | None) -> tuple[User, str]:
     await init_database()
     async with SessionLocal() as session:
         user = await _fetch_user(session, identifier)
@@ -128,7 +126,10 @@ async def _reset_password(
 def create_admin(
     email: str = typer.Argument(..., help="Admin email address"),
     password: str = typer.Option(
-        None, "--password", "-p", help="Custom password (auto-generated if omitted)",
+        None,
+        "--password",
+        "-p",
+        help="Custom password (auto-generated if omitted)",
     ),
 ):
     """Create an administrator account."""
@@ -158,10 +159,16 @@ def create_admin(
 def create_user(
     email: str = typer.Argument(..., help="User email address"),
     nickname: str = typer.Option(
-        None, "--nickname", "-n", help="Display name (defaults to email username)",
+        None,
+        "--nickname",
+        "-n",
+        help="Display name (defaults to email username)",
     ),
     password: str = typer.Option(
-        None, "--password", "-p", help="Custom password (auto-generated if omitted)",
+        None,
+        "--password",
+        "-p",
+        help="Custom password (auto-generated if omitted)",
     ),
 ):
     """Create a regular user account."""
@@ -191,10 +198,16 @@ def create_user(
 @app.command("list")
 def list_users(
     role: str | None = typer.Option(
-        None, "--role", "-r", help="Filter by role (admin / user)",
+        None,
+        "--role",
+        "-r",
+        help="Filter by role (admin / user)",
     ),
     status: str | None = typer.Option(
-        None, "--status", "-s", help="Filter by status (active / suspended)",
+        None,
+        "--status",
+        "-s",
+        help="Filter by status (active / suspended)",
     ),
 ):
     """List all user accounts."""
@@ -247,11 +260,7 @@ def get_user(
     )
     print(
         "  Last Login:   "
-        + (
-            user.last_login_at.strftime("%Y-%m-%d %H:%M:%S %Z")
-            if user.last_login_at
-            else "Never"
-        )
+        + (user.last_login_at.strftime("%Y-%m-%d %H:%M:%S %Z") if user.last_login_at else "Never")
     )
 
 
@@ -273,7 +282,8 @@ def set_user_status(
         raise typer.Exit(code=1) from e
 
     typer.secho(
-        f"✓ Status updated: {old_status} → {status}", fg=typer.colors.GREEN,
+        f"✓ Status updated: {old_status} → {status}",
+        fg=typer.colors.GREEN,
     )
     print(f"  Email: {user.email}")
 
@@ -282,7 +292,10 @@ def set_user_status(
 def reset_password(
     identifier: str = typer.Argument(..., help="User ID or email"),
     password: str = typer.Option(
-        None, "--password", "-p", help="New password (auto-generated if omitted)",
+        None,
+        "--password",
+        "-p",
+        help="New password (auto-generated if omitted)",
     ),
 ):
     """Reset a user's password."""

@@ -14,7 +14,9 @@ class Settings(BaseSettings):
     jwt_secret: str = "dev-secret"
     auto_create_tables: bool = True
     env: str = "development"
-    cors_origins: str = "http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:3100,http://localhost:3100"
+    cors_origins: str = (
+        "http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:3100,http://localhost:3100"
+    )
     user_session_seconds: int = 60 * 60 * 24
     admin_session_seconds: int = 60 * 60 * 2
     enable_payment_simulator: bool = False

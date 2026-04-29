@@ -46,7 +46,9 @@ async def create_admin_account(session: AsyncSession, email: str) -> tuple[User,
     )
     session.add(user)
     await session.flush()
-    session.add(PointAccount(user_id=user.id, vip_daily_points_balance=0, credit_pack_points_balance=0))
+    session.add(
+        PointAccount(user_id=user.id, vip_daily_points_balance=0, credit_pack_points_balance=0)
+    )
     await session.flush()
     return user, password
 
@@ -60,7 +62,9 @@ async def async_main(email: str) -> tuple[User, str]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Create an admin account with a generated password.")
+    parser = argparse.ArgumentParser(
+        description="Create an admin account with a generated password."
+    )
     parser.add_argument("email", nargs="?", help="Admin email address")
     parser.add_argument("--email", dest="email_option", help="Admin email address")
     return parser

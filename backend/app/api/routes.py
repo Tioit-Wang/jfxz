@@ -653,6 +653,12 @@ async def seed_defaults(session: AsyncSession) -> None:
             )
             if group == "billing" and key == "points_per_cny":
                 defaults["integer_value"] = 10000
+            elif group == "payment.alipay_f2f" and key == "enabled":
+                defaults["boolean_value"] = False
+            elif group == "payment.alipay_f2f" and key == "timeout_express":
+                defaults["string_value"] = "30m"
+            elif group == "payment.alipay_f2f" and key == "extra_options":
+                defaults["json_value"] = {}
             session.add(GlobalConfig(**defaults))
 
     existing_models = await one(session, select(func.count(AiModel.id)))

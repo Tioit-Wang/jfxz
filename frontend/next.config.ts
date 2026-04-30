@@ -51,6 +51,7 @@ export function securityHeaders(isProduction = productionSecurityHeaders(), apiB
 }
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   allowedDevOrigins: ["127.0.0.1", "localhost"],
   reactStrictMode: true,
   async headers() {

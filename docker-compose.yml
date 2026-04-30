@@ -1,0 +1,57 @@
+services:
+  nginx:
+    image: nginx:alpine
+    container_name: jfxz-nginx
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:18081:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    environment:
+      - TZ=Asia/Shanghai
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - app-network
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
+    container_name: jfxz-frontend
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
+    networks:
+      - app-network
+
+  backend:
+    build:
+      context: ./backend
+    container_name: jfxz-backend
+    restart: unless-stopped
+    environment:
+      - JFXZ_ENV=production
+      - JFXZ_DATABASE_URL=${JFXZ_DATABASE_URL}
+      - JFXZ_JWT_SECRET=${JFXZ_JWT_SECRET}
+      - JFXZ_CORS_ORIGINS=${JFXZ_CORS_ORIGINS}
+      - JFXZ_USER_SESSION_SECONDS=${JFXZ_USER_SESSION_SECONDS:-86400}
+      - JFXZ_ADMIN_SESSION_SECONDS=${JFXZ_ADMIN_SESSION_SECONDS:-7200}
+      - JFXZ_AI_PROVIDER_BASE_URL=${JFXZ_AI_PROVIDER_BASE_URL:-https://platform.aimom.net/v1}
+      - JFXZ_AI_PROVIDER_API_KEY=${JFXZ_AI_PROVIDER_API_KEY}
+      - JFXZ_AUTO_CREATE_TABLES=true
+      - JFXZ_BOOTSTRAP_ADMIN_EMAIL=${JFXZ_BOOTSTRAP_ADMIN_EMAIL}
+      - JFXZ_BOOTSTRAP_ADMIN_PASSWORD=${JFXZ_BOOTSTRAP_ADMIN_PASSWORD}
+      - JFXZ_TRUSTED_PROXY_IPS=${JFXZ_TRUSTED_PROXY_IPS}
+      - TZ=Asia/Shanghai
+    networks:
+      - app-network
+      - 1panel-network
+
+networks:
+  app-network:
+    driver: bridge
+  1panel-network:
+    external: true

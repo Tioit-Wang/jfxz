@@ -43,6 +43,7 @@ class User(Base, TimestampMixin):
     role: Mapped[str] = mapped_column(String(20), default="user", index=True)
     status: Mapped[str] = mapped_column(String(20), default="active", index=True)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    password_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     point_account: Mapped["PointAccount"] = relationship(cascade="all, delete-orphan")
 

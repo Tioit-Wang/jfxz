@@ -8,6 +8,7 @@ from rich.table import Table
 from sqlalchemy import select
 
 from app.core.database import SessionLocal, init_database
+from app.models import now
 from app.core.security import hash_password
 from app.models import PointAccount, User
 
@@ -115,6 +116,7 @@ async def _reset_password(identifier: str, password: str | None) -> tuple[User, 
             raise typer.BadParameter(f"User not found: {identifier}")
         pw = password or _generate_password()
         user.password_hash = hash_password(pw)
+        user.password_changed_at = now()
         await session.commit()
         return user, pw
 
@@ -146,7 +148,7 @@ def create_admin(
         typer.secho(f"Error: {e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from e
 
-    typer.secho("✓ Admin account created", fg=typer.colors.GREEN, bold=True)
+    typer.secho("Admin account created", fg=typer.colors.GREEN, bold=True)
     print(f"  Email:    {user.email}")
     if password:
         print("  Password: [custom]")
@@ -185,7 +187,7 @@ def create_user(
         typer.secho(f"Error: {e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from e
 
-    typer.secho("✓ User account created", fg=typer.colors.GREEN, bold=True)
+    typer.secho("User account created", fg=typer.colors.GREEN, bold=True)
     print(f"  Email:    {user.email}")
     print(f"  Nickname: {user.nickname}")
     if password:
@@ -282,7 +284,7 @@ def set_user_status(
         raise typer.Exit(code=1) from e
 
     typer.secho(
-        f"✓ Status updated: {old_status} → {status}",
+        f"Status updated: {old_status} -> {status}",
         fg=typer.colors.GREEN,
     )
     print(f"  Email: {user.email}")
@@ -307,7 +309,7 @@ def reset_password(
         typer.secho(f"Error: {e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from e
 
-    typer.secho(f"✓ Password reset for {user.email}", fg=typer.colors.GREEN, bold=True)
+    typer.secho(f"Password reset for {user.email}", fg=typer.colors.GREEN, bold=True)
     if password:
         print("  Password: [custom]")
     else:

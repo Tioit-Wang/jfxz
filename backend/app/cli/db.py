@@ -19,7 +19,7 @@ def db_init():
         typer.secho(f"Error: {e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from e
 
-    typer.secho("✓ Database tables created", fg=typer.colors.GREEN)
+    typer.secho("Database tables created", fg=typer.colors.GREEN)
 
 
 @app.command("check")
@@ -41,7 +41,7 @@ def db_check():
     try:
         db_name = asyncio.run(_check())
     except Exception as e:
-        typer.secho(f"✗ Connection failed: {e}", fg=typer.colors.RED, err=True)
+        typer.secho(f"Connection failed: {e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from e
 
-    typer.secho(f"✓ Connected to database: {db_name}", fg=typer.colors.GREEN)
+    typer.secho(f"Connected to database: {db_name}", fg=typer.colors.GREEN)

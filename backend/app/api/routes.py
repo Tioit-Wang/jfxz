@@ -227,16 +227,21 @@ def _agent_run_lock(session_id: str) -> asyncio.Lock:
 
 
 def public(model: Any) -> dict[str, Any]:
+    from datetime import datetime as _DateTime
     from decimal import Decimal as _Decimal
 
     data: dict[str, Any] = {}
     for column in model.__table__.columns:
         value = getattr(model, column.name)
-        if isinstance(value, _Decimal):
+        if isinstance(value, _DateTime):
+            value = value.isoformat()
+        elif isinstance(value, _Decimal):
             value = float(value)
         data[column.name] = value
     if "password_hash" in data:
         del data["password_hash"]
+    if "password_changed_at" in data:
+        del data["password_changed_at"]
     return data
 
 
@@ -467,6 +472,12 @@ async def user_from_token(session: AsyncSession, token: str | None, token_type: 
     user = await session.get(User, token_data[0])
     if user is None or user.status != "active":
         raise HTTPException(status_code=403, detail="inactive user")
+    if user.password_changed_at is not None:
+        token_iat = token_data[2].get("iat")
+        if isinstance(token_iat, (int, float)):
+            token_issued = datetime.fromtimestamp(token_iat, tz=UTC)
+            if token_issued < user.password_changed_at:
+                raise HTTPException(status_code=401, detail="password changed")
     return user
 
 

@@ -208,15 +208,20 @@ function referenceTone(type: ChatReference["type"]): string {
 
 function apiErrorMessage(error: unknown): string {
   if (!(error instanceof ApiError)) return "请求失败，请稍后重试";
+  if (error.status === 401) return "登录已过期，请重新登录";
   if (error.status === 402) return "积分不足，暂时无法检测";
-  if (error.status === 503) return "AI 检测暂未配置";
+  if (error.status === 429) return "请求过于频繁，请稍后再试";
+  if (error.status === 500) return "服务器内部错误，请稍后重试";
   if (error.status === 502) return "AI 检测结果解析失败，请重试";
+  if (error.status === 503) return "AI 检测暂未配置";
   return "AI 检测失败，请稍后重试";
 }
 
 export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const router = useRouter();
-  const client = useMemo(() => new ApiClient(), []);
+  const client = useMemo(() => new ApiClient(undefined, undefined, {
+    onUnauthorized: () => router.replace(userLoginPath(`/books/${bookId}`))
+  }), [bookId, router]);
   const chatInputRef = useRef<ChatMentionInputHandle | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const workspaceGroupRef = useGroupRef();
@@ -1379,6 +1384,116 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     );
   }
 
+  function renderCharacterList(resultStr: string) {
+    let items: Array<{ id: string; name: string; summary: string }> = [];
+    try {
+      const parsed = JSON.parse(resultStr);
+      items = Array.isArray(parsed) ? parsed : parsed.characters ?? [];
+    } catch {
+      return <p className="whitespace-pre-wrap">{resultStr}</p>;
+    }
+    if (!items.length) {
+      return <p className="text-blue-500 italic">暂无角色</p>;
+    }
+    return (
+      <div className="space-y-1">
+        {items.map((c) => (
+          <div key={c.id} className="flex items-start gap-2 rounded-md bg-white/60 px-2.5 py-1.5">
+            <span className="mt-0.5 shrink-0 rounded bg-blue-100 px-1.5 py-0.5 font-mono text-[10px] text-blue-500">{c.id.slice(0, 8)}</span>
+            <div className="min-w-0">
+              <span className="font-medium text-gray-800">{c.name}</span>
+              {c.summary ? <span className="ml-1.5 text-gray-400">— {c.summary.length > 40 ? `${c.summary.slice(0, 40)}…` : c.summary}</span> : null}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  function renderCharacterDetail(resultStr: string) {
+    let c: Record<string, string> = {};
+    try { c = JSON.parse(resultStr); } catch {
+      return <p className="whitespace-pre-wrap">{resultStr}</p>;
+    }
+    if (c.error) return <p className="text-red-500">{c.error}</p>;
+    return (
+      <div className="space-y-2 rounded-md bg-white/60 p-3">
+        <div className="flex items-center gap-2">
+          <span className="rounded bg-blue-100 px-1.5 py-0.5 font-mono text-[10px] text-blue-500">{c.id?.slice(0, 8)}</span>
+          <span className="text-base font-semibold text-gray-800">{c.name}</span>
+        </div>
+        {c.summary ? (
+          <div>
+            <span className="text-[10px] font-medium uppercase tracking-wider text-gray-400">简介</span>
+            <p className="mt-0.5 text-gray-600">{c.summary}</p>
+          </div>
+        ) : null}
+        {c.detail ? (
+          <div>
+            <span className="text-[10px] font-medium uppercase tracking-wider text-gray-400">详细描述</span>
+            <p className="mt-0.5 max-h-40 overflow-auto whitespace-pre-wrap text-gray-600 text-[11px] leading-relaxed">{c.detail}</p>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderCharacterUpsert(resultStr: string) {
+    let c: Record<string, string> = {};
+    try { c = JSON.parse(resultStr); } catch {
+      return <p className="whitespace-pre-wrap">{resultStr}</p>;
+    }
+    return (
+      <div className="flex items-start gap-2 rounded-md bg-white/60 p-2.5">
+        <span className="rounded bg-blue-100 px-1.5 py-0.5 font-mono text-[10px] text-blue-500">{c.id?.slice(0, 8)}</span>
+        <div className="min-w-0">
+          <p className="font-medium text-gray-800">{c.name}</p>
+          {c.summary ? <p className="text-gray-400 text-[11px]">{c.summary.length > 60 ? `${c.summary.slice(0, 60)}…` : c.summary}</p> : null}
+        </div>
+      </div>
+    );
+  }
+
+  function renderCharacterDelete(resultStr: string) {
+    let d: Record<string, string> = {};
+    try { d = JSON.parse(resultStr); } catch {
+      return <p className="whitespace-pre-wrap">{resultStr}</p>;
+    }
+    return (
+      <div className="flex items-center gap-2 rounded-md bg-red-50 px-3 py-2 text-red-600">
+        <span className="font-medium">已删除角色「{d.name}」</span>
+        <span className="font-mono text-[10px] text-red-400">{d.character_id?.slice(0, 8)}</span>
+      </div>
+    );
+  }
+
+  function renderToolResult(block: ToolCallBlock) {
+    if (!block.result) return null;
+    const tool = block.tool;
+    if (tool === "update_chapter_content") {
+      return <div className="border-t border-blue-100 px-3 py-2">{renderDiffResult(block.result)}</div>;
+    }
+    if (tool === "list_characters") {
+      return <div className="border-t border-blue-100 px-3 py-2">{renderCharacterList(block.result)}</div>;
+    }
+    if (tool === "get_character") {
+      return <div className="border-t border-blue-100 px-3 py-2">{renderCharacterDetail(block.result)}</div>;
+    }
+    if (tool === "create_or_update_character") {
+      return <div className="border-t border-blue-100 px-3 py-2">{renderCharacterUpsert(block.result)}</div>;
+    }
+    if (tool === "delete_character") {
+      return <div className="border-t border-blue-100 px-3 py-2">{renderCharacterDelete(block.result)}</div>;
+    }
+    return (
+      <div className="border-t border-blue-100 px-3 py-2 text-blue-600">
+        <p className="line-clamp-6 whitespace-pre-wrap">
+          {block.result.length > 500 ? `${block.result.slice(0, 500)}...` : block.result}
+        </p>
+      </div>
+    );
+  }
+
   function renderMessageContent(message: ChatMessage) {
     const isStreaming = message.id === streamingMessageId;
 
@@ -1402,19 +1517,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                   )}
                   {block.display || toolLabel(block.tool)}
                 </summary>
-                {block.result ? (
-                  block.tool === "update_chapter_content" ? (
-                    <div className="border-t border-blue-100 px-3 py-2">
-                      {renderDiffResult(block.result)}
-                    </div>
-                  ) : (
-                    <div className="border-t border-blue-100 px-3 py-2 text-blue-600">
-                      <p className="line-clamp-6 whitespace-pre-wrap">
-                        {block.result.length > 500 ? `${block.result.slice(0, 500)}...` : block.result}
-                      </p>
-                    </div>
-                  )
-                ) : null}
+                {renderToolResult(block)}
               </details>
             );
           })}

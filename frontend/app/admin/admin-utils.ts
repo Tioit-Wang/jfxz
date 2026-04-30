@@ -1,7 +1,13 @@
 import { ApiClient } from "@/api";
 
 export function adminClient(): ApiClient {
-  return new ApiClient();
+  return new ApiClient(undefined, undefined, {
+    onUnauthorized: () => {
+      if (typeof window !== "undefined") {
+        window.location.href = "/admin/login";
+      }
+    }
+  });
 }
 
 export function formatDate(value?: string | null): string {

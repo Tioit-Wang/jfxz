@@ -21,7 +21,9 @@ export default function AdminShell({ children }: Readonly<{ children: ReactNode 
       setReady(true);
       return;
     }
-    const client = new ApiClient();
+    const client = new ApiClient(undefined, undefined, {
+      onUnauthorized: () => router.replace("/admin/login")
+    });
     client
       .getMe()
       .then((p) => {

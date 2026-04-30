@@ -415,6 +415,8 @@ export type AdminSubscription = {
   start_at: string;
   end_at: string;
   next_renew_at: string | null;
+  daily_vip_points_snapshot: number;
+  duration_days_snapshot: number;
 };
 
 export type AdminSession = {
@@ -661,13 +663,21 @@ function mapChatMessage(message: {
   };
 }
 
+export type ApiClientOptions = {
+  onUnauthorized?: () => void;
+};
+
 export class ApiClient {
   private csrfToken: string | null = null;
+  private readonly onUnauthorized?: () => void;
 
   constructor(
     private readonly baseUrl = defaultApiBaseUrl(),
-    private readonly fetcher: Fetcher = (...args) => fetch(...args)
-  ) {}
+    private readonly fetcher: Fetcher = (...args) => fetch(...args),
+    options?: ApiClientOptions
+  ) {
+    this.onUnauthorized = options?.onUnauthorized;
+  }
 
   async registerWithEmail(email: string, nickname: string | undefined, password: string): Promise<ApiUser> {
     const data = await this.request<{ user: ApiUser }>("/auth/register", {
@@ -1397,6 +1407,9 @@ export class ApiClient {
       if (needsCsrf && response.status === 403 && !retriedCsrf && message.toLowerCase().includes("csrf")) {
         this.csrfToken = null;
         return this.rawRequest(path, init, true);
+      }
+      if (response.status === 401 && this.onUnauthorized) {
+        this.onUnauthorized();
       }
       throw new ApiError(message, response.status);
     }

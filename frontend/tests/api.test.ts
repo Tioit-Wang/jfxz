@@ -151,7 +151,7 @@ describe("api client", () => {
       .mockResolvedValueOnce(jsonResponse({ id: "u1", email: "a@example.com", nickname: "B", role: "user", status: "active" }))
       .mockResolvedValueOnce(
         jsonResponse({
-          plans: [{ id: "plan-1", name: "专业版", price_amount: "29.00", monthly_points: 100, bundled_topup_points: 20 }],
+          plans: [{ id: "plan-1", name: "专业版", price_amount: "29.00", daily_vip_points: 100, bundled_credit_pack_points: 20 }],
           credit_packs: [{ id: "pack-1", name: "加油包", price_amount: "9.00", points: 50 }]
         })
       )

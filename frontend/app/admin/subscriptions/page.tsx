@@ -114,6 +114,8 @@ export default function AdminSubscriptionsPage() {
                     <TableHead>开始</TableHead>
                     <TableHead>结束</TableHead>
                     <TableHead>下次续费</TableHead>
+                    <TableHead>每日积分</TableHead>
+                    <TableHead>时长(天)</TableHead>
                     <TableHead className="text-right">操作</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -126,6 +128,8 @@ export default function AdminSubscriptionsPage() {
                       <TableCell>{formatDate(item.start_at)}</TableCell>
                       <TableCell>{formatDate(item.end_at)}</TableCell>
                       <TableCell>{formatDate(item.next_renew_at)}</TableCell>
+                      <TableCell>{item.daily_vip_points_snapshot}</TableCell>
+                      <TableCell>{item.duration_days_snapshot}</TableCell>
                       <TableCell className="text-right">
                         <Button size="sm" variant="outline" onClick={() => void openDetail(item)}>详情</Button>
                       </TableCell>
@@ -158,6 +162,8 @@ export default function AdminSubscriptionsPage() {
               <span className="text-muted-foreground">开始时间</span><span>{formatDate(detail.subscription.start_at)}</span>
               <span className="text-muted-foreground">结束时间</span><span>{formatDate(detail.subscription.end_at)}</span>
               <span className="text-muted-foreground">关联订单</span><span>{detail.order?.order_no ?? "无"}</span>
+              <span className="text-muted-foreground">每日积分快照</span><span>{detail.subscription.daily_vip_points_snapshot}</span>
+              <span className="text-muted-foreground">订阅时长(天)</span><span>{detail.subscription.duration_days_snapshot}</span>
             </div>
           ) : null}
         </SheetContent>

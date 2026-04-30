@@ -644,15 +644,16 @@ async def seed_defaults(session: AsyncSession) -> None:
             ),
         )
         if existing_config is None:
-            session.add(
-                GlobalConfig(
-                    config_group=group,
-                    config_key=key,
-                    value_type=value_type,
-                    is_required=is_required,
-                    description=description,
-                )
+            defaults: dict[str, Any] = dict(
+                config_group=group,
+                config_key=key,
+                value_type=value_type,
+                is_required=is_required,
+                description=description,
             )
+            if group == "billing" and key == "points_per_cny":
+                defaults["integer_value"] = 10000
+            session.add(GlobalConfig(**defaults))
 
     existing_models = await one(session, select(func.count(AiModel.id)))
     if not existing_models:

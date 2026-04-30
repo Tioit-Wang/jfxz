@@ -53,7 +53,7 @@ export default function LandingPage() {
       <header className="lp-nav">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
           <Link href="/" className="text-base font-semibold tracking-tight">
-            金番写作
+            妙蛙写作
           </Link>
           <nav className="flex items-center gap-8">
             <a href="#features" className="hidden text-sm sm:block" style={{ color: "var(--lp-ink-light)" }}>
@@ -495,7 +495,7 @@ export default function LandingPage() {
               {[
                 {
                   book: "《长安浮世录》",
-                  text: "以前写长篇最怕上下文混乱，角色性格前后不一。金番的角色档案系统和上下文感知对话彻底解决了这个痛点，AI 真的能记住我几百章前的设定。",
+                  text: "以前写长篇最怕上下文混乱，角色性格前后不一。妙蛙的角色档案系统和上下文感知对话彻底解决了这个痛点，AI 真的能记住我几百章前的设定。",
                   name: "沈墨白",
                   role: "网文作者 · 连载 3 年",
                   avatar: "沈",
@@ -503,7 +503,7 @@ export default function LandingPage() {
                 },
                 {
                   book: "《星海迷途》",
-                  text: "世界观设定太庞大了，自己管理力不从心。金番的世界观构建模块让我把几百条规则整理得井井有条，AI 对话时还能自动引用，非常省心。",
+                  text: "世界观设定太庞大了，自己管理力不从心。妙蛙的世界观构建模块让我把几百条规则整理得井井有条，AI 对话时还能自动引用，非常省心。",
                   name: "林知远",
                   role: "科幻作者 · 完结 2 部",
                   avatar: "林",
@@ -519,7 +519,7 @@ export default function LandingPage() {
                 },
                 {
                   book: "《剑道无疆》",
-                  text: "作为新人作者，最怕写崩。金番帮我理清角色关系、把控情节节奏，半年写了 80 万字，读者反馈说人物刻画比之前细腻太多了。",
+                  text: "作为新人作者，最怕写崩。妙蛙帮我理清角色关系、把控情节节奏，半年写了 80 万字，读者反馈说人物刻画比之前细腻太多了。",
                   name: "江辰宇",
                   role: "新人作者 · 首部连载中",
                   avatar: "江",
@@ -571,7 +571,7 @@ export default function LandingPage() {
             准备好<span style={{ color: "var(--lp-accent)" }}>开始创作</span>了吗？
           </h2>
           <p className="mb-10 text-lg" style={{ color: "var(--lp-ink-light)" }}>
-            从第一个字到最后一章，金番写作陪你完成每一个值得被讲述的故事。
+            从第一个字到最后一章，妙蛙写作陪你完成每一个值得被讲述的故事。
           </p>
           <div className="flex justify-center gap-3">
             <Button size="lg" asChild className="lp-btn-primary">
@@ -591,10 +591,10 @@ export default function LandingPage() {
       <footer className="py-8" style={{ borderTop: "1px solid var(--lp-border-light)" }}>
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6">
           <span className="text-sm font-semibold">
-            金番写作
+            妙蛙写作
           </span>
           <span className="text-xs" style={{ color: "var(--lp-muted)" }}>
-            &copy; 2026 金番写作
+            &copy; 2026 妙蛙写作
           </span>
         </div>
       </footer>

@@ -18,7 +18,7 @@ export function apiOrigin(baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL): strin
 }
 
 function productionSecurityHeaders(): boolean {
-  return process.env.NODE_ENV === "production" || process.env.JFXZ_FRONTEND_PRODUCTION_HEADERS === "true";
+  return process.env.NODE_ENV === "production" || process.env.GOODGUA_FRONTEND_PRODUCTION_HEADERS === "true";
 }
 
 export function securityHeaders(isProduction = productionSecurityHeaders(), apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL) {

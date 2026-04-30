@@ -1,10 +1,10 @@
 import os
 from collections.abc import AsyncIterator
 
-os.environ["JFXZ_DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
-os.environ["JFXZ_ENV"] = "test"
-os.environ["JFXZ_ENABLE_PAYMENT_SIMULATOR"] = "true"
-os.environ["JFXZ_AI_PROVIDER_API_KEY"] = ""
+os.environ["GOODGUA_DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
+os.environ["GOODGUA_ENV"] = "test"
+os.environ["GOODGUA_ENABLE_PAYMENT_SIMULATOR"] = "true"
+os.environ["GOODGUA_AI_PROVIDER_API_KEY"] = ""
 
 from decimal import Decimal
 

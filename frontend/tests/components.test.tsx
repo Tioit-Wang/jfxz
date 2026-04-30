@@ -50,7 +50,7 @@ describe("AuthModal", () => {
     await user.click(screen.getByRole("button", { name: "登录" }));
 
     await waitFor(() => expect(onAuthenticated).toHaveBeenCalled());
-    expect(window.localStorage.getItem("jfxz-user-token")).toBeNull();
+    expect(window.localStorage.getItem("goodgua-user-token")).toBeNull();
     expect(onClose).toHaveBeenCalled();
     expect(loginWithEmail).toHaveBeenCalledWith("writer@example.com", "secret123");
   });

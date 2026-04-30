@@ -63,3 +63,16 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+
+## 5. Timezone Conventions
+
+**所有前端时间展示必须显式指定 `timeZone: "Asia/Shanghai"`。**
+
+- 用户群体在中国，服务器部署在新加坡（同为 UTC+8），但浏览器环境可能不一致。
+- `Intl.DateTimeFormat` 和 `toLocaleString` 用于日期时间展示时，必须加 `timeZone: "Asia/Shanghai"`，确保在任何浏览器/系统时区下都显示北京时间。
+- 后端存储统一用 UTC（`datetime.now(UTC)`），前端负责在展示层转换为北京时间。
+- 已修改的文件：
+  - `frontend/app/admin/admin-utils.ts` — `formatDate()`
+  - `frontend/app/books/BooksClient.tsx` — `formatUpdatedAt()`
+  - `frontend/app/books/[bookId]/WorkspaceClient.tsx` — `formatUpdatedAt()`
+- 新增日期格式化函数时，务必遵循同一规范。

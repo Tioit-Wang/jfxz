@@ -15,12 +15,12 @@ export default defineConfig({
         "python -c \"from pathlib import Path; [Path(name).unlink(missing_ok=True) for name in ('e2e.db', 'e2e.db-shm', 'e2e.db-wal')]\" && python -m uvicorn app.main:app --host 127.0.0.1 --port 8100",
       cwd: "../backend",
       env: {
-        JFXZ_DATABASE_URL: "sqlite+aiosqlite:///./e2e.db",
-        JFXZ_ENV: "test",
-        JFXZ_ENABLE_PAYMENT_SIMULATOR: "true",
-        JFXZ_BOOTSTRAP_ADMIN_EMAIL: "admin@example.com",
-        JFXZ_BOOTSTRAP_ADMIN_PASSWORD: "admin123",
-        JFXZ_CORS_ORIGINS: "http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:3100,http://localhost:3100"
+        GOODGUA_DATABASE_URL: "sqlite+aiosqlite:///./e2e.db",
+        GOODGUA_ENV: "test",
+        GOODGUA_ENABLE_PAYMENT_SIMULATOR: "true",
+        GOODGUA_BOOTSTRAP_ADMIN_EMAIL: "admin@example.com",
+        GOODGUA_BOOTSTRAP_ADMIN_PASSWORD: "admin123",
+        GOODGUA_CORS_ORIGINS: "http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:3100,http://localhost:3100"
       },
       reuseExistingServer: false,
       timeout: 120_000,

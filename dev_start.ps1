@@ -1,7 +1,7 @@
 #Requires -Version 7
 <#
 .SYNOPSIS
-    一键启动金番写作 (jfxz) 前后端开发环境
+    一键启动妙蛙写作 (goodgua) 前后端开发环境
 .DESCRIPTION
     同时启动后端 (FastAPI/Uvicorn) 和前端 (Next.js)，日志输出到 logs/ 目录。
     按 Ctrl+C 或关闭窗口即可停止对应服务。

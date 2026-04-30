@@ -73,7 +73,7 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
                   <BookOpenText />
                 </span>
                 <span className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-medium">金番写作</span>
+                  <span className="truncate font-medium">妙蛙写作</span>
                   <span className="truncate text-xs text-muted-foreground">管理后台</span>
                 </span>
               </Link>

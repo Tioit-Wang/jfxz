@@ -26,14 +26,14 @@ class Settings(BaseSettings):
     ai_provider_base_url: str = "https://platform.aimom.net/v1"
     ai_provider_api_key: str | None = None
 
-    model_config = SettingsConfigDict(env_prefix="JFXZ_", env_file=SHARED_ENV_FILES, extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="GOODGUA_", env_file=SHARED_ENV_FILES, extra="ignore")
 
     @field_validator("env")
     @classmethod
     def normalize_env(cls, value: str) -> str:
         normalized = value.lower()
         if normalized not in {"development", "test", "production"}:
-            raise ValueError("JFXZ_ENV must be development, test, or production")
+            raise ValueError("GOODGUA_ENV must be development, test, or production")
         return normalized
 
     @property
@@ -53,9 +53,9 @@ class Settings(BaseSettings):
         if self.is_production:
             self.enable_payment_simulator = False
             if self.jwt_secret == "dev-secret" or len(self.jwt_secret.encode("utf-8")) < 32:
-                raise ValueError("JFXZ_JWT_SECRET must be at least 32 bytes in production")
+                raise ValueError("GOODGUA_JWT_SECRET must be at least 32 bytes in production")
             if "*" in self.cors_origin_list:
-                raise ValueError("JFXZ_CORS_ORIGINS cannot contain * in production")
+                raise ValueError("GOODGUA_CORS_ORIGINS cannot contain * in production")
         return self
 
 

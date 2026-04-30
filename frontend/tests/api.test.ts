@@ -557,7 +557,7 @@ describe("api client", () => {
   });
 
   it("fetches and refreshes csrf tokens when needed", async () => {
-    document.cookie = "jfxz_csrf=; Max-Age=0; path=/";
+    document.cookie = "goodgua_csrf=; Max-Age=0; path=/";
     const fetcher = vi.fn<typeof fetch>(async (input) => {
       const url = String(input);
       if (url.endsWith("/csrf") && fetcher.mock.calls.filter((call) => String(call[0]).endsWith("/csrf")).length === 1) {

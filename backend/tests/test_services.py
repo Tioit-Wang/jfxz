@@ -19,7 +19,7 @@ from app.models import (
     SettingItem,
     Work,
 )
-from app.services.agent_service import JfxzTools, _serialize, build_system_prompt
+from app.services.agent_service import GoodguaTools, _serialize, build_system_prompt
 from app.services.billing_service import (
     _calculate_cost,
     _cost_to_deduct,
@@ -179,15 +179,15 @@ class TestAgentServiceHelpers:
         _mod._db = None
 
 
-class TestJfxzTools:
+class TestGoodguaTools:
     @pytest_asyncio.fixture
-    async def tools(self, session: AsyncSession) -> JfxzTools:
+    async def tools(self, session: AsyncSession) -> GoodguaTools:
         user_id = "u-tools"
         work = await _make_work(session, user_id)
         await session.commit()
-        return JfxzTools(db=session, work_id=work.id)
+        return GoodguaTools(db=session, work_id=work.id)
 
-    async def test_character_crud(self, tools: JfxzTools, session: AsyncSession) -> None:
+    async def test_character_crud(self, tools: GoodguaTools, session: AsyncSession) -> None:
         result = json.loads(await tools.list_characters())
         assert result == []
 
@@ -209,7 +209,7 @@ class TestJfxzTools:
         not_found = json.loads(await tools.get_character("nonexistent"))
         assert "error" in not_found
 
-    async def test_setting_crud(self, tools: JfxzTools, session: AsyncSession) -> None:
+    async def test_setting_crud(self, tools: GoodguaTools, session: AsyncSession) -> None:
         created = json.loads(await tools.create_or_update_setting("魔法体系", "设定摘要", "设定详情", "world"))
         assert created["name"] == "魔法体系"
         assert created["type"] == "world"
@@ -227,7 +227,7 @@ class TestJfxzTools:
         fetched = json.loads(await tools.get_setting(setting_id))
         assert fetched["name"] == "魔法体系"
 
-    async def test_chapter_operations(self, tools: JfxzTools, session: AsyncSession) -> None:
+    async def test_chapter_operations(self, tools: GoodguaTools, session: AsyncSession) -> None:
         chapter = Chapter(work_id=tools.work_id, order_index=1, title="第一章", content="正文内容", summary="原始摘要")
         session.add(chapter)
         await session.flush()
@@ -251,7 +251,7 @@ class TestJfxzTools:
         not_found = json.loads(await tools.get_chapter("nonexistent"))
         assert "error" in not_found
 
-    async def test_work_info(self, tools: JfxzTools, session: AsyncSession) -> None:
+    async def test_work_info(self, tools: GoodguaTools, session: AsyncSession) -> None:
         info = json.loads(await tools.get_work_info())
         assert info["title"] == "测试作品"
 
@@ -265,15 +265,15 @@ class TestJfxzTools:
         assert refreshed["short_intro"] == "新简介"
         assert refreshed["synopsis"] == "新梗概"
 
-    async def test_update_character_not_found(self, tools: JfxzTools) -> None:
+    async def test_update_character_not_found(self, tools: GoodguaTools) -> None:
         result = json.loads(await tools.create_or_update_character("x", "y", character_id="nonexistent"))
         assert "error" in result
 
-    async def test_update_setting_not_found(self, tools: JfxzTools) -> None:
+    async def test_update_setting_not_found(self, tools: GoodguaTools) -> None:
         result = json.loads(await tools.create_or_update_setting("x", "y", setting_id="nonexistent"))
         assert "error" in result
 
-    async def test_update_chapter_not_found(self, tools: JfxzTools) -> None:
+    async def test_update_chapter_not_found(self, tools: GoodguaTools) -> None:
         result = json.loads(await tools.update_chapter_summary("nonexistent", "摘要"))
         assert "error" in result
 
@@ -284,15 +284,15 @@ class TestJfxzTools:
         await session.flush()
         await session.commit()
 
-        tools = JfxzTools(db=session, work_id="nonexistent-work")
+        tools = GoodguaTools(db=session, work_id="nonexistent-work")
         result = json.loads(await tools.list_chapters())
         assert result == []
 
-    async def test_get_setting_not_found(self, tools: JfxzTools) -> None:
+    async def test_get_setting_not_found(self, tools: GoodguaTools) -> None:
         result = json.loads(await tools.get_setting("nonexistent"))
         assert "error" in result
 
-    async def test_update_existing_setting(self, tools: JfxzTools) -> None:
+    async def test_update_existing_setting(self, tools: GoodguaTools) -> None:
         created = json.loads(await tools.create_or_update_setting("原始", "摘要", "详情", "world"))
         setting_id = created["id"]
         updated = json.loads(await tools.create_or_update_setting("更新", "新摘要", "新详情", "combat", setting_id=setting_id))
@@ -300,16 +300,16 @@ class TestJfxzTools:
         assert updated["type"] == "combat"
 
     async def test_get_work_info_not_found(self, session: AsyncSession) -> None:
-        tools = JfxzTools(db=session, work_id="nonexistent-work")
+        tools = GoodguaTools(db=session, work_id="nonexistent-work")
         result = json.loads(await tools.get_work_info())
         assert "error" in result
 
     async def test_update_work_info_not_found(self, session: AsyncSession) -> None:
-        tools = JfxzTools(db=session, work_id="nonexistent-work")
+        tools = GoodguaTools(db=session, work_id="nonexistent-work")
         result = json.loads(await tools.update_work_info("short_intro", "x"))
         assert "error" in result
 
-    async def test_update_work_info_all_fields(self, tools: JfxzTools) -> None:
+    async def test_update_work_info_all_fields(self, tools: GoodguaTools) -> None:
         focus = json.loads(await tools.update_work_info("focus_requirements", "全重点"))
         forbidden = json.loads(await tools.update_work_info("forbidden_requirements", "全禁忌"))
         assert focus["field"] == "focus_requirements"

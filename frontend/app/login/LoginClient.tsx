@@ -22,7 +22,7 @@ export default function LoginClient() {
         <section className="flex flex-col justify-between gap-10 rounded-lg border bg-muted/30 p-6 lg:p-8">
           <div className="flex items-center justify-between gap-4">
             <Link href="/" className="text-lg font-semibold">
-              金番写作
+              妙蛙写作
             </Link>
             <Badge variant="outline">长篇写作工作台</Badge>
           </div>

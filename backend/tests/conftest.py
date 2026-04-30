@@ -1,10 +1,10 @@
 import os
 
-os.environ.setdefault("JFXZ_DATABASE_URL", "sqlite+aiosqlite:///:memory:")
-os.environ.setdefault("JFXZ_ENV", "test")
-os.environ.setdefault("JFXZ_ENABLE_PAYMENT_SIMULATOR", "true")
+os.environ.setdefault("GOODGUA_DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+os.environ.setdefault("GOODGUA_ENV", "test")
+os.environ.setdefault("GOODGUA_ENABLE_PAYMENT_SIMULATOR", "true")
 # Prevent .env API keys from leaking into tests (pydantic reads .env file directly)
-os.environ["JFXZ_AI_PROVIDER_API_KEY"] = ""
+os.environ["GOODGUA_AI_PROVIDER_API_KEY"] = ""
 
 from unittest.mock import MagicMock
 

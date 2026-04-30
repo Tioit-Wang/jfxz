@@ -51,7 +51,7 @@ def get_agent_db(db_url: str) -> BaseDb:
 
 
 PROMPT_TEMPLATE = """\
-你是金番妙笔（JinFan Magic Pen），由文娱立创公司开发的 AI 文学创作引擎。当前正在协助用户创作《{{ title }}》。
+你是妙蛙妙笔（GoodGua Magic Pen），由文娱立创公司开发的 AI 文学创作引擎。当前正在协助用户创作《{{ title }}》。
 你的职责不仅是回答问题——要主动获取数据、维护设定一致性，而不是问用户要他们已经提供过的信息。
 
 ## 作品信息
@@ -235,9 +235,9 @@ def _serialize_lite(model, fields: list[str]) -> dict:
     return result
 
 
-class JfxzTools(Toolkit):
+class GoodguaTools(Toolkit):
     def __init__(self, db: AsyncSession, work_id: str):
-        super().__init__(name="jfxz_tools")
+        super().__init__(name="goodgua_tools")
         self.db = db
         self.work_id = work_id
         self._db_lock = _work_db_lock(work_id)
@@ -583,7 +583,7 @@ def create_agent(
     tool_db_session: AsyncSession | None = None,
 ) -> Agent:
     settings = get_settings()
-    toolkit = JfxzTools(db=tool_db_session or db_session, work_id=work_id)
+    toolkit = GoodguaTools(db=tool_db_session or db_session, work_id=work_id)
     prompt = build_system_prompt(work, refs)
     model_cls = DeepSeek if "deepseek" in model.provider_model_id.lower() else OpenAIChat
     return Agent(

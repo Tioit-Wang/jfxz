@@ -51,8 +51,8 @@ async function grantPoints(page: Page) {
     const csrf = document.cookie
       .split(";")
       .map((part) => part.trim())
-      .find((part) => part.startsWith("jfxz_csrf="))
-      ?.slice("jfxz_csrf=".length);
+      .find((part) => part.startsWith("goodgua_csrf="))
+      ?.slice("goodgua_csrf=".length);
     if (!csrf) {
       throw new Error("missing csrf cookie");
     }

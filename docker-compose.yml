@@ -1,7 +1,7 @@
 services:
   nginx:
     image: nginx:alpine
-    container_name: jfxz-nginx
+    container_name: goodgua-nginx
     restart: unless-stopped
     ports:
       - "127.0.0.1:18081:80"
@@ -20,7 +20,7 @@ services:
       context: ./frontend
       args:
         - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
-    container_name: jfxz-frontend
+    container_name: goodgua-frontend
     restart: unless-stopped
     environment:
       - TZ=Asia/Shanghai
@@ -30,21 +30,21 @@ services:
   backend:
     build:
       context: ./backend
-    container_name: jfxz-backend
+    container_name: goodgua-backend
     restart: unless-stopped
     environment:
-      - JFXZ_ENV=production
-      - JFXZ_DATABASE_URL=${JFXZ_DATABASE_URL}
-      - JFXZ_JWT_SECRET=${JFXZ_JWT_SECRET}
-      - JFXZ_CORS_ORIGINS=${JFXZ_CORS_ORIGINS}
-      - JFXZ_USER_SESSION_SECONDS=${JFXZ_USER_SESSION_SECONDS:-86400}
-      - JFXZ_ADMIN_SESSION_SECONDS=${JFXZ_ADMIN_SESSION_SECONDS:-7200}
-      - JFXZ_AI_PROVIDER_BASE_URL=${JFXZ_AI_PROVIDER_BASE_URL:-https://platform.aimom.net/v1}
-      - JFXZ_AI_PROVIDER_API_KEY=${JFXZ_AI_PROVIDER_API_KEY}
-      - JFXZ_AUTO_CREATE_TABLES=true
-      - JFXZ_BOOTSTRAP_ADMIN_EMAIL=${JFXZ_BOOTSTRAP_ADMIN_EMAIL}
-      - JFXZ_BOOTSTRAP_ADMIN_PASSWORD=${JFXZ_BOOTSTRAP_ADMIN_PASSWORD}
-      - JFXZ_TRUSTED_PROXY_IPS=${JFXZ_TRUSTED_PROXY_IPS}
+      - GOODGUA_ENV=production
+      - GOODGUA_DATABASE_URL=${GOODGUA_DATABASE_URL}
+      - GOODGUA_JWT_SECRET=${GOODGUA_JWT_SECRET}
+      - GOODGUA_CORS_ORIGINS=${GOODGUA_CORS_ORIGINS}
+      - GOODGUA_USER_SESSION_SECONDS=${GOODGUA_USER_SESSION_SECONDS:-86400}
+      - GOODGUA_ADMIN_SESSION_SECONDS=${GOODGUA_ADMIN_SESSION_SECONDS:-7200}
+      - GOODGUA_AI_PROVIDER_BASE_URL=${GOODGUA_AI_PROVIDER_BASE_URL:-https://platform.aimom.net/v1}
+      - GOODGUA_AI_PROVIDER_API_KEY=${GOODGUA_AI_PROVIDER_API_KEY}
+      - GOODGUA_AUTO_CREATE_TABLES=true
+      - GOODGUA_BOOTSTRAP_ADMIN_EMAIL=${GOODGUA_BOOTSTRAP_ADMIN_EMAIL}
+      - GOODGUA_BOOTSTRAP_ADMIN_PASSWORD=${GOODGUA_BOOTSTRAP_ADMIN_PASSWORD}
+      - GOODGUA_TRUSTED_PROXY_IPS=${GOODGUA_TRUSTED_PROXY_IPS}
       - TZ=Asia/Shanghai
     networks:
       - app-network

@@ -624,7 +624,7 @@ async def test_csrf_origin_and_token_contract(client: AsyncClient) -> None:
         json=payload,
     )
     assert response.status_code == 200
-    token = client.cookies.get("jfxz_csrf")
+    token = client.cookies.get("goodgua_csrf")
     assert token
 
     assert (await client.patch("/me", headers={"Origin": origin}, json={"nickname": "Blocked"})).status_code == 403
@@ -642,7 +642,7 @@ async def test_csrf_origin_and_token_contract(client: AsyncClient) -> None:
             json={"nickname": "Allowed"},
         )
     ).json()["nickname"] == "Allowed"
-    client.cookies.set("jfxz_csrf", "bad.token")
+    client.cookies.set("goodgua_csrf", "bad.token")
     assert (
         await client.patch(
             "/me",
@@ -675,15 +675,15 @@ async def test_admin_login_replaces_existing_user_cookie(client: AsyncClient) ->
             json={"email": "cookie-swap@example.com", "nickname": "Swap", "password": "user12345"},
         )
     ).status_code == 200
-    assert client.cookies.get("jfxz_session")
+    assert client.cookies.get("goodgua_session")
 
     response = await client.post(
         "/admin/login", json={"email": "admin@example.com", "password": "admin12345"}
     )
 
     assert response.status_code == 200
-    assert client.cookies.get("jfxz_session") is None
-    assert client.cookies.get("jfxz_admin_session")
+    assert client.cookies.get("goodgua_session") is None
+    assert client.cookies.get("goodgua_admin_session")
     assert (await client.get("/me")).json()["user"]["role"] == "admin"
 
 
@@ -695,11 +695,11 @@ async def test_cookie_auth_paths_and_admin_role_check(session: AsyncSession) -> 
     admin_token = issue_token(admin.id, admin.role, get_settings().jwt_secret, token_type="admin")
     user_admin_type_token = issue_token(user.id, user.role, get_settings().jwt_secret, token_type="admin")
 
-    assert (await current_user(jfxz_session=user_token, session=session)).id == user.id
-    assert (await current_user(jfxz_admin_session=admin_token, session=session)).id == admin.id
-    assert (await current_admin(jfxz_admin_session=admin_token, session=session)).id == admin.id
+    assert (await current_user(goodgua_session=user_token, session=session)).id == user.id
+    assert (await current_user(goodgua_admin_session=admin_token, session=session)).id == admin.id
+    assert (await current_admin(goodgua_admin_session=admin_token, session=session)).id == admin.id
     with pytest.raises(HTTPException) as role_error:
-        await current_admin(jfxz_admin_session=user_admin_type_token, session=session)
+        await current_admin(goodgua_admin_session=user_admin_type_token, session=session)
     assert role_error.value.status_code == 403
 
 
@@ -734,30 +734,30 @@ def test_create_admin_cli_prints_password_and_exits_on_duplicate(
     async def fake_duplicate(_email: str) -> tuple[object, str]:
         raise AdminEmailExistsError("email already exists: cli@example.com")
 
-    monkeypatch.setattr("sys.argv", ["jfxz-create-admin", "CLI@example.com"])
+    monkeypatch.setattr("sys.argv", ["goodgua-create-admin", "CLI@example.com"])
     monkeypatch.setattr("app.scripts.create_admin.async_main", fake_async_main)
     create_admin_main()
     output = capsys.readouterr().out
     assert "Email: cli@example.com" in output
     assert "Password: generated-password" in output
 
-    monkeypatch.setattr("sys.argv", ["jfxz-create-admin", "--email", "FLAG@example.com"])
+    monkeypatch.setattr("sys.argv", ["goodgua-create-admin", "--email", "FLAG@example.com"])
     create_admin_main()
     output = capsys.readouterr().out
     assert "Email: flag@example.com" in output
 
-    monkeypatch.setattr("sys.argv", ["jfxz-create-admin", "cli@example.com"])
+    monkeypatch.setattr("sys.argv", ["goodgua-create-admin", "cli@example.com"])
     monkeypatch.setattr("app.scripts.create_admin.async_main", fake_duplicate)
     with pytest.raises(SystemExit) as exited:
         create_admin_main()
     assert str(exited.value) == "email already exists: cli@example.com"
 
-    monkeypatch.setattr("sys.argv", ["jfxz-create-admin", "both@example.com", "--email", "both@example.com"])
+    monkeypatch.setattr("sys.argv", ["goodgua-create-admin", "both@example.com", "--email", "both@example.com"])
     with pytest.raises(SystemExit) as both_args:
         create_admin_main()
     assert both_args.value.code == 2
 
-    monkeypatch.setattr("sys.argv", ["jfxz-create-admin"])
+    monkeypatch.setattr("sys.argv", ["goodgua-create-admin"])
     with pytest.raises(SystemExit) as no_email:
         create_admin_main()
     assert no_email.value.code == 2

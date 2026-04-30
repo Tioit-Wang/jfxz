@@ -2,7 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { beforeEach } from "vitest";
 
 beforeEach(() => {
-  document.cookie = "jfxz_csrf=csrf-token; path=/";
+  document.cookie = "goodgua_csrf=csrf-token; path=/";
 });
 
 Object.defineProperty(window, "matchMedia", {

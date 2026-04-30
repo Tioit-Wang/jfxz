@@ -156,7 +156,7 @@ export default function BooksClient() {
       <header className="lp-app-header">
         <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 lg:px-6">
           <Link className="text-base font-semibold tracking-tight" href="/" style={{ fontFamily: "var(--font-display)" }}>
-            金番写作
+            妙蛙写作
           </Link>
           <div className="relative">
             {/* 头像 + hover 弹窗 */}

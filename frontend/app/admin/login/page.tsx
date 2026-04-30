@@ -39,7 +39,7 @@ export default function AdminLoginPage() {
             <LockKeyhole />
           </div>
           <CardTitle className="text-2xl">管理员登录</CardTitle>
-          <CardDescription>进入金番写作管理后台。</CardDescription>
+          <CardDescription>进入妙蛙写作管理后台。</CardDescription>
         </CardHeader>
         <CardContent>
           <form className="flex flex-col gap-4" onSubmit={(event) => void submit(event)}>

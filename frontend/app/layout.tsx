@@ -14,7 +14,7 @@ const playfair = Playfair_Display({
 });
 
 export const metadata: Metadata = {
-  title: "金番写作",
+  title: "妙蛙写作",
   description: "作者主导，AI 协助的长篇写作工作台",
 };
 

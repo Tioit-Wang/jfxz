@@ -473,8 +473,8 @@ function csrfCookieToken(): string | null {
   const cookie = document.cookie
     .split(";")
     .map((part) => part.trim())
-    .find((part) => part.startsWith("jfxz_csrf="));
-  return cookie ? decodeURIComponent(cookie.slice("jfxz_csrf=".length)) : null;
+    .find((part) => part.startsWith("goodgua_csrf="));
+  return cookie ? decodeURIComponent(cookie.slice("goodgua_csrf=".length)) : null;
 }
 
 export function mapWork(work: ApiWork): Work {

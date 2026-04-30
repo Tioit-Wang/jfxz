@@ -91,8 +91,8 @@ type CharacterDraft = { name: string; summary: string; detail: string };
 type SettingMode = "detail" | "create" | "edit";
 type SettingStatus = "ready" | "saving" | "deleting" | "error";
 type SettingDraft = { name: string; summary: string; detail: string; type: string };
-const RECENT_REF_KEY = "jfxz-recent-references";
-const CHAT_MODEL_KEY = "jfxz-chat-model";
+const RECENT_REF_KEY = "goodgua-recent-references";
+const CHAT_MODEL_KEY = "goodgua-chat-model";
 const WORKSPACE_LAYOUT_PANEL_IDS = ["workspace-sidebar", "workspace-editor", "workspace-chat"] as const;
 const testPaymentEnabled = process.env.NEXT_PUBLIC_ENABLE_TEST_PAYMENT === "true";
 const quickPrompts = ["帮我构思后续情节", "帮我补充作品信息"];
@@ -136,7 +136,7 @@ function dedupeReferences(items: ChatReference[]): ChatReference[] {
 }
 
 function workspaceLayoutKey(bookId: string): string {
-  return `jfxz-workspace-layout:v1:${bookId}`;
+  return `goodgua-workspace-layout:v1:${bookId}`;
 }
 
 function chatModelKey(bookId: string): string {

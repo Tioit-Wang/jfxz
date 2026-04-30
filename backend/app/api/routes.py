@@ -54,9 +54,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 REFERENCE_LIMIT = 20
-USER_COOKIE = "jfxz_session"
-ADMIN_COOKIE = "jfxz_admin_session"
-CSRF_COOKIE = "jfxz_csrf"
+USER_COOKIE = "goodgua_session"
+ADMIN_COOKIE = "goodgua_admin_session"
+CSRF_COOKIE = "goodgua_csrf"
 SECRET_MASK = "******"
 MAX_LOGIN_FAILURES = 5
 LOGIN_LOCK_SECONDS = 15 * 60
@@ -482,31 +482,31 @@ async def user_from_token(session: AsyncSession, token: str | None, token_type: 
 
 
 async def current_user(
-    jfxz_session: Annotated[str | None, Cookie(alias=USER_COOKIE)] = None,
-    jfxz_admin_session: Annotated[str | None, Cookie(alias=ADMIN_COOKIE)] = None,
+    goodgua_session: Annotated[str | None, Cookie(alias=USER_COOKIE)] = None,
+    goodgua_admin_session: Annotated[str | None, Cookie(alias=ADMIN_COOKIE)] = None,
     authorization: Annotated[str | None, Header()] = None,
     session: AsyncSession = Depends(get_session),
 ) -> User:
     if authorization and authorization.startswith("Bearer ") and not get_settings().is_production:
         return await user_from_token(session, authorization.removeprefix("Bearer "), "user")
     return await user_from_token(
-        session, jfxz_session or jfxz_admin_session, "user" if jfxz_session else "admin"
+        session, goodgua_session or goodgua_admin_session, "user" if goodgua_session else "admin"
     )
 
 
 async def current_admin(
-    jfxz_admin_session: Annotated[str | None, Cookie(alias=ADMIN_COOKIE)] = None,
-    jfxz_session: Annotated[str | None, Cookie(alias=USER_COOKIE)] = None,
+    goodgua_admin_session: Annotated[str | None, Cookie(alias=ADMIN_COOKIE)] = None,
+    goodgua_session: Annotated[str | None, Cookie(alias=USER_COOKIE)] = None,
     authorization: Annotated[str | None, Header()] = None,
     session: AsyncSession = Depends(get_session),
 ) -> User:
     if authorization and authorization.startswith("Bearer ") and not get_settings().is_production:
         user = await user_from_token(session, authorization.removeprefix("Bearer "), "admin")
     else:
-        if jfxz_admin_session:
-            user = await user_from_token(session, jfxz_admin_session, "admin")
-        elif jfxz_session:
-            user = await user_from_token(session, jfxz_session, "user")
+        if goodgua_admin_session:
+            user = await user_from_token(session, goodgua_admin_session, "admin")
+        elif goodgua_session:
+            user = await user_from_token(session, goodgua_session, "user")
         else:
             raise HTTPException(status_code=401, detail="missing token")
     if user.role != "admin":
@@ -716,7 +716,7 @@ async def seed_defaults(session: AsyncSession) -> None:
 
 @router.get("/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok", "service": "jfxz"}
+    return {"status": "ok", "service": "goodgua"}
 
 
 @router.get("/ai/models")
@@ -1612,7 +1612,7 @@ async def send_chat_message(
     if settings.env != "test" and not settings.ai_provider_api_key:  # pragma: no cover
         raise HTTPException(
             status_code=503,
-            detail="AI provider not configured, please set JFXZ_AI_PROVIDER_API_KEY",
+            detail="AI provider not configured, please set GOODGUA_AI_PROVIDER_API_KEY",
         )
 
     # Context collection (before pre-check so we can estimate tokens accurately)

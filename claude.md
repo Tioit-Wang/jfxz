@@ -76,3 +76,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
   - `frontend/app/books/BooksClient.tsx` — `formatUpdatedAt()`
   - `frontend/app/books/[bookId]/WorkspaceClient.tsx` — `formatUpdatedAt()`
 - 新增日期格式化函数时，务必遵循同一规范。
+
+## 6. 项目文档索引
+
+- 部署架构 → `docs/部署文档.md`

@@ -10,8 +10,15 @@ services:
     environment:
       - TZ=Asia/Shanghai
     depends_on:
-      - frontend
-      - backend
+      frontend:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     networks:
       - app-network
 
@@ -24,6 +31,12 @@ services:
     restart: unless-stopped
     environment:
       - TZ=Asia/Shanghai
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
     networks:
       - app-network
 
@@ -46,6 +59,42 @@ services:
       - GOODGUA_BOOTSTRAP_ADMIN_PASSWORD=${GOODGUA_BOOTSTRAP_ADMIN_PASSWORD}
       - GOODGUA_TRUSTED_PROXY_IPS=${GOODGUA_TRUSTED_PROXY_IPS}
       - TZ=Asia/Shanghai
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - app-network
+      - 1panel-network
+
+  worker:
+    build:
+      context: ./backend
+    container_name: goodgua-worker
+    restart: unless-stopped
+    command: ["python", "-m", "app.worker"]
+    environment:
+      - GOODGUA_ENV=production
+      - GOODGUA_DATABASE_URL=${GOODGUA_DATABASE_URL}
+      - GOODGUA_JWT_SECRET=${GOODGUA_JWT_SECRET}
+      - GOODGUA_CORS_ORIGINS=${GOODGUA_CORS_ORIGINS}
+      - GOODGUA_USER_SESSION_SECONDS=${GOODGUA_USER_SESSION_SECONDS:-86400}
+      - GOODGUA_ADMIN_SESSION_SECONDS=${GOODGUA_ADMIN_SESSION_SECONDS:-7200}
+      - GOODGUA_AI_PROVIDER_BASE_URL=${GOODGUA_AI_PROVIDER_BASE_URL:-https://platform.aimom.net/v1}
+      - GOODGUA_AI_PROVIDER_API_KEY=${GOODGUA_AI_PROVIDER_API_KEY}
+      - GOODGUA_AUTO_CREATE_TABLES=true
+      - GOODGUA_BOOTSTRAP_ADMIN_EMAIL=${GOODGUA_BOOTSTRAP_ADMIN_EMAIL}
+      - GOODGUA_BOOTSTRAP_ADMIN_PASSWORD=${GOODGUA_BOOTSTRAP_ADMIN_PASSWORD}
+      - GOODGUA_TRUSTED_PROXY_IPS=${GOODGUA_TRUSTED_PROXY_IPS}
+      - TZ=Asia/Shanghai
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
     networks:
       - app-network
       - 1panel-network

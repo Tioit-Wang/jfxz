@@ -108,6 +108,29 @@ const settingTypes = [
   { value: "other", label: "其他" }
 ];
 
+const EDITOR_SETTINGS_KEY = "goodgua-editor-settings";
+
+const EDITOR_FONT_OPTIONS = [
+  { value: "system-serif", label: "系统衬线", stack: "Georgia, 'Noto Serif', 'Times New Roman', serif" },
+  { value: "songti", label: "宋体", stack: "'SimSun', '宋体', 'Songti SC', serif" },
+  { value: "noto-serif-sc", label: "思源宋体", stack: "'Noto Serif SC', 'Source Han Serif SC', serif" },
+  { value: "fangsong", label: "仿宋", stack: "'FangSong', '仿宋', 'STFangsong', serif" },
+  { value: "kaiti", label: "楷体", stack: "'KaiTi', '楷体', 'STKaiti', serif" },
+  { value: "heiti", label: "黑体", stack: "'SimHei', '黑体', 'STHeiti', sans-serif" },
+  { value: "yahei", label: "微软雅黑", stack: "'Microsoft YaHei', '微软雅黑', sans-serif" },
+  { value: "noto-sans-sc", label: "思源黑体", stack: "'Noto Sans SC', 'Source Han Sans SC', sans-serif" },
+  { value: "lisu", label: "隶书", stack: "'LiSu', '隶书', 'STLiti', serif" },
+  { value: "youyuan", label: "幼圆", stack: "'YouYuan', '幼圆', sans-serif" },
+];
+
+const DEFAULT_EDITOR_SETTINGS = {
+  fontFamily: "lisu",
+  fontSize: 28,
+  lineHeight: 1.5,
+  letterSpacing: 0,
+  paragraphSpacing: 4,
+};
+
 function formatStatus(status: SaveStatus): { label: string; tone: "success" | "muted" | "warning"; icon: typeof Check } {
   if (status === "saving") return { label: "正在保存...", tone: "muted", icon: Loader2 };
   if (status === "dirty") return { label: "编辑中", tone: "warning", icon: Clock3 };
@@ -306,6 +329,25 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const [showPointsDetail, setShowPointsDetail] = useState(false);
   const [workspaceDefaultLayout, setWorkspaceDefaultLayout] = useState<Layout | undefined>(() => readWorkspaceLayout(bookId));
   const [workspaceLayoutLoaded, setWorkspaceLayoutLoaded] = useState(false);
+  const [editorSettingsOpen, setEditorSettingsOpen] = useState(false);
+  const [editorSettings, setEditorSettings] = useState<typeof DEFAULT_EDITOR_SETTINGS>(() => {
+    if (typeof window === "undefined") return DEFAULT_EDITOR_SETTINGS;
+    try {
+      const saved = window.localStorage.getItem(EDITOR_SETTINGS_KEY);
+      if (saved) return { ...DEFAULT_EDITOR_SETTINGS, ...JSON.parse(saved) };
+    } catch { /* ignore */ }
+    return DEFAULT_EDITOR_SETTINGS;
+  });
+
+  const editorFontStack = EDITOR_FONT_OPTIONS.find((f) => f.value === editorSettings.fontFamily)?.stack ?? EDITOR_FONT_OPTIONS[0].stack;
+
+  function updateEditorSetting<K extends keyof typeof DEFAULT_EDITOR_SETTINGS>(key: K, value: (typeof DEFAULT_EDITOR_SETTINGS)[K]) {
+    setEditorSettings((prev) => {
+      const next = { ...prev, [key]: value };
+      window.localStorage.setItem(EDITOR_SETTINGS_KEY, JSON.stringify(next));
+      return next;
+    });
+  }
 
   const count = useMemo(() => wordCount(content), [content]);
   const todayCount = useMemo(() => chapters.reduce((sum, chapter) => sum + wordCount(chapter.content), 0), [chapters]);
@@ -2062,6 +2104,9 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
             <button className="rounded p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600" onClick={() => setChapterDeleteOpen(true)} aria-label="删除当前章节">
               <Trash2 size={16} />
             </button>
+            <button className="rounded p-1.5 text-gray-400 transition-colors hover:bg-accent hover:text-accent-foreground" onClick={() => setEditorSettingsOpen(true)} aria-label="编辑器设置">
+              <Settings size={16} />
+            </button>
           </div>
           <button
             className="flex items-center gap-1.5 rounded-full bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-60"
@@ -2121,6 +2166,13 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                   onActivateSuggestion={(index) => {
                     setActiveSuggestionIndex(index);
                     setOverlay(true);
+                  }}
+                  styleSettings={{
+                    fontStack: editorFontStack,
+                    fontSize: editorSettings.fontSize,
+                    lineHeight: editorSettings.lineHeight,
+                    letterSpacing: editorSettings.letterSpacing,
+                    paragraphSpacing: editorSettings.paragraphSpacing,
                   }}
                 />
               </>
@@ -2623,6 +2675,112 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
         onSimulatePaid={() => void simulateOrderPaid()}
         testEnabled={testPaymentEnabled}
       />
+
+      <Dialog open={editorSettingsOpen} onOpenChange={setEditorSettingsOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>编辑器排版设置</DialogTitle>
+            <DialogDescription>自定义编辑器的字体和排版，设置仅保存在本地浏览器。</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-5">
+            <Field>
+              <FieldLabel>字体</FieldLabel>
+              <Select value={editorSettings.fontFamily} onValueChange={(v) => updateEditorSetting("fontFamily", v)}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {EDITOR_FONT_OPTIONS.map((font) => (
+                      <SelectItem key={font.value} value={font.value}>
+                        {font.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <p
+                className="mt-2 rounded-lg border border-border bg-muted/50 p-3 text-sm leading-relaxed text-foreground"
+                style={{ fontFamily: editorFontStack, fontSize: `${Math.min(editorSettings.fontSize, 16)}px`, lineHeight: editorSettings.lineHeight, letterSpacing: `${editorSettings.letterSpacing}px` }}
+              >
+                天地玄黄，宇宙洪荒。日月盈昃，辰宿列张。寒来暑往，秋收冬藏。
+              </p>
+            </Field>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium leading-none">字号</span>
+                <span className="tabular-nums text-xs text-muted-foreground">{editorSettings.fontSize}px</span>
+              </div>
+              <input
+                type="range" min={14} max={28} step={1}
+                value={editorSettings.fontSize}
+                onChange={(e) => updateEditorSetting("fontSize", Number(e.target.value))}
+                className="w-full cursor-pointer accent-primary"
+              />
+              <div className="flex justify-between text-[10px] text-muted-foreground/60">
+                <span>14</span><span>28</span>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium leading-none">行高</span>
+                <span className="tabular-nums text-xs text-muted-foreground">{editorSettings.lineHeight.toFixed(1)}</span>
+              </div>
+              <input
+                type="range" min={1.2} max={3.0} step={0.1}
+                value={editorSettings.lineHeight}
+                onChange={(e) => updateEditorSetting("lineHeight", Number(e.target.value))}
+                className="w-full cursor-pointer accent-primary"
+              />
+              <div className="flex justify-between text-[10px] text-muted-foreground/60">
+                <span>1.2</span><span>3.0</span>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium leading-none">字间距</span>
+                <span className="tabular-nums text-xs text-muted-foreground">{editorSettings.letterSpacing}px</span>
+              </div>
+              <input
+                type="range" min={0} max={4} step={0.5}
+                value={editorSettings.letterSpacing}
+                onChange={(e) => updateEditorSetting("letterSpacing", Number(e.target.value))}
+                className="w-full cursor-pointer accent-primary"
+              />
+              <div className="flex justify-between text-[10px] text-muted-foreground/60">
+                <span>0</span><span>4</span>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium leading-none">段落间距</span>
+                <span className="tabular-nums text-xs text-muted-foreground">{editorSettings.paragraphSpacing}px</span>
+              </div>
+              <input
+                type="range" min={0} max={32} step={4}
+                value={editorSettings.paragraphSpacing}
+                onChange={(e) => updateEditorSetting("paragraphSpacing", Number(e.target.value))}
+                className="w-full cursor-pointer accent-primary"
+              />
+              <div className="flex justify-between text-[10px] text-muted-foreground/60">
+                <span>0</span><span>32</span>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
+              setEditorSettings(DEFAULT_EDITOR_SETTINGS);
+              window.localStorage.setItem(EDITOR_SETTINGS_KEY, JSON.stringify(DEFAULT_EDITOR_SETTINGS));
+            }}>
+              恢复默认
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
     </div>
   );

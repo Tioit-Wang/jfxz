@@ -8,6 +8,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ApiSuggestion } from "@/api";
 import { cn } from "@/lib/utils";
 
+type EditorStyleSettings = {
+  fontStack: string;
+  fontSize: number;
+  lineHeight: number;
+  letterSpacing: number;
+  paragraphSpacing: number;
+};
+
 type ChapterPlainTextEditorProps = {
   value: string;
   suggestions: ApiSuggestion[];
@@ -15,6 +23,7 @@ type ChapterPlainTextEditorProps = {
   disabled?: boolean;
   onChange: (value: string) => void;
   onActivateSuggestion: (index: number) => void;
+  styleSettings?: EditorStyleSettings;
 };
 
 type HoverState = {
@@ -92,7 +101,8 @@ export function ChapterPlainTextEditor({
   activeSuggestionIndex,
   disabled = false,
   onChange,
-  onActivateSuggestion
+  onActivateSuggestion,
+  styleSettings
 }: ChapterPlainTextEditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const suggestionsRef = useRef(suggestions);
@@ -209,7 +219,20 @@ export function ChapterPlainTextEditor({
   }, [activeSuggestionIndex, editor, suggestions]);
 
   return (
-    <div ref={containerRef} className="relative flex min-h-[58vh] flex-1 flex-col">
+    <div ref={containerRef} className="editor-settings-scope relative flex min-h-[58vh] flex-1 flex-col">
+      {styleSettings && (
+        <style>{`
+          .editor-settings-scope .ProseMirror {
+            font-family: ${styleSettings.fontStack} !important;
+            font-size: ${styleSettings.fontSize}px !important;
+            line-height: ${styleSettings.lineHeight} !important;
+            letter-spacing: ${styleSettings.letterSpacing}px !important;
+          }
+          .editor-settings-scope .ProseMirror p + p {
+            margin-top: ${styleSettings.paragraphSpacing}px !important;
+          }
+        `}</style>
+      )}
       {hover ? (
         <div
           className="pointer-events-none absolute z-20 max-w-xs rounded-lg border border-border bg-popover px-3 py-2 text-xs leading-5 text-popover-foreground shadow-lg"

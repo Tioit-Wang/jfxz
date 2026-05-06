@@ -3,7 +3,7 @@
 import Mention from "@tiptap/extension-mention";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import { Loader2, Send, X } from "lucide-react";
+import { Loader2, Send, Square, X } from "lucide-react";
 import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { ChatMention, ChatReference } from "@/api";
 import { cn } from "@/lib/utils";
@@ -28,6 +28,8 @@ type ChatMentionInputProps = {
   recentItems: ChatReference[];
   pendingReferences?: ChatReference[];
   disabled?: boolean;
+  isStreaming?: boolean;
+  onStop?: () => void;
   onChange: (text: string, mentions: ChatMention[]) => void;
   onSelectReference: (reference: ChatReference) => void;
   onRemoveReference?: (reference: ChatReference) => void;
@@ -142,6 +144,8 @@ export const ChatMentionInput = forwardRef<ChatMentionInputHandle, ChatMentionIn
       recentItems,
       pendingReferences = [],
       disabled = false,
+      isStreaming = false,
+      onStop,
       onChange,
       onSelectReference,
       onRemoveReference,
@@ -418,19 +422,32 @@ export const ChatMentionInput = forwardRef<ChatMentionInputHandle, ChatMentionIn
           <EditorContent editor={editor} aria-label="AI 对话输入" />
         </div>
 
-        {/* Send button */}
+        {/* Send / Stop button */}
         <div className="flex justify-end px-3 pb-3 pt-2">
-          <button
-            className="inline-flex items-center gap-1.5 rounded-lg bg-gray-900 px-4 py-2 text-xs font-medium text-white shadow-sm transition-all hover:bg-gray-800 hover:shadow-md disabled:bg-gray-100 disabled:text-gray-300 disabled:shadow-none"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={onSubmit}
-            disabled={disabled}
-            aria-label="发送消息"
-            type="button"
-          >
-            {disabled ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send size={13} />}
-            发送
-          </button>
+          {isStreaming ? (
+            <button
+              className="inline-flex items-center gap-1.5 rounded-lg bg-foreground px-4 py-2 text-xs font-medium text-background shadow-sm transition-all hover:bg-foreground/80 hover:shadow-md"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onStop?.()}
+              aria-label="停止生成"
+              type="button"
+            >
+              <Square size={13} />
+              停止
+            </button>
+          ) : (
+            <button
+              className="inline-flex items-center gap-1.5 rounded-lg bg-foreground px-4 py-2 text-xs font-medium text-background shadow-sm transition-all hover:bg-foreground/80 hover:shadow-md disabled:bg-muted disabled:text-muted-foreground disabled:shadow-none"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={onSubmit}
+              disabled={disabled}
+              aria-label="发送消息"
+              type="button"
+            >
+              {disabled ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send size={13} />}
+              发送
+            </button>
+          )}
         </div>
       </div>
     );

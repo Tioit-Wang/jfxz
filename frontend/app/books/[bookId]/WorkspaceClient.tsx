@@ -5,6 +5,7 @@ import {
   AlertCircle,
   BookOpen,
   Check,
+  ChevronDown,
   ChevronLeft,
   Clock3,
   Cloud,
@@ -48,6 +49,7 @@ import {
   type ChatReference,
   type ChatSession,
   type NamedContent,
+  type ToolCallBlock,
   type UserProfile,
 } from "@/api";
 import { userLoginPath } from "@/auth";
@@ -269,6 +271,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const [modelStatus, setModelStatus] = useState<"loading" | "ready" | "error">("loading");
 
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
+  const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
 
   const [characterSearch, setCharacterSearch] = useState("");
   const [activeCharacterId, setActiveCharacterId] = useState("");
@@ -772,6 +775,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
 
   async function createSession() {
     setChatStatus("loading");
+    setExpandedTools(new Set());
     try {
       const session = await client.createChatSession(bookId);
       setSessions((items) => [session, ...items]);
@@ -793,6 +797,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       return;
     }
     setActiveSessionId(sessionId);
+    setExpandedTools(new Set());
     setShowHistory(false);
     clearChatDraft();
     try {
@@ -892,6 +897,8 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                   (b) => b.type === "tool_call" && b.tool === tool && b.status === "started"
                 );
                 if (startedIdx === -1) return item;
+                // Keep the tool expanded after completion so user can see the result
+                setExpandedTools((prev) => new Set(prev).add(`${item.id}-tool-${startedIdx}`));
                 const updated = blocks.map((b, i) =>
                   i === startedIdx
                     ? { ...b, status: "completed" as const, result: data?.result }
@@ -1089,7 +1096,13 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
         setChatStatus("idle");
         return;
       }
-      setChatStatus(error instanceof ApiError && error.status === 402 ? "no_points" : "error");
+      const errorMsg = error instanceof ApiError && error.status === 402
+        ? "积分不足，暂时无法发送"
+        : "发送失败，请稍后重试";
+      setMessages((items) =>
+        items.map((item) => (item.id === assistantId ? { ...item, error: errorMsg } : item))
+      );
+      setChatStatus("idle");
     }
   }
 
@@ -1354,6 +1367,15 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     );
   }
 
+  function toggleToolExpand(key: string) {
+    setExpandedTools((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
   function renderDiffResult(resultStr: string) {
     let oldContent = "";
     let newContent = "";
@@ -1471,22 +1493,22 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     if (!block.result) return null;
     const tool = block.tool;
     if (tool === "update_chapter_content") {
-      return <div className="border-t border-blue-100 px-3 py-2">{renderDiffResult(block.result)}</div>;
+      return <div className="px-3 py-2">{renderDiffResult(block.result)}</div>;
     }
     if (tool === "list_characters") {
-      return <div className="border-t border-blue-100 px-3 py-2">{renderCharacterList(block.result)}</div>;
+      return <div className="px-3 py-2">{renderCharacterList(block.result)}</div>;
     }
     if (tool === "get_character") {
-      return <div className="border-t border-blue-100 px-3 py-2">{renderCharacterDetail(block.result)}</div>;
+      return <div className="px-3 py-2">{renderCharacterDetail(block.result)}</div>;
     }
     if (tool === "create_or_update_character") {
-      return <div className="border-t border-blue-100 px-3 py-2">{renderCharacterUpsert(block.result)}</div>;
+      return <div className="px-3 py-2">{renderCharacterUpsert(block.result)}</div>;
     }
     if (tool === "delete_character") {
-      return <div className="border-t border-blue-100 px-3 py-2">{renderCharacterDelete(block.result)}</div>;
+      return <div className="px-3 py-2">{renderCharacterDelete(block.result)}</div>;
     }
     return (
-      <div className="border-t border-blue-100 px-3 py-2 text-blue-600">
+      <div className="px-3 py-2 text-muted-foreground">
         <p className="line-clamp-6 whitespace-pre-wrap">
           {block.result.length > 500 ? `${block.result.slice(0, 500)}...` : block.result}
         </p>
@@ -1499,26 +1521,57 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
 
     // Render with blocks (streaming + completed messages with tool calls)
     if (message.blocks && message.blocks.length > 0) {
+      // Check if last block is text and streaming — add cursor
+      const lastBlockIdx = message.blocks.length - 1;
       return (
         <div className="space-y-2">
           {message.blocks.map((block, index) => {
             if (block.type === "text") {
               if (!block.text) return null;
-              return <div key={`text-${index}`} className="chat-md">{renderMarkdown(block.text, isStreaming)}</div>;
+              const isLastText = index === lastBlockIdx && isStreaming;
+              return (
+                <div key={`text-${index}`} className={cn("chat-md", isLastText && "streaming-cursor")}>
+                  {renderMarkdown(block.text, isStreaming)}
+                </div>
+              );
             }
+            const toolKey = `${message.id}-tool-${index}`;
             const isStarted = block.status === "started";
+            const isExpanded = expandedTools.has(toolKey) || isStarted;
             return (
-              <details key={`tool-${index}`} className="rounded-lg border border-blue-200 bg-blue-50/50 text-xs" open={isStarted}>
-                <summary className="flex cursor-pointer items-center gap-1.5 px-3 py-2 font-medium text-blue-700">
+              <div key={`tool-${index}`} className="rounded-md border border-border bg-muted/40 text-xs">
+                <button
+                  type="button"
+                  className="flex w-full cursor-pointer select-none items-center gap-2 rounded-md px-3 py-2 text-left transition-colors hover:bg-accent/50"
+                  onClick={() => toggleToolExpand(toolKey)}
+                >
                   {isStarted ? (
-                    <Loader2 size={12} className="animate-spin" />
+                    <Loader2 size={14} className="animate-spin text-primary" />
                   ) : (
-                    <Check size={12} className="text-green-600" />
+                    <Check size={14} className="text-green-600" />
                   )}
-                  {block.display || toolLabel(block.tool)}
-                </summary>
-                {renderToolResult(block)}
-              </details>
+                  <span className="font-semibold text-primary">{toolLabel(block.tool)}</span>
+                  {block.display && block.display !== toolLabel(block.tool) ? (
+                    <span className="truncate text-muted-foreground">{block.display}</span>
+                  ) : null}
+                  <ChevronDown
+                    size={14}
+                    className={cn(
+                      "ml-auto shrink-0 text-muted-foreground transition-transform duration-300",
+                      isExpanded && "rotate-180"
+                    )}
+                  />
+                </button>
+                <div className={cn("tool-collapse", isExpanded && "expanded")}>
+                  <div>
+                    <div className="border-t border-border px-3 py-2 pl-5">
+                      <div className="border-l-2 border-primary pl-3">
+                        {renderToolResult(block)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             );
           })}
         </div>
@@ -2097,19 +2150,25 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
           panelRef={workspaceChatRef}
           className="min-h-0 min-w-0"
         >
-      <aside data-testid="workspace-chat-panel" className="relative z-20 flex h-full min-h-0 min-w-0 flex-col border-l border-gray-200 bg-white shadow-[-2px_0_12px_rgba(0,0,0,0.03)]">
-        <div className="flex h-14 items-center justify-between border-b border-gray-100 p-4">
-          <div className="min-w-0">
-            <h2 className="truncate text-sm font-semibold text-gray-900">{activeSession?.title || "新的对话"}</h2>
-            <p className="truncate text-xs text-gray-400">
-              {chatStatus === "streaming" ? "AI 回复中" : "当前会话 · 已读取作品上下文"}
-            </p>
+      <aside data-testid="workspace-chat-panel" className="relative z-20 flex h-full min-h-0 min-w-0 flex-col border-l border-border bg-card shadow-[-2px_0_12px_rgba(0,0,0,0.03)]">
+        <div className="flex h-14 items-center justify-between border-b border-border p-4">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className={cn(
+              "h-2.5 w-2.5 shrink-0 rounded-full shadow-[0_0_10px_rgba(52,211,153,0.6)]",
+              chatStatus === "streaming" ? "animate-pulse bg-emerald-400" : "bg-muted-foreground/40"
+            )} />
+            <div className="min-w-0">
+              <h2 className="truncate text-sm font-semibold text-foreground">{activeSession?.title || "新的对话"}</h2>
+              <p className="truncate text-xs text-muted-foreground">
+                {chatStatus === "streaming" ? "AI 回复中" : "当前会话 · 已读取作品上下文"}
+              </p>
+            </div>
           </div>
           <div className="flex gap-1">
-            <button className="rounded p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-900" onClick={() => setShowHistory((value) => !value)} title="历史会话" aria-label="历史会话">
+            <button className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground" onClick={() => setShowHistory((value) => !value)} title="历史会话" aria-label="历史会话">
               <Clock3 size={16} />
             </button>
-            <button className="rounded p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-900" onClick={() => void createSession()} title="新建会话" aria-label="新建会话">
+            <button className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground" onClick={() => void createSession()} title="新建会话" aria-label="新建会话">
               <MessageSquare size={16} />
             </button>
           </div>
@@ -2140,8 +2199,8 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
         ) : null}
 
         {!overlay ? (
-          <div className="flex flex-1 flex-col overflow-hidden bg-muted/30">
-            <div className="flex-1 space-y-5 overflow-y-auto p-4">
+          <div className="flex flex-1 flex-col overflow-hidden">
+            <div className="chat-scroll flex-1 space-y-5 overflow-y-auto p-4">
               <div className="flex justify-center">
                 <span className="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">当前会话 · 已读取作品上下文</span>
               </div>
@@ -2151,58 +2210,58 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                   加载更早消息
                 </Button>
               ) : null}
-              {chatStatus === "loading" ? <p className="text-sm text-gray-400">消息加载中...</p> : null}
-              {chatStatus === "no_points" ? (
-                <div className="flex items-center rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-600 shadow-sm">
-                  <AlertCircle size={16} className="mr-2 shrink-0" />
-                  积分不足，暂时无法发送。
-                </div>
-              ) : null}
-              {chatStatus === "error" ? (
-                <div className="flex items-center rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted-foreground shadow-sm">
-                  <AlertCircle size={16} className="mr-2 shrink-0" />
-                  发送失败，请稍后重试。
-                </div>
-              ) : null}
+              {chatStatus === "loading" ? <p className="text-sm text-muted-foreground">消息加载中...</p> : null}
 
               {messages.map((message) => (
-                <div key={message.id} className={cn("animate-pop flex w-full", message.role === "user" ? "justify-end" : "justify-start")}>
-                  <div
-                    className={cn(
-                      "max-w-[90%] rounded-2xl border px-4 py-3 text-sm leading-relaxed shadow-sm",
-                      message.role === "user"
-                        ? "rounded-tr-sm border-primary bg-primary text-primary-foreground"
-                        : "rounded-tl-sm border-border bg-card text-card-foreground"
-                    )}
-                  >
-                    {renderMessageContent(message)}
-                    {message.role === "assistant" && message.billing_failed ? (
-                      <div className="mt-2 flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-700">
-                        <AlertCircle size={12} className="shrink-0" />
-                        计费异常，请联系管理员
-                      </div>
-                    ) : null}
-                    {message.role === "assistant" && message.error ? (
-                      <div className="mt-2 flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs text-red-700">
-                        <AlertCircle size={12} className="shrink-0" />
-                        {message.error}
-                      </div>
-                    ) : null}
+                <div key={message.id} className={cn("animate-pop flex w-full gap-3", message.role === "user" ? "justify-end" : "justify-start")}>
+                  {message.role === "assistant" && (
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted text-xs font-bold text-primary">AI</div>
+                  )}
+                  <div className="max-w-[85%]">
+                    <div
+                      className={cn(
+                        "rounded-2xl border px-4 py-3 text-sm leading-relaxed shadow-sm",
+                        message.role === "user"
+                          ? "rounded-br-sm border-primary bg-primary text-primary-foreground"
+                          : "rounded-tl-sm border-border bg-background text-card-foreground"
+                      )}
+                    >
+                      {renderMessageContent(message)}
+                      {message.role === "assistant" && message.billing_failed ? (
+                        <div className="mt-2 flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-700">
+                          <AlertCircle size={12} className="shrink-0" />
+                          计费异常，请联系管理员
+                        </div>
+                      ) : null}
+                      {message.role === "assistant" && message.error ? (
+                        <div className={cn(
+                          "mt-2 flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs",
+                          message.error.includes("积分") || message.error.includes("402")
+                            ? "border-amber-200 bg-amber-50 text-amber-700"
+                            : "border-destructive/20 bg-destructive/5 text-destructive"
+                        )}>
+                          <AlertCircle size={12} className="shrink-0" />
+                          {message.error}
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
+                  {message.role === "user" && (
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">U</div>
+                  )}
                 </div>
               ))}
             </div>
 
-            <div className="mx-4 mb-4 rounded-2xl border border-gray-100 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+            <div className="mx-4 mb-4 rounded-2xl border border-border bg-background shadow-sm">
               {/* Model selector bar */}
-              <div className="flex items-center justify-between px-4 py-2">
-                <div className="flex min-w-0 items-center gap-1.5 text-xs text-gray-400">
-                  <Zap size={12} className="shrink-0 text-gray-300" />
+              <div className="flex items-center justify-between pl-3 pr-4 py-2">
+                <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
                   {modelStatus === "loading" ? (
-                    <span className="text-gray-300">模型加载中...</span>
+                    <span className="text-muted-foreground/50">模型加载中...</span>
                   ) : modelStatus === "error" ? (
                     <>
-                      <span className="text-red-500">模型列表加载失败</span>
+                      <span className="text-destructive">模型列表加载失败</span>
                       <button
                         type="button"
                         className="ml-1 underline hover:no-underline"
@@ -2223,7 +2282,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                       </button>
                     </>
                   ) : !selectedModel ? (
-                    <span className="text-gray-300">暂无可用模型</span>
+                    <span className="text-muted-foreground/50">暂无可用模型</span>
                   ) : (
                     <ModelPicker
                       models={aiModels}
@@ -2235,20 +2294,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
               </div>
 
               {/* Input area */}
-              {chatStatus === "streaming" && (
-                <div className="flex justify-center border-t border-gray-100 px-4 py-2">
-                  <button
-                    className="flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-100"
-                    onClick={() => {
-                      abortRef.current?.abort();
-                      setChatStatus("idle");
-                    }}
-                  >
-                    <X size={12} />
-                    停止生成
-                  </button>
-                </div>
-              )}
               <ChatMentionInput
                 ref={chatInputRef}
                 valueText={chatInput}
@@ -2256,7 +2301,12 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                 items={allReferenceItems}
                 recentItems={recentReferences}
                 pendingReferences={pendingReferences}
-                disabled={chatStatus === "streaming" || modelStatus !== "ready" || !selectedModelId}
+                disabled={modelStatus !== "ready" || !selectedModelId}
+                isStreaming={chatStatus === "streaming"}
+                onStop={() => {
+                  abortRef.current?.abort();
+                  setChatStatus("idle");
+                }}
                 onChange={(text, mentions) => {
                   setChatInput(text);
                   setChatMentions(mentions);
@@ -2276,7 +2326,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                 <Wand2 size={16} className="text-foreground" />
                 <span className="text-sm font-semibold text-foreground">AI 写作建议</span>
               </div>
-              <button className="rounded p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-900" onClick={() => setOverlay(false)} aria-label="关闭写作建议">
+              <button className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground" onClick={() => setOverlay(false)} aria-label="关闭写作建议">
                 <X size={18} />
               </button>
             </div>

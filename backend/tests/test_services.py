@@ -97,6 +97,14 @@ class TestAgentServiceHelpers:
         db = _create_agent_db("sqlite+aiosqlite:///./test.db")
         assert isinstance(db, AsyncSqliteDb)
 
+    def test_create_agent_db_routes_mysql(self) -> None:
+        """Verify _create_agent_db returns AsyncMySQLDb for mysql URLs."""
+        from app.services.agent_service import _create_agent_db
+        from agno.db.mysql.async_mysql import AsyncMySQLDb
+
+        db = _create_agent_db("mysql+asyncmy://user:pass@host/db")
+        assert isinstance(db, AsyncMySQLDb)
+
     def test_create_agent_db_routes_postgres(self) -> None:
         """Verify _create_agent_db passes correct URL to PostgresDb."""
         from unittest.mock import patch, MagicMock

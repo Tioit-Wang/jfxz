@@ -7,10 +7,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 REPO_ROOT = BACKEND_DIR.parent
 SHARED_ENV_FILES = (REPO_ROOT / ".env", REPO_ROOT / ".env.local")
+DEFAULT_DATABASE_URLS = {
+    "development": "sqlite+aiosqlite:///./goodgua-dev.db",
+    "test": "sqlite+aiosqlite:///:memory:",
+}
 
 
 class Settings(BaseSettings):
-    database_url: str = "postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/postgres"
+    database_url: str | None = None
     jwt_secret: str = "dev-secret"
     auto_create_tables: bool = True
     env: str = "development"
@@ -47,6 +51,20 @@ class Settings(BaseSettings):
     @property
     def trusted_proxy_ip_set(self) -> set[str]:
         return {ip.strip() for ip in self.trusted_proxy_ips.split(",") if ip.strip()}
+
+    @model_validator(mode="after")
+    def validate_database_url(self) -> "Settings":
+        if not self.database_url:
+            if self.is_production:
+                raise ValueError("GOODGUA_DATABASE_URL is required in production")
+            self.database_url = DEFAULT_DATABASE_URLS[self.env]
+
+        if self.is_production:
+            if not self.database_url.startswith("mysql+asyncmy://"):
+                raise ValueError("GOODGUA_DATABASE_URL must use mysql+asyncmy in production")
+        elif not self.database_url.startswith("sqlite+aiosqlite://"):
+            raise ValueError("GOODGUA_DATABASE_URL must use sqlite+aiosqlite in development/test")
+        return self
 
     @model_validator(mode="after")
     def validate_security_settings(self) -> "Settings":

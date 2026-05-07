@@ -37,6 +37,10 @@ def _create_agent_db(db_url: str) -> BaseDb:  # pragma: no cover
         from agno.db.sqlite.async_sqlite import AsyncSqliteDb
 
         return AsyncSqliteDb(db_url=db_url, session_table="agent_sessions")
+    if db_url.startswith("mysql"):
+        from agno.db.mysql.async_mysql import AsyncMySQLDb
+
+        return AsyncMySQLDb(db_url=db_url, session_table="agent_sessions")
     stripped = db_url.replace("+asyncpg", "")
     from agno.db.postgres.postgres import PostgresDb
 

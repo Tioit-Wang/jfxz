@@ -1,6 +1,6 @@
-import WorkspaceClient from "./WorkspaceClient";
+import WorkspaceEntryClient from "./WorkspaceEntryClient";
 
 export default async function WorkspacePage({ params }: { params: Promise<{ bookId: string }> }) {
   const { bookId } = await params;
-  return <WorkspaceClient bookId={bookId} />;
+  return <WorkspaceEntryClient bookId={bookId} />;
 }

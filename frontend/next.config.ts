@@ -54,6 +54,20 @@ const nextConfig: NextConfig = {
   output: "standalone",
   allowedDevOrigins: ["127.0.0.1", "localhost"],
   reactStrictMode: true,
+  productionBrowserSourceMaps: false,
+  experimental: {
+    webpackMemoryOptimizations: true,
+    serverSourceMaps: false,
+    webpackBuildWorker: true
+  },
+  webpack: (config, { dev }) => {
+    if (config.cache && !dev) {
+      config.cache = Object.freeze({
+        type: "memory"
+      });
+    }
+    return config;
+  },
   async headers() {
     return [
       {

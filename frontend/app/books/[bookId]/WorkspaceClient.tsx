@@ -32,10 +32,6 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Streamdown } from "streamdown";
-import { code } from "@streamdown/code";
-import { cjk } from "@streamdown/cjk";
-import "streamdown/styles.css";
 import { useGroupRef, usePanelRef, type Layout } from "react-resizable-panels";
 import {
   ApiClient,
@@ -1399,13 +1395,11 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     }
   }
 
-  const streamdownPlugins = useMemo(() => ({ code, cjk }), []);
-
   function renderMarkdown(text: string, isStreaming = false) {
     return (
-      <Streamdown animated plugins={streamdownPlugins} isAnimating={isStreaming}>
+      <div className={cn("whitespace-pre-wrap break-words", isStreaming && "streaming-cursor")}>
         {text}
-      </Streamdown>
+      </div>
     );
   }
 

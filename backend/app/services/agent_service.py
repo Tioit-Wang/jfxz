@@ -82,7 +82,7 @@ PROMPT_TEMPLATE = """\
   需要查看角色全部细节或创作前核对角色信息时使用。角色不存在时返回 error。
   与 `list_characters` 的区别：本工具返回完整 detail 字段；`list_characters` 只返回概览（无 detail），浏览列表时优先使用。
 
-- `list_characters()` — 列出所有角色概览，按更新时间倒序排列
+- `list_characters(limit?)` — 列出角色概览，按更新时间倒序排列，默认最多返回 20 条
   只返回 id / name / summary 三个字段，不包含 detail。
   了解作品中有哪些角色、回忆角色名称时使用。需详细设定时再用 `get_character`。
 
@@ -98,7 +98,7 @@ PROMPT_TEMPLATE = """\
 - `get_setting(setting_id)` — 获取指定设定的完整信息，含详细设定（detail 字段）
   与 `list_settings` 的区别：本工具返回完整 detail；`list_settings` 只返回概览，浏览设定列表时优先使用。
 
-- `list_settings(setting_type?)` — 列出所有设定概览（仅 id/type/name/summary），可选按类型过滤
+- `list_settings(setting_type?, limit?)` — 列出设定概览（仅 id/type/name/summary），默认最多返回 20 条
   setting_type 为可选的类型字符串。不传则返回全部设定。
 
 - `create_or_update_setting(name, summary, detail?, setting_type?, setting_id?)` — 创建或更新设定
@@ -113,7 +113,7 @@ PROMPT_TEMPLATE = """\
   数据量较大，仅在需要阅读或参考正文时调用。
   与 `list_chapters` 的区别：本工具返回正文全文；`list_chapters` 只返回目录概览，浏览章节结构时优先使用。
 
-- `list_chapters()` — 列出所有章节目录，按章节顺序排列
+- `list_chapters(limit?)` — 列出章节目录，按章节顺序排列，默认最多返回 20 条
   只返回 id / order_index / title / summary，不包含正文。
   了解章节结构、确定当前进度、拟定下一章标题时使用。
 
@@ -239,6 +239,12 @@ def _serialize_lite(model, fields: list[str]) -> dict:
     return result
 
 
+def _normalize_list_limit(limit: int, default: int = 20, maximum: int = 100) -> int:
+    if not isinstance(limit, int):
+        return default
+    return max(1, min(limit, maximum))
+
+
 class GoodguaTools(Toolkit):
     def __init__(self, db: AsyncSession, work_id: str):
         super().__init__(name="goodgua_tools")
@@ -271,12 +277,14 @@ class GoodguaTools(Toolkit):
             return json.dumps({"error": "character not found"}, ensure_ascii=False)
         return json.dumps(_serialize(character), ensure_ascii=False)
 
-    async def list_characters(self) -> str:
-        """列出当前作品所有角色的概览列表，按更新时间倒序排列。仅返回 id/name/summary 三个字段，不包含 detail。需查看角色详细设定时使用 get_character。"""
+    async def list_characters(self, limit: int = 20) -> str:
+        """列出当前作品角色概览，按更新时间倒序排列。默认最多返回 20 条，仅返回 id/name/summary 三个字段，不包含 detail。需查看角色详细设定时使用 get_character。"""
+        limit = _normalize_list_limit(limit)
         result = await self.db.execute(
             select(Character)
             .where(Character.work_id == self.work_id)
             .order_by(Character.updated_at.desc())
+            .limit(limit)
         )
         items = [_serialize_lite(c, ["id", "name", "summary"]) for c in result.scalars()]
         return json.dumps(items, ensure_ascii=False)
@@ -355,12 +363,13 @@ class GoodguaTools(Toolkit):
             return json.dumps({"error": "setting not found"}, ensure_ascii=False)
         return json.dumps(_serialize(setting), ensure_ascii=False)
 
-    async def list_settings(self, setting_type: str | None = None) -> str:
-        """列出当前作品所有设定的概览列表，可选按 setting_type 过滤。仅返回 id/type/name/summary 四个字段，不包含 detail。需查看详细设定时使用 get_setting。"""
+    async def list_settings(self, setting_type: str | None = None, limit: int = 20) -> str:
+        """列出当前作品设定概览，可选按 setting_type 过滤。默认最多返回 20 条，仅返回 id/type/name/summary 四个字段，不包含 detail。需查看详细设定时使用 get_setting。"""
+        limit = _normalize_list_limit(limit)
         statement = select(SettingItem).where(SettingItem.work_id == self.work_id)
         if setting_type:
             statement = statement.where(SettingItem.type == setting_type)
-        statement = statement.order_by(SettingItem.updated_at.desc())
+        statement = statement.order_by(SettingItem.updated_at.desc()).limit(limit)
         result = await self.db.execute(statement)
         items = [_serialize_lite(s, ["id", "type", "name", "summary"]) for s in result.scalars()]
         return json.dumps(items, ensure_ascii=False)
@@ -448,10 +457,14 @@ class GoodguaTools(Toolkit):
             return json.dumps({"error": "chapter not found"}, ensure_ascii=False)
         return json.dumps(_serialize(chapter), ensure_ascii=False)
 
-    async def list_chapters(self) -> str:
-        """列出当前作品所有章节的目录概览，按章节顺序排列。仅返回 id/order_index/title/summary 四个字段，不包含正文（content）。需查看正文内容时使用 get_chapter。"""
+    async def list_chapters(self, limit: int = 20) -> str:
+        """列出当前作品章节目录概览，按章节顺序排列。默认最多返回 20 条，仅返回 id/order_index/title/summary 四个字段，不包含正文（content）。需查看正文内容时使用 get_chapter。"""
+        limit = _normalize_list_limit(limit)
         result = await self.db.execute(
-            select(Chapter).where(Chapter.work_id == self.work_id).order_by(Chapter.order_index)
+            select(Chapter)
+            .where(Chapter.work_id == self.work_id)
+            .order_by(Chapter.order_index)
+            .limit(limit)
         )
         items = [
             _serialize_lite(c, ["id", "order_index", "title", "summary"]) for c in result.scalars()
@@ -585,20 +598,26 @@ def create_agent(
     work_id: str,
     agno_session_id: str,
     tool_db_session: AsyncSession | None = None,
+    thinking_intensity: float | None = None,
 ) -> Agent:
     settings = get_settings()
     toolkit = GoodguaTools(db=tool_db_session or db_session, work_id=work_id)
     prompt = build_system_prompt(work, refs)
     model_cls = DeepSeek if "deepseek" in model.provider_model_id.lower() else OpenAIChat
+    model_kwargs: dict = dict(
+        id=model.provider_model_id,
+        base_url=settings.ai_provider_base_url,
+        api_key=settings.ai_provider_api_key,
+        temperature=float(model.temperature),
+        max_tokens=model.max_output_tokens,
+        role_map={"system": "system", "user": "user", "assistant": "assistant", "tool": "tool"},
+    )
+    if thinking_intensity is not None and thinking_intensity > 0:
+        reasoning_effort = "max" if thinking_intensity > 0.66 else "high"
+        model_kwargs["reasoning_effort"] = reasoning_effort
+        model_kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
     return Agent(
-        model=model_cls(
-            id=model.provider_model_id,
-            base_url=settings.ai_provider_base_url,
-            api_key=settings.ai_provider_api_key,
-            temperature=float(model.temperature),
-            max_tokens=model.max_output_tokens,
-            role_map={"system": "system", "user": "user", "assistant": "assistant", "tool": "tool"},
-        ),
+        model=model_cls(**model_kwargs),
         tools=[toolkit],
         instructions=prompt,
         db=get_agent_db(settings.database_url),

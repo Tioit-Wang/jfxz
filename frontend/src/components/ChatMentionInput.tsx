@@ -162,27 +162,28 @@ export const ChatMentionInput = forwardRef<ChatMentionInputHandle, ChatMentionIn
 
     const mentionOptions = useMemo(() => {
       const query = mention.query.trim().toLowerCase();
-      const matches = (item: ChatReference) =>
-        !query || item.name.toLowerCase().includes(query) || (item.summary ?? "").toLowerCase().includes(query);
-      const recent = recentItems.filter(matches);
+      const isMentionItem = (item: ChatReference) => item.type === "chapter" || item.type === "character";
+      const matches = (item: ChatReference) => !query || item.name.toLowerCase().includes(query);
+      const mentionItems = items.filter(isMentionItem);
+      const recent = recentItems.filter((item) => isMentionItem(item) && matches(item));
       const recentKeys = new Set(recent.map(referenceKey));
       if (!query) {
         return dedupeReferences([
           ...recent,
-          ...items.filter((item) => item.type === "chapter" && !recentKeys.has(referenceKey(item)))
+          ...mentionItems.filter((item) => item.type === "chapter" && !recentKeys.has(referenceKey(item)))
         ]);
       }
-      const orderedTypes: ChatReference["type"][] = ["chapter", "character", "setting"];
+      const orderedTypes: Array<"chapter" | "character"> = ["chapter", "character"];
       return dedupeReferences([
         ...recent,
         ...orderedTypes.flatMap((type) =>
-          items.filter((item) => item.type === type && matches(item) && !recentKeys.has(referenceKey(item)))
+          mentionItems.filter((item) => item.type === type && matches(item) && !recentKeys.has(referenceKey(item)))
         )
       ]);
     }, [items, mention.query, recentItems]);
 
     const placeholderText = useMemo(() => {
-      return "输入 @ 引用章节、角色或设定 · Shift+Enter 换行";
+      return "输入 @ 引用章节或角色 · Shift+Enter 换行";
     }, []);
 
     mentionRef.current = mention;
@@ -347,41 +348,45 @@ export const ChatMentionInput = forwardRef<ChatMentionInputHandle, ChatMentionIn
     return (
       <div className="relative">
         {/* Mention suggestion popup */}
-        {mention.open && mentionOptions.length ? (
+        {mention.open ? (
           <div className="absolute bottom-full left-0 right-0 z-20 mb-2 max-h-64 overflow-y-auto rounded-xl border border-border bg-popover p-2 shadow-soft">
-            {mentionOptions.map((item, index) => (
-              <button
-                key={referenceKey(item)}
-                className={cn(
-                  "flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-xs",
-                  index === mention.activeIndex
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                )}
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => selectReference(item)}
-              >
-                <span className="min-w-0">
-                  <span className="block truncate font-medium">{item.name}</span>
+            {mentionOptions.length ? (
+              mentionOptions.map((item, index) => (
+                <button
+                  key={referenceKey(item)}
+                  className={cn(
+                    "flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-xs",
+                    index === mention.activeIndex
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                  )}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => selectReference(item)}
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium">{item.name}</span>
+                    <span
+                      className={cn(
+                        "block truncate",
+                        index === mention.activeIndex ? "text-primary-foreground/70" : "text-muted-foreground"
+                      )}
+                    >
+                      {item.summary || item.type}
+                    </span>
+                  </span>
                   <span
                     className={cn(
-                      "block truncate",
-                      index === mention.activeIndex ? "text-primary-foreground/70" : "text-muted-foreground"
+                      "shrink-0 rounded border px-1.5 py-0.5",
+                      index === mention.activeIndex ? "border-primary-foreground/70 text-primary-foreground" : referenceTone(item.type)
                     )}
                   >
-                    {item.summary || item.type}
+                    {item.type}
                   </span>
-                </span>
-                <span
-                  className={cn(
-                    "shrink-0 rounded border px-1.5 py-0.5",
-                    index === mention.activeIndex ? "border-primary-foreground/70 text-primary-foreground" : referenceTone(item.type)
-                  )}
-                >
-                  {item.type}
-                </span>
-              </button>
-            ))}
+                </button>
+              ))
+            ) : (
+              <div className="px-3 py-2 text-xs text-muted-foreground">没有匹配的章节或角色</div>
+            )}
           </div>
         ) : null}
 

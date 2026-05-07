@@ -1224,7 +1224,7 @@ async def test_direct_user_routes_cover_core_documented_workflows(session: Async
     assert "创建/更新角色" in body
     page = await list_chat_messages(chat["id"], user, session)
     assert [item["role"] for item in page["messages"]] == ["user", "assistant"]
-    assert page["messages"][1]["tool_results"]
+    assert page["messages"][1]["blocks"]
     older_page = await list_chat_messages(chat["id"], user, session, 1, page["messages"][1]["id"])
     assert older_page["has_more"] is False
     assert older_page["messages"][0]["role"] == "user"
@@ -1862,6 +1862,65 @@ async def test_send_chat_streams_tool_call_started_and_empty_content(
         )
         body = b"".join([chunk async for chunk in stream.body_iterator]).decode()
         assert "event: done" in body
+    finally:
+        _agent_service.create_agent = original
+
+
+async def test_send_chat_persists_partial_assistant_message_after_stream_error(
+    session: AsyncSession,
+) -> None:
+    user = await create_user_account(session, "stream-partial@example.com", "user12345")
+    await session.commit()
+    work = await create_work(WorkIn(title="中断保留", short_intro="", synopsis="", genre_tags=[], background_rules=""), user, session)
+    chat = await create_chat_session(work["id"], ChatSessionIn(), user, session)
+    account = await ensure_point_account(session, user.id)
+    account.vip_daily_points_balance = 10000000
+    await session.commit()
+
+    class _RunContentEvent:
+        event = RunEvent.run_content
+        content = "半截回复"
+        tool = None
+
+    class _ToolStartedEvent:
+        event = RunEvent.tool_call_started
+        tool = MagicMock(tool_name="list_characters")
+
+    async def _failing_events():
+        yield _RunContentEvent()
+        yield _ToolStartedEvent()
+        raise RuntimeError("stream exploded")
+
+    def _failing_arun(message, *, stream=True, stream_events=True):
+        return _failing_events()
+
+    import app.services.agent_service as _agent_service
+
+    original = _agent_service.create_agent
+
+    def _custom_agent(*args, **kwargs):
+        agent = MagicMock()
+        agent.arun = _failing_arun
+        return agent
+
+    _agent_service.create_agent = _custom_agent
+
+    try:
+        active_model = (await session.execute(select(AiModel).where(AiModel.status == "active"))).scalars().first()
+        stream = await send_chat_message(
+            chat["id"], ChatIn(message="测试中断", references=[], model_id=active_model.id), user, session
+        )
+        body = b"".join([chunk async for chunk in stream.body_iterator]).decode()
+        assert "event: error" in body
+        assert "event: done" in body
+
+        page = await list_chat_messages(chat["id"], user, session)
+        assistant = page["messages"][1]
+        assert assistant["content"] == "半截回复"
+        assert assistant["error"] == "stream exploded"
+        assert assistant["blocks"][0] == {"type": "text", "text": "半截回复"}
+        assert assistant["blocks"][1]["tool"] == "list_characters"
+        assert assistant["blocks"][1]["status"] == "completed"
     finally:
         _agent_service.create_agent = original
 

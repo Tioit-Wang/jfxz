@@ -217,6 +217,20 @@ class TestGoodguaTools:
         not_found = json.loads(await tools.get_character("nonexistent"))
         assert "error" in not_found
 
+    async def test_list_tools_apply_default_limits(self, tools: GoodguaTools, session: AsyncSession) -> None:
+        for index in range(25):
+            session.add(Character(work_id=tools.work_id, name=f"角色{index}", summary="摘要", detail=""))
+            session.add(SettingItem(work_id=tools.work_id, type="other", name=f"设定{index}", summary="摘要", detail=""))
+            session.add(Chapter(work_id=tools.work_id, order_index=index + 1, title=f"章节{index}", content="", summary="摘要"))
+        await session.commit()
+
+        assert len(json.loads(await tools.list_characters())) == 20
+        assert len(json.loads(await tools.list_settings())) == 20
+        assert len(json.loads(await tools.list_chapters())) == 20
+        assert len(json.loads(await tools.list_characters(limit=5))) == 5
+        assert len(json.loads(await tools.list_settings(limit=5))) == 5
+        assert len(json.loads(await tools.list_chapters(limit=5))) == 5
+
     async def test_setting_crud(self, tools: GoodguaTools, session: AsyncSession) -> None:
         created = json.loads(await tools.create_or_update_setting("魔法体系", "设定摘要", "设定详情", "world"))
         assert created["name"] == "魔法体系"

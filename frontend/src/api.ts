@@ -106,6 +106,10 @@ export type ToolCallBlock = {
 
 export type ContentBlock = TextBlock | ToolCallBlock;
 
+type ApiContentBlock =
+  | { type: "text"; text: string }
+  | { type: "tool_call"; tool: string; display: string; status: "started" | "completed"; result?: string };
+
 export type ChatMessage = {
   id: string;
   role: "user" | "assistant";
@@ -615,24 +619,25 @@ function aiModelPayload(input: AdminAiModelInput): Record<string, unknown> {
   };
 }
 
-function buildBlocksFromContentAndToolResults(
-  content: string,
-  toolResults: { tool: string; display: string; result: string }[]
-): ContentBlock[] {
-  const blocks: ContentBlock[] = [];
-  if (content) {
-    blocks.push({ type: "text", text: content });
-  }
-  for (const tr of toolResults) {
-    blocks.push({
+function normalizeContentBlocks(blocks?: ApiContentBlock[]): ContentBlock[] | undefined {
+  if (!blocks?.length) return undefined;
+  const normalized: ContentBlock[] = [];
+  for (const block of blocks) {
+    if (block.type === "text") {
+      if (block.text) {
+        normalized.push({ type: "text", text: block.text });
+      }
+      continue;
+    }
+    normalized.push({
       type: "tool_call",
-      tool: tr.tool,
-      display: tr.display,
-      status: "completed",
-      result: tr.result,
+      tool: block.tool,
+      display: block.display,
+      status: block.status,
+      ...(block.result !== undefined ? { result: block.result } : {}),
     });
   }
-  return blocks;
+  return normalized.length ? normalized : undefined;
 }
 
 function mapChatMessage(message: {
@@ -645,15 +650,13 @@ function mapChatMessage(message: {
   created_at: string;
   billing_failed?: boolean;
   error?: string | null;
-  tool_results?: { tool: string; display: string; result: string }[];
+  blocks?: ApiContentBlock[];
 }): ChatMessage {
   return {
     id: message.id,
     role: message.role,
     content: message.content,
-    blocks: message.tool_results
-      ? buildBlocksFromContentAndToolResults(message.content, message.tool_results)
-      : undefined,
+    blocks: normalizeContentBlocks(message.blocks),
     mentions: message.mentions ?? [],
     references: message.references ?? [],
     actions: message.actions ?? [],
@@ -774,10 +777,13 @@ export class ApiClient {
           id: string;
           role: "user" | "assistant";
           content: string;
+          blocks?: ApiContentBlock[];
           mentions?: ChatMention[];
           references?: ChatReference[];
           actions?: ChatAction[];
           created_at: string;
+          billing_failed?: boolean;
+          error?: string | null;
         }>;
         has_more: boolean;
         next_before: string | null;
@@ -1239,13 +1245,13 @@ export class ApiClient {
         id: string;
         role: "user" | "assistant";
         content: string;
+        blocks?: ApiContentBlock[];
         mentions?: ChatMention[];
         references?: ChatReference[];
         actions?: ChatAction[];
         created_at: string;
         billing_failed?: boolean;
         error?: string | null;
-        tool_results?: { tool: string; display: string; result: string }[];
       }>;
       has_more: boolean;
       next_before: string | null;
@@ -1264,6 +1270,7 @@ export class ApiClient {
     mentions: ChatMention[],
     onChunk: (chunk: string) => void,
     modelId?: string,
+    thinkingIntensity?: number,
     onToolCall?: (tool: string, status: "started" | "completed", data?: { display?: string; result?: string }) => void,
     onError?: (message: string) => void,
     signal?: AbortSignal
@@ -1271,7 +1278,13 @@ export class ApiClient {
     const response = await this.rawRequest(`/chat-sessions/${sessionId}/messages`, {
       signal,
       method: "POST",
-      body: JSON.stringify({ message, references, mentions, ...(modelId ? { model_id: modelId } : {}) })
+      body: JSON.stringify({
+        message,
+        references,
+        mentions,
+        ...(modelId ? { model_id: modelId } : {}),
+        ...(thinkingIntensity !== undefined ? { thinking_intensity: thinkingIntensity } : {}),
+      })
     });
     if (!response.body) {
       throw new ApiError("stream body unavailable", response.status);

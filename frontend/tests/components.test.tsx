@@ -73,6 +73,7 @@ describe("AuthModal", () => {
 describe("ChatMentionInput", () => {
   const chapter: ChatReference = { type: "chapter", id: "c1", name: "第一章", summary: "开场" };
   const character: ChatReference = { type: "character", id: "p1", name: "苏白", summary: "线人" };
+  const setting: ChatReference = { type: "setting", id: "s1", name: "刘家祖训", summary: "设定条目" };
 
   it("submits from the send button and exposes imperative text helpers", async () => {
     const user = userEvent.setup();
@@ -162,6 +163,28 @@ describe("ChatMentionInput", () => {
         { type: "character", id: "p1", label: "苏白", start: 6, end: 9 }
       ])
     );
+  });
+
+  it("filters mentions by chapter and character names only", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <ChatMentionInput
+        valueText=""
+        mentions={[]}
+        items={[chapter, character, setting]}
+        recentItems={[setting]}
+        onChange={vi.fn()}
+        onSelectReference={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+    const editor = container.querySelector("[contenteditable='true']");
+    expect(editor).toBeTruthy();
+
+    await user.type(editor as HTMLElement, "@刘");
+
+    expect(screen.queryByText("刘家祖训")).not.toBeInTheDocument();
+    expect(await screen.findByText("没有匹配的章节或角色")).toBeVisible();
   });
 
   it("disables sending while streaming", () => {

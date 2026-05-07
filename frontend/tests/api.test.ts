@@ -405,7 +405,10 @@ describe("api client", () => {
       content: "已查询角色。",
       references: [],
       actions: [{ type: "save_character", label: "保存为角色" }],
-      tool_results: [{ tool: "list_characters", display: "列出角色", result: "角色A, 角色B" }],
+      blocks: [
+        { type: "text", text: "已查询角色。" },
+        { type: "tool_call", tool: "list_characters", display: "列出角色", status: "completed", result: "角色A, 角色B" }
+      ],
       created_at: "now"
     };
     const stream = new ReadableStream({
@@ -429,6 +432,7 @@ describe("api client", () => {
       [],
       [],
       (chunk) => chunks.push(chunk),
+      undefined,
       undefined,
       (tool, status) => toolCalls.push({ tool, status })
     );
@@ -467,7 +471,7 @@ describe("api client", () => {
     const toolCalls: Array<{ tool: string; status: string }> = [];
 
     const result = await client.streamChatMessage(
-      "s1", "hi", [], [], vi.fn(), undefined, (tool, status) => toolCalls.push({ tool, status })
+      "s1", "hi", [], [], vi.fn(), undefined, undefined, (tool, status) => toolCalls.push({ tool, status })
     );
     expect(result).toMatchObject({ id: "a3" });
     expect(toolCalls).toEqual([]);
@@ -531,6 +535,37 @@ describe("api client", () => {
     await expect(new ApiClient("http://api", fetcher).streamChatMessage("s1", "hi", [], [], vi.fn())).rejects.toMatchObject(
       new ApiError("missing final assistant message", 200)
     );
+  });
+
+  it("returns a partial assistant message when the stream emits error and done", async () => {
+    const final = {
+      id: "a4",
+      role: "assistant",
+      content: "半截回复",
+      blocks: [{ type: "text", text: "半截回复" }],
+      references: [],
+      actions: [],
+      error: "Tool 'list_characters' failed: timeout",
+      created_at: "now"
+    };
+    const stream = new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder();
+        controller.enqueue(encoder.encode("data: 半截\n\n"));
+        controller.enqueue(encoder.encode("event: error\ndata: " + JSON.stringify({ message: "Tool 'list_characters' failed: timeout" }) + "\n\n"));
+        controller.enqueue(encoder.encode("event: done\ndata: " + JSON.stringify(final) + "\n\n"));
+        controller.close();
+      }
+    });
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(stream, { status: 200 }));
+    const client = new ApiClient("http://api", fetcher);
+    const errors: string[] = [];
+
+    const result = await client.streamChatMessage("s1", "hi", [], [], vi.fn(), undefined, undefined, undefined, (message) => errors.push(message));
+
+    expect(result).toMatchObject({ id: "a4", content: "半截回复", error: "Tool 'list_characters' failed: timeout" });
+    expect(result.blocks).toEqual([{ type: "text", text: "半截回复" }]);
+    expect(errors).toEqual(["Tool 'list_characters' failed: timeout"]);
   });
 
   it("uses cookie credentials and raises typed errors", async () => {
@@ -883,7 +918,7 @@ describe("api client", () => {
     globalThis.fetch = originalFetch;
   });
 
-  it("maps tool_results into blocks on ChatMessage", async () => {
+  it("maps blocks on ChatMessage", async () => {
     const stream = new ReadableStream({
       start(controller) {
         const encoder = new TextEncoder();
@@ -893,7 +928,10 @@ describe("api client", () => {
           content: "已查询角色。",
           references: [],
           actions: [],
-          tool_results: [{ tool: "get_character", display: "查询角色", result: "角色信息..." }],
+          blocks: [
+            { type: "text", text: "已查询角色。" },
+            { type: "tool_call", tool: "get_character", display: "查询角色", status: "completed", result: "角色信息..." }
+          ],
           created_at: "2025-01-01"
         }) + "\n\n"));
         controller.close();
@@ -909,7 +947,7 @@ describe("api client", () => {
     expect(result.blocks![1]).toMatchObject({ type: "tool_call", tool: "get_character", status: "completed" });
   });
 
-  it("does not set blocks when tool_results is absent", async () => {
+  it("does not set blocks when blocks are absent", async () => {
     const stream = new ReadableStream({
       start(controller) {
         const encoder = new TextEncoder();

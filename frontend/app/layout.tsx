@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "streamdown/styles.css";
 import { Geist } from "next/font/google";
 import { Playfair_Display } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";

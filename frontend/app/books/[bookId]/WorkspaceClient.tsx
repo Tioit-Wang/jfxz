@@ -4,6 +4,7 @@ import { diffLines, type Change } from "diff";
 import {
   AlertCircle,
   BookOpen,
+  Brain,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -33,6 +34,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useGroupRef, usePanelRef, type Layout } from "react-resizable-panels";
+import { Streamdown } from "streamdown";
+import { code } from "@streamdown/code";
+import { cjk } from "@streamdown/cjk";
 import {
   ApiClient,
   ApiError,
@@ -68,8 +72,10 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { BillingDialog } from "@/components/billing/BillingDialog";
 import { PaymentDialog } from "@/components/billing/PaymentDialog";
@@ -156,6 +162,14 @@ function dedupeReferences(items: ChatReference[]): ChatReference[] {
   });
 }
 
+function isMentionReferenceType(type: ChatReference["type"]): type is "chapter" | "character" {
+  return type === "chapter" || type === "character";
+}
+
+function filterMentionReferences(items: ChatReference[]): ChatReference[] {
+  return items.filter((item) => isMentionReferenceType(item.type));
+}
+
 function workspaceLayoutKey(bookId: string): string {
   return `goodgua-workspace-layout:v1:${bookId}`;
 }
@@ -215,6 +229,8 @@ const TOOL_LABELS: Record<string, string> = {
   get_work_info: "查看作品",
   update_work_info: "更新作品",
 };
+
+const CHAT_MARKDOWN_PLUGINS = { code, cjk };
 
 function toolLabel(toolName: string): string {
   return TOOL_LABELS[toolName] ?? toolName;
@@ -288,6 +304,8 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const [aiModels, setAiModels] = useState<AiModelOption[]>([]);
   const [selectedModelId, setSelectedModelId] = useState("");
   const [modelStatus, setModelStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [thinkingEnabled, setThinkingEnabled] = useState(false);
+  const [thinkingIntensity, setThinkingIntensity] = useState(0.5);
 
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
@@ -317,6 +335,10 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [nicknameDraft, setNicknameDraft] = useState("");
   const [accountStatus, setAccountStatus] = useState<"idle" | "loading" | "saving" | "error">("idle");
+
+  const [workEditOpen, setWorkEditOpen] = useState(false);
+  const [workDraft, setWorkDraft] = useState({ title: "", shortIntro: "", synopsis: "", backgroundRules: "", focusRequirements: "", forbiddenRequirements: "", tags: "" });
+  const [workSaveStatus, setWorkSaveStatus] = useState<"idle" | "saving" | "error">("idle");
   const [billingOpen, setBillingOpen] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [billingProducts, setBillingProducts] = useState<BillingProducts>({ plans: [], creditPacks: [] });
@@ -407,14 +429,8 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       name: item.name,
       summary: item.summary
     }));
-    const settingRefs = settings.map((item) => ({
-      type: "setting" as const,
-      id: item.id,
-      name: item.name,
-      summary: item.summary
-    }));
-    return [...chapterRefs, ...characterRefs, ...settingRefs];
-  }, [chapters, characters, settings]);
+    return [...chapterRefs, ...characterRefs];
+  }, [chapters, characters]);
 
   const moduleMeta = {
     chapters: { title: "章节目录", count: `${chapters.length} 章 · 共 ${todayCount} 字` },
@@ -460,7 +476,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     try {
       const saved = window.localStorage.getItem(`${RECENT_REF_KEY}:${bookId}`);
       if (saved) {
-        setRecentReferences(JSON.parse(saved));
+        setRecentReferences(filterMentionReferences(JSON.parse(saved) as ChatReference[]));
       }
     } catch {
       window.localStorage.removeItem(`${RECENT_REF_KEY}:${bookId}`);
@@ -622,12 +638,13 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   }, [activeChapter, content, saveCurrentChapter, summary, title]);
 
   function persistRecentReferences(items: ChatReference[]) {
-    setRecentReferences(items);
-    window.localStorage.setItem(`${RECENT_REF_KEY}:${bookId}`, JSON.stringify(items));
+    const next = dedupeReferences(filterMentionReferences(items)).slice(0, 3);
+    setRecentReferences(next);
+    window.localStorage.setItem(`${RECENT_REF_KEY}:${bookId}`, JSON.stringify(next));
   }
 
   function rememberReferences(items: ChatReference[]) {
-    const next = dedupeReferences([...items, ...recentReferences]).slice(0, 3);
+    const next = dedupeReferences([...filterMentionReferences(items), ...recentReferences]).slice(0, 3);
     persistRecentReferences(next);
   }
 
@@ -920,6 +937,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
           );
         },
         selectedModelId,
+        thinkingEnabled ? thinkingIntensity : undefined,
         (tool, status, data) => {
           setMessages((items) =>
             items.map((item) => {
@@ -931,15 +949,35 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                   blocks: [...blocks, { type: "tool_call", tool, display: data?.display ?? toolLabel(tool), status: "started" as const }],
                 };
               } else {
-                const startedIdx = blocks.findIndex(
-                  (b) => b.type === "tool_call" && b.tool === tool && b.status === "started"
-                );
-                if (startedIdx === -1) return item;
-                // Keep the tool expanded after completion so user can see the result
+                let startedIdx = -1;
+                for (let index = blocks.length - 1; index >= 0; index -= 1) {
+                  const block = blocks[index];
+                  if (block.type === "tool_call" && block.tool === tool && block.status === "started") {
+                    startedIdx = index;
+                    break;
+                  }
+                }
+                if (startedIdx === -1) {
+                  return {
+                    ...item,
+                    blocks: [
+                      ...blocks,
+                      {
+                        type: "tool_call",
+                        tool,
+                        display: data?.display ?? toolLabel(tool),
+                        status: "completed" as const,
+                        result: data?.result
+                      }
+                    ],
+                  };
+                }
                 setExpandedTools((prev) => new Set(prev).add(`${item.id}-tool-${startedIdx}`));
                 const updated = blocks.map((b, i) =>
                   i === startedIdx
-                    ? { ...b, status: "completed" as const, result: data?.result }
+                    ? b.type === "tool_call"
+                      ? { ...b, display: data?.display ?? b.display, status: "completed" as const, result: data?.result }
+                      : b
                     : b
                 );
                 return { ...item, blocks: updated };
@@ -1109,9 +1147,12 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       setMessages((items) =>
         items.map((item) => {
           if (item.id !== assistantId) return item;
-          const streamingBlocks = item.blocks;
-          if (!streamingBlocks || streamingBlocks.length === 0) return { ...final };
-          return { ...final, blocks: streamingBlocks };
+          const resolvedBlocks = final.blocks ?? item.blocks;
+          return {
+            ...item,
+            ...final,
+            ...(resolvedBlocks && resolvedBlocks.length ? { blocks: resolvedBlocks } : {})
+          };
         })
       );
       setSessions((items) =>
@@ -1128,6 +1169,13 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       );
       setChatStatus("ready");
       setStreamingMessageId(null);
+      try {
+        const nextProfile = await client.getMe();
+        setProfile(nextProfile);
+        setNicknameDraft(nextProfile.user.nickname);
+      } catch {
+        // Ignore balance refresh failures so chat completion is not blocked.
+      }
     } catch (error) {
       setStreamingMessageId(null);
       if (error instanceof DOMException && error.name === "AbortError") {
@@ -1204,13 +1252,8 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     }
   }
 
-  async function deleteCharacter() {
+  async function deleteCharacterConfirm() {
     if (!activeCharacter) return;
-    if (!characterDeleteConfirm) {
-      setCharacterDeleteConfirm(true);
-      return;
-    }
-
     setCharacterStatus("deleting");
     setCharacterError("");
     try {
@@ -1234,6 +1277,29 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       window.setTimeout(() => setCopyNotice(""), 1600);
     } catch {
       setCopyNotice("复制失败");
+    }
+  }
+
+  async function saveWorkEdit() {
+    if (!work) return;
+    setWorkSaveStatus("saving");
+    try {
+      const updated = await client.updateWork({
+        id: work.id,
+        title: workDraft.title.trim(),
+        shortIntro: workDraft.shortIntro.trim(),
+        synopsis: workDraft.synopsis.trim(),
+        backgroundRules: workDraft.backgroundRules.trim(),
+        focusRequirements: workDraft.focusRequirements.trim(),
+        forbiddenRequirements: workDraft.forbiddenRequirements.trim(),
+        tags: workDraft.tags.split(",").map((t) => t.trim()).filter(Boolean),
+        updatedAt: work.updatedAt,
+      });
+      setWork(updated);
+      setWorkEditOpen(false);
+      setWorkSaveStatus("idle");
+    } catch {
+      setWorkSaveStatus("error");
     }
   }
 
@@ -1299,12 +1365,8 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     }
   }
 
-  async function deleteSetting() {
+  async function deleteSettingConfirm() {
     if (!activeSetting) return;
-    if (!settingDeleteConfirm) {
-      setSettingDeleteConfirm(true);
-      return;
-    }
     setSettingStatus("deleting");
     setSettingError("");
     try {
@@ -1318,16 +1380,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     } catch {
       setSettingStatus("error");
       setSettingError("删除失败，请稍后重试");
-    }
-  }
-
-  async function copySettingText(label: string, value: string) {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopyNotice(`已复制${label}`);
-      window.setTimeout(() => setCopyNotice(""), 1600);
-    } catch {
-      setCopyNotice("复制失败");
     }
   }
 
@@ -1397,9 +1449,13 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
 
   function renderMarkdown(text: string, isStreaming = false) {
     return (
-      <div className={cn("whitespace-pre-wrap break-words", isStreaming && "streaming-cursor")}>
+      <Streamdown
+        className={cn("chat-md break-words", isStreaming && "streaming-cursor")}
+        isAnimating={isStreaming}
+        plugins={CHAT_MARKDOWN_PLUGINS}
+      >
         {text}
-      </div>
+      </Streamdown>
     );
   }
 
@@ -1456,12 +1512,9 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     return (
       <div className="space-y-1">
         {items.map((c) => (
-          <div key={c.id} className="flex items-start gap-2 rounded-md bg-white/60 px-2.5 py-1.5">
-            <span className="mt-0.5 shrink-0 rounded bg-blue-100 px-1.5 py-0.5 font-mono text-[10px] text-blue-500">{c.id.slice(0, 8)}</span>
-            <div className="min-w-0">
-              <span className="font-medium text-gray-800">{c.name}</span>
-              {c.summary ? <span className="ml-1.5 text-gray-400">— {c.summary.length > 40 ? `${c.summary.slice(0, 40)}…` : c.summary}</span> : null}
-            </div>
+          <div key={c.id} className="rounded-md bg-white/60 px-2.5 py-1.5">
+            <span className="font-medium text-gray-800">{c.name}</span>
+            {c.summary ? <span className="ml-1.5 text-gray-400">— {c.summary.length > 40 ? `${c.summary.slice(0, 40)}…` : c.summary}</span> : null}
           </div>
         ))}
       </div>
@@ -1477,7 +1530,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     return (
       <div className="space-y-2 rounded-md bg-white/60 p-3">
         <div className="flex items-center gap-2">
-          <span className="rounded bg-blue-100 px-1.5 py-0.5 font-mono text-[10px] text-blue-500">{c.id?.slice(0, 8)}</span>
           <span className="text-base font-semibold text-gray-800">{c.name}</span>
         </div>
         {c.summary ? (
@@ -1490,6 +1542,66 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
           <div>
             <span className="text-[10px] font-medium uppercase tracking-wider text-gray-400">详细描述</span>
             <p className="mt-0.5 max-h-40 overflow-auto whitespace-pre-wrap text-gray-600 text-[11px] leading-relaxed">{c.detail}</p>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderChapterList(resultStr: string) {
+    let items: Array<{ id: string; order_index?: number; title: string; summary?: string }> = [];
+    try {
+      const parsed = JSON.parse(resultStr);
+      items = Array.isArray(parsed) ? parsed : parsed.chapters ?? [];
+    } catch {
+      return <p className="whitespace-pre-wrap">{resultStr}</p>;
+    }
+    if (!items.length) {
+      return <p className="text-muted-foreground italic">暂无章节</p>;
+    }
+    return (
+      <div className="space-y-1">
+        {items.map((ch) => (
+          <div key={ch.id} className="flex items-start gap-2 rounded-md bg-white/60 px-2.5 py-1.5">
+            <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded bg-primary/10 text-[10px] font-bold text-primary">
+              {ch.order_index ?? "?"}
+            </span>
+            <div className="min-w-0">
+              <span className="font-medium text-gray-800">{ch.title}</span>
+              {ch.summary ? <span className="ml-1.5 text-gray-400">— {ch.summary.length > 50 ? `${ch.summary.slice(0, 50)}…` : ch.summary}</span> : null}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  function renderWorkInfo(resultStr: string) {
+    let w: Record<string, unknown> = {};
+    try { w = JSON.parse(resultStr); } catch {
+      return <p className="whitespace-pre-wrap">{resultStr}</p>;
+    }
+    if (w.error) return <p className="text-red-500">{String(w.error)}</p>;
+    return (
+      <div className="space-y-2 rounded-md bg-white/60 p-3">
+        <span className="text-base font-semibold text-gray-800">{String(w.title ?? "")}</span>
+        {w.short_intro ? (
+          <div>
+            <span className="text-[10px] font-medium uppercase tracking-wider text-gray-400">简介</span>
+            <p className="mt-0.5 text-gray-600">{String(w.short_intro)}</p>
+          </div>
+        ) : null}
+        {w.synopsis ? (
+          <div>
+            <span className="text-[10px] font-medium uppercase tracking-wider text-gray-400">大纲</span>
+            <p className="mt-0.5 max-h-40 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-gray-600">{String(w.synopsis)}</p>
+          </div>
+        ) : null}
+        {Array.isArray(w.genre_tags) && w.genre_tags.length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {(w.genre_tags as string[]).map((tag: string) => (
+              <span key={tag} className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">{tag}</span>
+            ))}
           </div>
         ) : null}
       </div>
@@ -1543,6 +1655,12 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     if (tool === "delete_character") {
       return <div className="px-3 py-2">{renderCharacterDelete(block.result)}</div>;
     }
+    if (tool === "list_chapters") {
+      return <div className="px-3 py-2">{renderChapterList(block.result)}</div>;
+    }
+    if (tool === "get_work_info") {
+      return <div className="px-3 py-2">{renderWorkInfo(block.result)}</div>;
+    }
     return (
       <div className="px-3 py-2 text-muted-foreground">
         <p className="line-clamp-6 whitespace-pre-wrap">
@@ -1565,11 +1683,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
             if (block.type === "text") {
               if (!block.text) return null;
               const isLastText = index === lastBlockIdx && isStreaming;
-              return (
-                <div key={`text-${index}`} className={cn("chat-md", isLastText && "streaming-cursor")}>
-                  {renderMarkdown(block.text, isStreaming)}
-                </div>
-              );
+              return <div key={`text-${index}`}>{renderMarkdown(block.text, isLastText)}</div>;
             }
             const toolKey = `${message.id}-tool-${index}`;
             const isStarted = block.status === "started";
@@ -1619,7 +1733,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       .filter((mention) => mention.start >= 0 && mention.end > mention.start && mention.end <= message.content.length)
       .sort((left, right) => left.start - right.start);
 
-    if (!mentions.length) return <div className="chat-md">{renderMarkdown(message.content, isStreaming)}</div>;
+    if (!mentions.length) return renderMarkdown(message.content, isStreaming);
 
     let cursor = 0;
     return (
@@ -1677,7 +1791,26 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
               <span className="mt-0.5 block truncate text-xs text-muted-foreground">{work?.shortIntro || "作品总纲已定"}</span>
             </div>
           </div>
-          <MoreVertical size={16} className="shrink-0 text-muted-foreground" />
+          <button
+            className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+            onClick={() => {
+              if (work) {
+                setWorkDraft({
+                  title: work.title,
+                  shortIntro: work.shortIntro,
+                  synopsis: work.synopsis,
+                  backgroundRules: work.backgroundRules,
+                  focusRequirements: work.focusRequirements,
+                  forbiddenRequirements: work.forbiddenRequirements,
+                  tags: (work.tags ?? []).join(", "),
+                });
+              }
+              setWorkEditOpen(true);
+            }}
+            aria-label="编辑作品信息"
+          >
+            <MoreVertical size={16} />
+          </button>
         </div>
 
         <div className="flex gap-1 border-b border-border bg-muted/40 p-2">
@@ -1787,10 +1920,10 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                 {filteredCharacters.map((item) => {
                   const selected = item.id === activeCharacter?.id && characterMode === "detail";
                   return (
-                    <button
+                    <div
                       key={item.id}
                       className={cn(
-                        "w-full rounded-lg border p-3 text-left transition-colors",
+                        "group relative w-full rounded-lg border p-3 text-left transition-colors cursor-pointer",
                         selected ? "border-border bg-card shadow-sm" : "border-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                       )}
                       onClick={() => selectCharacter(item)}
@@ -1801,36 +1934,40 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                         <Clock3 size={11} className="mr-1" />
                         {formatUpdatedAt(item.updatedAt)}
                       </span>
-                    </button>
+                      <div className="absolute right-2 top-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                        <button
+                          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                          onClick={(e) => { e.stopPropagation(); selectCharacter(item); startEditCharacter(); }}
+                          aria-label="编辑角色"
+                        >
+                          <Edit3 size={13} />
+                        </button>
+                        <button
+                          className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600"
+                          onClick={(e) => { e.stopPropagation(); selectCharacter(item); setCharacterDeleteConfirm(true); }}
+                          aria-label="删除角色"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </div>
                   );
                 })}
               </div>
 
               {activeCharacter && characterMode === "detail" ? (
                 <div className="mx-1 rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <h3 className="truncate text-sm font-semibold text-gray-900">{activeCharacter.name}</h3>
-                      <p className="mt-1 text-xs leading-5 text-gray-500">{activeCharacter.summary}</p>
-                    </div>
-                    <button className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700" onClick={startEditCharacter} aria-label="编辑角色">
-                      <Edit3 size={14} />
-                    </button>
+                  <div className="min-w-0">
+                    <h3 className="truncate text-sm font-semibold text-gray-900">{activeCharacter.name}</h3>
+                    <p className="mt-1 text-xs leading-5 text-gray-500">{activeCharacter.summary}</p>
                   </div>
                   <p className="mt-3 max-h-24 overflow-y-auto whitespace-pre-wrap rounded-lg bg-muted p-2 text-xs leading-5 text-muted-foreground">
                     {activeCharacter.detail || "暂无详情"}
                   </p>
-                  {characterDeleteConfirm ? (
-                    <p className="mt-2 rounded-lg bg-red-50 px-2 py-1.5 text-xs text-red-600">再点一次确认删除。</p>
-                  ) : null}
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    <button className="rounded-lg border border-border py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground" onClick={() => void copyCharacterText("详情", activeCharacter.detail || activeCharacter.summary)}>
+                  <div className="mt-3">
+                    <button className="w-full rounded-lg border border-border py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground" onClick={() => void copyCharacterText("详情", activeCharacter.detail || activeCharacter.summary)}>
                       <Copy size={12} className="mr-1 inline" />
                       复制
-                    </button>
-                    <button className="rounded-lg border border-border py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground" onClick={() => void deleteCharacter()} disabled={characterStatus === "deleting"}>
-                      {characterStatus === "deleting" ? <Loader2 className="mr-1 inline h-3 w-3 animate-spin" /> : <Trash2 size={12} className="mr-1 inline" />}
-                      {characterDeleteConfirm ? "确认删除" : "删除"}
                     </button>
                   </div>
                 </div>
@@ -1890,10 +2027,10 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                 {filteredSettings.map((item) => {
                   const selected = item.id === activeSetting?.id && settingMode === "detail";
                   return (
-                    <button
+                    <div
                       key={item.id}
                       className={cn(
-                        "w-full rounded-lg border p-3 text-left transition-colors",
+                        "group relative w-full rounded-lg border p-3 text-left transition-colors cursor-pointer",
                         selected ? "border-border bg-card shadow-sm" : "border-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                       )}
                       onClick={() => selectSetting(item)}
@@ -1907,42 +2044,37 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                         <Clock3 size={11} className="mr-1" />
                         {formatUpdatedAt(item.updatedAt)}
                       </span>
-                    </button>
+                      <div className="absolute right-2 top-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                        <button
+                          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                          onClick={(e) => { e.stopPropagation(); selectSetting(item); startEditSetting(); }}
+                          aria-label="编辑设定"
+                        >
+                          <Edit3 size={13} />
+                        </button>
+                        <button
+                          className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600"
+                          onClick={(e) => { e.stopPropagation(); selectSetting(item); setSettingDeleteConfirm(true); }}
+                          aria-label="删除设定"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </div>
                   );
                 })}
               </div>
 
               {activeSetting && settingMode === "detail" ? (
                 <div className="mx-1 rounded-lg border bg-card p-3 shadow-sm">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <Badge variant="outline">{activeSetting.type || "other"}</Badge>
-                      <h3 className="mt-2 truncate text-sm font-semibold">{activeSetting.name}</h3>
-                      <p className="mt-1 text-xs leading-5 text-muted-foreground">{activeSetting.summary}</p>
-                    </div>
-                    <Button variant="ghost" size="icon-sm" onClick={startEditSetting} aria-label="编辑设定">
-                      <Edit3 />
-                    </Button>
+                  <div className="min-w-0">
+                    <Badge variant="outline">{activeSetting.type || "other"}</Badge>
+                    <h3 className="mt-2 truncate text-sm font-semibold">{activeSetting.name}</h3>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">{activeSetting.summary}</p>
                   </div>
                   <p className="mt-3 max-h-28 overflow-y-auto whitespace-pre-wrap rounded-lg bg-muted p-2 text-xs leading-5 text-muted-foreground">
                     {activeSetting.detail || "暂无详情"}
                   </p>
-                  {settingDeleteConfirm ? <p className="mt-2 rounded-lg bg-muted px-2 py-1.5 text-xs text-muted-foreground">再点一次确认删除。</p> : null}
-                  <div className="mt-3 grid grid-cols-3 gap-2">
-                    <Button variant="outline" size="sm" onClick={() => void copySettingText("名称", activeSetting.name)}>
-                      名称
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => void copySettingText("简介", activeSetting.summary)}>
-                      简介
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => void copySettingText("详情", activeSetting.detail || activeSetting.summary)}>
-                      详情
-                    </Button>
-                  </div>
-                  <Button className="mt-2 w-full" variant="outline" size="sm" onClick={() => void deleteSetting()} disabled={settingStatus === "deleting"}>
-                    {settingStatus === "deleting" ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Trash2 data-icon="inline-start" />}
-                    {settingDeleteConfirm ? "确认删除" : "删除设定"}
-                  </Button>
                 </div>
               ) : null}
             </div>
@@ -2211,38 +2343,44 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
             </div>
           </div>
           <div className="flex gap-1">
-            <button className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground" onClick={() => setShowHistory((value) => !value)} title="历史会话" aria-label="历史会话">
-              <Clock3 size={16} />
-            </button>
+            <DropdownMenu open={showHistory} onOpenChange={setShowHistory}>
+              <DropdownMenuTrigger asChild>
+                <button className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground" title="历史会话" aria-label="历史会话">
+                  <Clock3 size={16} />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-80 p-2">
+                <div className="space-y-2">
+                  <div className="px-1 py-1 text-xs font-medium text-muted-foreground">最近会话</div>
+                  <div className="max-h-64 space-y-2 overflow-y-auto">
+                    {sessions.length ? (
+                      sessions.map((session) => (
+                        <button
+                          key={session.id}
+                          className={cn(
+                            "w-full rounded-lg border px-3 py-2 text-left text-xs transition-colors",
+                            session.id === activeSessionId
+                              ? "border-primary bg-card text-foreground"
+                              : "border-transparent bg-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                          )}
+                          onClick={() => void switchSession(session.id)}
+                        >
+                          <span className="block truncate font-medium">{session.title}</span>
+                          <span className="mt-1 block truncate text-muted-foreground">{session.lastMessagePreview || "暂无消息"}</span>
+                        </button>
+                      ))
+                    ) : (
+                      <p className="px-2 py-3 text-xs text-muted-foreground">暂无历史会话</p>
+                    )}
+                  </div>
+                </div>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <button className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground" onClick={() => void createSession()} title="新建会话" aria-label="新建会话">
               <MessageSquare size={16} />
             </button>
           </div>
         </div>
-
-        {showHistory ? (
-          <div className="border-b border-border bg-card p-3">
-            <div className="max-h-52 space-y-2 overflow-y-auto rounded-lg border border-border bg-muted p-2">
-              {sessions.length ? (
-                sessions.map((session) => (
-                  <button
-                    key={session.id}
-                    className={cn(
-                      "w-full rounded-lg border px-3 py-2 text-left text-xs transition-colors",
-                      session.id === activeSessionId ? "border-primary bg-card text-foreground" : "border-transparent bg-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                    )}
-                    onClick={() => void switchSession(session.id)}
-                  >
-                    <span className="block truncate font-medium">{session.title}</span>
-                    <span className="mt-1 block truncate text-muted-foreground">{session.lastMessagePreview || "暂无消息"}</span>
-                  </button>
-                ))
-              ) : (
-                <p className="px-2 py-3 text-xs text-gray-400">暂无历史会话</p>
-              )}
-            </div>
-          </div>
-        ) : null}
 
         {!overlay ? (
           <div className="flex flex-1 flex-col overflow-hidden">
@@ -2334,6 +2472,28 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                       models={aiModels}
                       selectedId={selectedModelId}
                       onSelect={selectChatModel}
+                    />
+                  )}
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Brain size={12} className="text-muted-foreground/60" />
+                    <span>思考</span>
+                    <Switch
+                      checked={thinkingEnabled}
+                      onCheckedChange={setThinkingEnabled}
+                      aria-label="开启思考"
+                    />
+                  </div>
+                  {thinkingEnabled && (
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={Math.round(thinkingIntensity * 100)}
+                      onChange={(e) => setThinkingIntensity(Number(e.target.value) / 100)}
+                      className="h-1 w-16 cursor-pointer accent-primary"
+                      aria-label="思考强度"
                     />
                   )}
                 </div>
@@ -2539,6 +2699,21 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
         </DialogContent>
       </Dialog>
 
+      <AlertDialog open={characterDeleteConfirm} onOpenChange={setCharacterDeleteConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除角色？</AlertDialogTitle>
+            <AlertDialogDescription>
+              将删除角色「{activeCharacter?.name ?? "选中角色"}」的所有信息。此操作不可撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void deleteCharacterConfirm()}>确认删除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <Dialog
         open={settingMode === "create" || settingMode === "edit"}
         onOpenChange={(open) => {
@@ -2607,6 +2782,21 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={settingDeleteConfirm} onOpenChange={setSettingDeleteConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除设定？</AlertDialogTitle>
+            <AlertDialogDescription>
+              将删除设定「{activeSetting?.name ?? "选中设定"}」的所有信息。此操作不可撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void deleteSettingConfirm()}>确认删除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog open={accountOpen} onOpenChange={setAccountOpen}>
         <DialogContent className="sm:max-w-md">
@@ -2771,6 +2961,89 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
               window.localStorage.setItem(EDITOR_SETTINGS_KEY, JSON.stringify(DEFAULT_EDITOR_SETTINGS));
             }}>
               恢复默认
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={workEditOpen} onOpenChange={setWorkEditOpen}>
+        <DialogContent className="sm:max-w-lg max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>编辑作品信息</DialogTitle>
+            <DialogDescription>修改作品的基本设定、大纲和创作规则。</DialogDescription>
+          </DialogHeader>
+          <FieldGroup>
+            <Field>
+              <FieldLabel>作品标题</FieldLabel>
+              <Input
+                aria-label="作品标题"
+                value={workDraft.title}
+                onChange={(e) => setWorkDraft((d) => ({ ...d, title: e.target.value }))}
+              />
+            </Field>
+            <Field>
+              <FieldLabel>简介</FieldLabel>
+              <Textarea
+                aria-label="简介"
+                value={workDraft.shortIntro}
+                onChange={(e) => setWorkDraft((d) => ({ ...d, shortIntro: e.target.value }))}
+                className="min-h-20 resize-none"
+              />
+            </Field>
+            <Field>
+              <FieldLabel>大纲</FieldLabel>
+              <Textarea
+                aria-label="大纲"
+                value={workDraft.synopsis}
+                onChange={(e) => setWorkDraft((d) => ({ ...d, synopsis: e.target.value }))}
+                className="min-h-24 resize-none"
+              />
+            </Field>
+            <Field>
+              <FieldLabel>背景规则</FieldLabel>
+              <Textarea
+                aria-label="背景规则"
+                value={workDraft.backgroundRules}
+                onChange={(e) => setWorkDraft((d) => ({ ...d, backgroundRules: e.target.value }))}
+                className="min-h-20 resize-none"
+              />
+            </Field>
+            <Field>
+              <FieldLabel>创作重点</FieldLabel>
+              <Textarea
+                aria-label="创作重点"
+                value={workDraft.focusRequirements}
+                onChange={(e) => setWorkDraft((d) => ({ ...d, focusRequirements: e.target.value }))}
+                className="min-h-20 resize-none"
+              />
+            </Field>
+            <Field>
+              <FieldLabel>禁忌要求</FieldLabel>
+              <Textarea
+                aria-label="禁忌要求"
+                value={workDraft.forbiddenRequirements}
+                onChange={(e) => setWorkDraft((d) => ({ ...d, forbiddenRequirements: e.target.value }))}
+                className="min-h-20 resize-none"
+              />
+            </Field>
+            <Field>
+              <FieldLabel>类型标签（逗号分隔）</FieldLabel>
+              <Input
+                aria-label="类型标签"
+                value={workDraft.tags}
+                onChange={(e) => setWorkDraft((d) => ({ ...d, tags: e.target.value }))}
+                placeholder="奇幻, 冒险, 群像"
+              />
+            </Field>
+            {workSaveStatus === "error" && <FieldError>保存失败，请稍后重试</FieldError>}
+          </FieldGroup>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setWorkEditOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={() => void saveWorkEdit()} disabled={workSaveStatus === "saving"}>
+              {workSaveStatus === "saving" ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Save data-icon="inline-start" />}
+              保存
             </Button>
           </DialogFooter>
         </DialogContent>

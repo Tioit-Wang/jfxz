@@ -109,6 +109,7 @@ class ChatIn(BaseModel):
     model_id: str | None = Field(default=None, max_length=100)
     mentions: list[dict[str, Any]] = Field(default_factory=list, max_length=REFERENCE_LIMIT)
     references: list[dict[str, Any]] = Field(default_factory=list, max_length=REFERENCE_LIMIT)
+    thinking_intensity: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class AnalyzeIn(BaseModel):
@@ -1391,6 +1392,8 @@ def normalized_run(run: dict[str, Any], index: int) -> dict[str, Any]:
         "actions": run.get("actions") or [],
         "created_at": created_at,
     }
+    if run.get("blocks"):
+        result["blocks"] = run["blocks"]
     if run.get("tool_results"):
         result["tool_results"] = run["tool_results"]
     if run.get("billing_failed"):
@@ -1398,6 +1401,58 @@ def normalized_run(run: dict[str, Any], index: int) -> dict[str, Any]:
     if run.get("error"):
         result["error"] = run["error"]
     return result
+
+
+def append_text_block(blocks: list[dict[str, Any]], content: str) -> None:
+    if not content:
+        return
+    if blocks and blocks[-1].get("type") == "text":
+        blocks[-1]["text"] = f'{blocks[-1].get("text", "")}{content}'
+        return
+    blocks.append({"type": "text", "text": content})
+
+
+def start_tool_block(
+    blocks: list[dict[str, Any]], tool_name: str, display: str
+) -> None:
+    blocks.append(
+        {"type": "tool_call", "tool": tool_name, "display": display, "status": "started"}
+    )
+
+
+def complete_tool_block(
+    blocks: list[dict[str, Any]], tool_name: str, display: str, result_text: str
+) -> None:
+    for index in range(len(blocks) - 1, -1, -1):
+        block = blocks[index]
+        if (
+            block.get("type") == "tool_call"
+            and block.get("tool") == tool_name
+            and block.get("status") == "started"
+        ):
+            block["status"] = "completed"
+            block["display"] = display
+            block["result"] = result_text
+            return
+    blocks.append(
+        {
+            "type": "tool_call",
+            "tool": tool_name,
+            "display": display,
+            "status": "completed",
+            "result": result_text,
+        }
+    )
+
+
+def finalize_tool_blocks(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    finalized: list[dict[str, Any]] = []
+    for block in blocks:
+        if block.get("type") != "tool_call" or block.get("status") != "started":
+            finalized.append(block)
+            continue
+        finalized.append({**block, "status": "completed"})
+    return finalized
 
 
 def message_page(
@@ -1584,8 +1639,31 @@ _TOOL_DISPLAY_NAMES = {
     "update_work_info": "更新作品信息",
 }
 
+_TOOL_ACTION_TYPES = {
+    "create_or_update_character": "save_character",
+    "create_or_update_setting": "save_setting",
+    "delete_character": "delete_character",
+    "delete_setting": "delete_setting",
+    "get_character": "get_character",
+    "list_characters": "list_characters",
+    "get_setting": "get_setting",
+    "list_settings": "list_settings",
+    "get_chapter": "get_chapter",
+    "list_chapters": "list_chapters",
+    "update_chapter_summary": "update_chapter_summary",
+    "get_work_info": "get_work_info",
+    "update_work_info": "update_work_info",
+}
+
 # 详情查询工具返回完整数据，需要截断以节省 token
 _DETAIL_TOOLS = {"get_chapter", "get_character", "get_setting", "get_work_info"}
+
+
+def tool_action(tool_name: str) -> dict[str, str] | None:
+    action_type = _TOOL_ACTION_TYPES.get(tool_name)
+    if action_type is None:
+        return None
+    return {"type": action_type, "label": _TOOL_DISPLAY_NAMES.get(tool_name, tool_name)}
 
 
 @router.get("/chat-sessions/{session_id}/messages")
@@ -1674,6 +1752,7 @@ async def send_chat_message(
 
     # Collect full response for persistence
     full_content_parts: list[str] = []
+    blocks: list[dict[str, Any]] = []
     tool_results: list[dict[str, str]] = []
     billing_failed = False
 
@@ -1683,117 +1762,33 @@ async def send_chat_message(
         nonlocal billing_failed
         completed_event = None
         error_messages: list[str] = []
-        async with SessionLocal() as tool_session:
-            agno_agent = create_agent(
-                model=model,
-                work=work,
-                refs=refs,
-                db_session=session,
-                tool_db_session=tool_session,
-                work_id=chat.work_id,
-                agno_session_id=chat.agno_session_id,
-            )
-            event_stream = agno_agent.arun(
-                payload.message,
-                stream=True,
-                stream_events=True,
-            )
-            async for event in event_stream:
-                if event.event == RunEvent.run_content:
-                    content = event.content
-                    if content:
-                        full_content_parts.append(content)
-                        yield encode_sse("text", content)
-                elif event.event == RunEvent.tool_call_started:
-                    tool_name = event.tool.tool_name if event.tool else ""
-                    display = _TOOL_DISPLAY_NAMES.get(tool_name, tool_name)
-                    yield encode_sse(
-                        "tool_call", {"tool": tool_name, "display": display, "status": "started"}
-                    )
-                elif event.event == RunEvent.tool_call_completed:
-                    tool_name = event.tool.tool_name if event.tool else ""
-                    display = _TOOL_DISPLAY_NAMES.get(tool_name, tool_name)
-                    result_text = ""
-                    if event.tool and hasattr(event.tool, "result") and event.tool.result:
-                        raw = str(event.tool.result)
-                        result_text = raw[:1000] if tool_name in _DETAIL_TOOLS else raw
-                    tool_results.append(
-                        {"tool": tool_name, "display": display, "result": result_text}
-                    )
-                    yield encode_sse(
-                        "tool_result",
-                        {
-                            "tool": tool_name,
-                            "display": display,
-                            "status": "completed",
-                            "result": result_text,
-                        },
-                    )
-                elif event.event == RunEvent.run_error:
-                    error_msg = str(event.content) if event.content else "Agent run failed"
-                    logger.error("agent run error for chat %s: %s", chat.id, error_msg)
-                    error_messages.append(error_msg)
-                    yield encode_sse("error", {"message": error_msg})
-                elif event.event == RunEvent.tool_call_error:
-                    tool_name = event.tool.tool_name if event.tool else ""
-                    error_msg = str(event.content) if event.content else "Tool call failed"
-                    logger.error(
-                        "tool call error for chat %s, tool=%s: %s", chat.id, tool_name, error_msg
-                    )
-                    error_messages.append(error_msg)
-                    yield encode_sse(
-                        "error", {"message": f"Tool '{tool_name}' failed: {error_msg}"}
-                    )
-                elif event.event == RunEvent.run_completed:
-                    completed_event = event
 
-            # Stream complete -- persist and bill
+        async def persist_assistant_message() -> dict[str, Any] | None:
             full_content = "".join(full_content_parts)
+            finalized_blocks = finalize_tool_blocks(blocks)
+            message_error = "; ".join(dict.fromkeys(error_messages)) if error_messages else None
+            actions = [
+                action
+                for action in (
+                    tool_action(tool_result["tool"])
+                    for tool_result in tool_results
+                )
+                if action is not None
+            ]
+            if not full_content and not finalized_blocks and not message_error and not billing_failed:
+                return None
 
-            # Deduct by actual usage
-            from app.services.billing_service import deduct_by_usage
-
-            try:
-                if (
-                    completed_event
-                    and hasattr(completed_event, "metrics")
-                    and completed_event.metrics
-                ):
-                    metrics = completed_event.metrics
-                    usage = {
-                        "prompt_tokens": getattr(metrics, "input_tokens", 0) or 0,
-                        "completion_tokens": getattr(metrics, "output_tokens", 0) or 0,
-                        "cached_tokens": getattr(metrics, "cache_read_tokens", 0) or 0,
-                    }
-                    await deduct_by_usage(
-                        session,
-                        user.id,
-                        model,
-                        usage,
-                        work_id=chat.work_id,
-                        source_id=chat.id,
-                        source_type="ai_chat",
-                    )
-                else:
-                    logger.warning(
-                        "no metrics from agent run, billing skipped for chat %s", chat.id
-                    )
-            except Exception:
-                billing_failed = True
-                logger.warning("billing deduction failed after agent stream", exc_info=True)
-
-            # Persist assistant message to AgentRunStore.runs
-            if not full_content and error_messages:
-                full_content = ""
-            assistant_message = {
+            assistant_message: dict[str, Any] = {
                 "id": str(uuid4()),
                 "role": "assistant",
                 "content": full_content,
                 "mentions": [],
                 "references": references,
+                "actions": actions,
+                "blocks": finalized_blocks,
                 "tool_results": tool_results,
                 "billing_failed": billing_failed,
-                "error": "; ".join(error_messages) if error_messages else None,
+                "error": message_error,
                 "created_at": now().isoformat(),
             }
             async with run_lock:
@@ -1804,8 +1799,125 @@ async def send_chat_message(
                 chat.last_message_preview = full_content[:120]
                 chat.last_active_at = now()
                 await session.commit()
+            return assistant_message
 
-            yield encode_sse("done", assistant_message)
+        async with SessionLocal() as tool_session:
+            agno_agent = create_agent(
+                model=model,
+                work=work,
+                refs=refs,
+                db_session=session,
+                tool_db_session=tool_session,
+                work_id=chat.work_id,
+                agno_session_id=chat.agno_session_id,
+                thinking_intensity=payload.thinking_intensity,
+            )
+            event_stream = agno_agent.arun(
+                payload.message,
+                stream=True,
+                stream_events=True,
+            )
+            try:
+                async for event in event_stream:
+                    if event.event == RunEvent.run_content:
+                        content = event.content
+                        if content:
+                            full_content_parts.append(content)
+                            append_text_block(blocks, content)
+                            yield encode_sse("text", content)
+                    elif event.event == RunEvent.tool_call_started:
+                        tool_name = event.tool.tool_name if event.tool else ""
+                        display = _TOOL_DISPLAY_NAMES.get(tool_name, tool_name)
+                        start_tool_block(blocks, tool_name, display)
+                        yield encode_sse(
+                            "tool_call",
+                            {"tool": tool_name, "display": display, "status": "started"},
+                        )
+                    elif event.event == RunEvent.tool_call_completed:
+                        tool_name = event.tool.tool_name if event.tool else ""
+                        display = _TOOL_DISPLAY_NAMES.get(tool_name, tool_name)
+                        result_text = ""
+                        if event.tool and hasattr(event.tool, "result") and event.tool.result:
+                            raw = str(event.tool.result)
+                            result_text = raw[:1000] if tool_name in _DETAIL_TOOLS else raw
+                        tool_results.append(
+                            {"tool": tool_name, "display": display, "result": result_text}
+                        )
+                        complete_tool_block(blocks, tool_name, display, result_text)
+                        yield encode_sse(
+                            "tool_result",
+                            {
+                                "tool": tool_name,
+                                "display": display,
+                                "status": "completed",
+                                "result": result_text,
+                            },
+                        )
+                    elif event.event == RunEvent.run_error:
+                        error_msg = str(event.content) if event.content else "Agent run failed"
+                        logger.error("agent run error for chat %s: %s", chat.id, error_msg)
+                        error_messages.append(error_msg)
+                        yield encode_sse("error", {"message": error_msg})
+                    elif event.event == RunEvent.tool_call_error:
+                        tool_name = event.tool.tool_name if event.tool else ""
+                        error_msg = str(event.content) if event.content else "Tool call failed"
+                        logger.error(
+                            "tool call error for chat %s, tool=%s: %s",
+                            chat.id,
+                            tool_name,
+                            error_msg,
+                        )
+                        error_messages.append(f"Tool '{tool_name}' failed: {error_msg}")
+                        yield encode_sse(
+                            "error", {"message": f"Tool '{tool_name}' failed: {error_msg}"}
+                        )
+                    elif event.event == RunEvent.run_completed:
+                        completed_event = event
+            except Exception as error:
+                error_msg = str(error) or "Agent run failed"
+                logger.error(
+                    "chat stream crashed for chat %s: %s", chat.id, error_msg, exc_info=True
+                )
+                error_messages.append(error_msg)
+                yield encode_sse("error", {"message": error_msg})
+
+            # Deduct by actual usage only for completed runs.
+            if completed_event is not None:
+                completed_content = str(getattr(completed_event, "content", "") or "")
+                if completed_content and not full_content_parts:
+                    full_content_parts.append(completed_content)
+                    append_text_block(blocks, completed_content)
+
+                from app.services.billing_service import deduct_by_usage
+
+                try:
+                    if hasattr(completed_event, "metrics") and completed_event.metrics:
+                        metrics = completed_event.metrics
+                        usage = {
+                            "prompt_tokens": getattr(metrics, "input_tokens", 0) or 0,
+                            "completion_tokens": getattr(metrics, "output_tokens", 0) or 0,
+                            "cached_tokens": getattr(metrics, "cache_read_tokens", 0) or 0,
+                        }
+                        await deduct_by_usage(
+                            session,
+                            user.id,
+                            model,
+                            usage,
+                            work_id=chat.work_id,
+                            source_id=chat.id,
+                            source_type="ai_chat",
+                        )
+                    else:
+                        logger.warning(
+                            "no metrics from agent run, billing skipped for chat %s", chat.id
+                        )
+                except Exception:
+                    billing_failed = True
+                    logger.warning("billing deduction failed after agent stream", exc_info=True)
+
+            assistant_message = await persist_assistant_message()
+            if assistant_message is not None:
+                yield encode_sse("done", assistant_message)
 
     return StreamingResponse(stream_reply(), media_type="text/event-stream")
 

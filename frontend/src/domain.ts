@@ -12,6 +12,7 @@ export type Work = {
 
 export type Chapter = {
   id: string;
+  volumeId?: string;
   order: number;
   title: string;
   summary: string;

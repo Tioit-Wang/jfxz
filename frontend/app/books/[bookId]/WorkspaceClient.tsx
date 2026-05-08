@@ -1,16 +1,27 @@
 "use client";
 
-import { diffLines, type Change } from "diff";
 import {
   AlertCircle,
+  ArrowRight,
+  BookMarked,
   Check,
-  ChevronDown,
   Clock3,
   Cloud,
   CloudOff,
+  Compass,
+  Crown,
+  Database,
+  FileText,
+  Lightbulb,
   Loader2,
+  Mail,
+  PencilLine,
   Save,
+  ShieldAlert,
+  Tags,
   type LucideIcon,
+  UserRound,
+  Zap,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -29,9 +40,12 @@ import {
   type ChatMessage,
   type ChatReference,
   type ChatSession,
+  type DailyWordProgress,
+  type InspirationNote,
   type NamedContent,
-  type ToolCallBlock,
   type UserProfile,
+  type Volume,
+  type WritingGoal,
 } from "@/api";
 import { userLoginPath } from "@/auth";
 import { type ChatMentionInputHandle } from "@/components/ChatMentionInput";
@@ -52,15 +66,14 @@ import { Input } from "@/components/ui/input";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { BillingDialog } from "@/components/billing/BillingDialog";
 import { PaymentDialog } from "@/components/billing/PaymentDialog";
 import { cn } from "@/lib/utils";
-import { formatToken } from "@/lib/format";
 import { applySuggestion, type Chapter, type Work, wordCount } from "@/domain";
 import { type WorkspaceMentionReference } from "./workspace/dnd";
 import { WorkspaceChatPanel } from "./workspace/WorkspaceChatPanel";
 import { WorkspaceEditorPanel } from "./workspace/WorkspaceEditorPanel";
 import { WorkspaceSidebarPanel } from "./workspace/WorkspaceSidebarPanel";
+import { toolLabel, WorkspaceToolCall } from "./workspace/WorkspaceToolCall";
 
 type WorkspaceClientProps = {
   bookId: string;
@@ -74,11 +87,12 @@ type CharacterDraft = { name: string; summary: string; detail: string };
 type SettingMode = "detail" | "create" | "edit";
 type SettingStatus = "ready" | "saving" | "deleting" | "error";
 type SettingDraft = { name: string; summary: string; detail: string; type: string };
+type InspirationNoteMode = "idle" | "create" | "edit";
+type InspirationNoteDraft = { title: string; content: string; category: string };
 const RECENT_REF_KEY = "goodgua-recent-references";
 const CHAT_MODEL_KEY = "goodgua-chat-model";
 const WORKSPACE_LAYOUT_PANEL_IDS = ["workspace-sidebar", "workspace-editor", "workspace-chat"] as const;
 const testPaymentEnabled = process.env.NEXT_PUBLIC_ENABLE_TEST_PAYMENT === "true";
-const quickPrompts = ["帮我构思后续情节", "帮我补充作品信息"];
 const settingTypes = [
   { value: "all", label: "全部设定" },
   { value: "location", label: "地点" },
@@ -111,6 +125,9 @@ const DEFAULT_EDITOR_SETTINGS = {
   letterSpacing: 0,
   paragraphSpacing: 4,
 };
+
+const DEFAULT_WRITING_GOAL: WritingGoal = { id: "", targetWords: 2000, updatedAt: "" };
+const DEFAULT_DAILY_PROGRESS: DailyWordProgress = { date: "", wordsAdded: 0, updatedAt: "" };
 
 function formatStatus(status: SaveStatus): { label: string; tone: "success" | "muted" | "warning"; icon: LucideIcon } {
   if (status === "saving") return { label: "正在保存...", tone: "muted", icon: Loader2 };
@@ -191,29 +208,7 @@ function formatUpdatedAt(value: string): string {
 }
 
 
-const TOOL_LABELS: Record<string, string> = {
-  get_character: "查询角色",
-  list_characters: "列出角色",
-  create_or_update_character: "创建角色",
-  delete_character: "删除角色",
-  get_setting: "查询设定",
-  list_settings: "列出设定",
-  create_or_update_setting: "创建设定",
-  delete_setting: "删除设定",
-  get_chapter: "查询章节",
-  list_chapters: "列出章节",
-  create_chapter: "创建章节",
-  update_chapter_summary: "更新提要",
-  update_chapter_content: "更新正文",
-  get_work_info: "查看作品",
-  update_work_info: "更新作品",
-};
-
 const CHAT_MARKDOWN_PLUGINS = { code, cjk };
-
-function toolLabel(toolName: string): string {
-  return TOOL_LABELS[toolName] ?? toolName;
-}
 
 function referenceTone(type: ChatReference["type"]): string {
   if (type === "setting") return "border-border bg-muted text-foreground";
@@ -246,10 +241,16 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const workspaceChatRef = usePanelRef();
   const workspaceLayoutReadyRef = useRef(false);
   const bootstrapStartedRef = useRef<string | null>(null);
+  const draftContentRef = useRef("");
+  const pendingAddedWordsRef = useRef(0);
   const [work, setWork] = useState<Work | null>(null);
+  const [volumes, setVolumes] = useState<Volume[]>([]);
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [characters, setCharacters] = useState<NamedContent[]>([]);
   const [settings, setSettings] = useState<NamedContent[]>([]);
+  const [inspirationNotes, setInspirationNotes] = useState<InspirationNote[]>([]);
+  const [writingGoal, setWritingGoal] = useState<WritingGoal>(DEFAULT_WRITING_GOAL);
+  const [dailyWordProgress, setDailyWordProgress] = useState<DailyWordProgress>(DEFAULT_DAILY_PROGRESS);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("chapters");
   const [activeChapterId, setActiveChapterId] = useState("");
   const activeChapterIdRef = useRef("");
@@ -298,6 +299,9 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const [characterDeleteConfirm, setCharacterDeleteConfirm] = useState(false);
   const [copyNotice, setCopyNotice] = useState("");
   const [chapterDeleteOpen, setChapterDeleteOpen] = useState(false);
+  const [volumeCreateOpen, setVolumeCreateOpen] = useState(false);
+  const [volumeDraft, setVolumeDraft] = useState("");
+  const [volumeStatus, setVolumeStatus] = useState<"ready" | "saving" | "error">("ready");
 
   const [settingSearch, setSettingSearch] = useState("");
   const [settingType, setSettingType] = useState("all");
@@ -308,8 +312,17 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const [settingStatus, setSettingStatus] = useState<SettingStatus>("ready");
   const [settingError, setSettingError] = useState("");
   const [settingDeleteConfirm, setSettingDeleteConfirm] = useState(false);
+  const [noteMode, setNoteMode] = useState<InspirationNoteMode>("idle");
+  const [activeNoteId, setActiveNoteId] = useState("");
+  const [noteDraft, setNoteDraft] = useState<InspirationNoteDraft>({ title: "", content: "", category: "灵感" });
+  const [noteStatus, setNoteStatus] = useState<"ready" | "saving" | "error">("ready");
+  const [noteError, setNoteError] = useState("");
+  const [goalEditOpen, setGoalEditOpen] = useState(false);
+  const [goalDraft, setGoalDraft] = useState({ targetWords: "2000" });
+  const [goalStatus, setGoalStatus] = useState<"ready" | "saving" | "error">("ready");
 
   const [accountOpen, setAccountOpen] = useState(false);
+  const [nicknameEditOpen, setNicknameEditOpen] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [nicknameDraft, setNicknameDraft] = useState("");
   const [accountStatus, setAccountStatus] = useState<"idle" | "loading" | "saving" | "error">("idle");
@@ -317,12 +330,10 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const [workEditOpen, setWorkEditOpen] = useState(false);
   const [workDraft, setWorkDraft] = useState({ title: "", shortIntro: "", synopsis: "", backgroundRules: "", focusRequirements: "", forbiddenRequirements: "", tags: "" });
   const [workSaveStatus, setWorkSaveStatus] = useState<"idle" | "saving" | "error">("idle");
-  const [billingOpen, setBillingOpen] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [billingProducts, setBillingProducts] = useState<BillingProducts>({ plans: [], creditPacks: [] });
   const [billingOrder, setBillingOrder] = useState<BillingOrder | null>(null);
   const [billingStatus, setBillingStatus] = useState<"idle" | "loading" | "creating" | "paid" | "error">("idle");
-  const [showPointsDetail, setShowPointsDetail] = useState(false);
   const [workspaceDefaultLayout, setWorkspaceDefaultLayout] = useState<Layout | undefined>(() => readWorkspaceLayout(bookId));
   const [workspaceLayoutLoaded, setWorkspaceLayoutLoaded] = useState(false);
   const [editorSettingsOpen, setEditorSettingsOpen] = useState(false);
@@ -346,7 +357,8 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   }
 
   const count = useMemo(() => wordCount(content), [content]);
-  const todayCount = useMemo(() => chapters.reduce((sum, chapter) => sum + wordCount(chapter.content), 0), [chapters]);
+  const totalWordCount = useMemo(() => chapters.reduce((sum, chapter) => sum + wordCount(chapter.content), 0), [chapters]);
+  const todayCount = dailyWordProgress.wordsAdded;
   const statusMeta = formatStatus(status);
   const StatusIcon = statusMeta.icon;
   const activeSession = sessions.find((session) => session.id === activeSessionId);
@@ -411,7 +423,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   }, [chapters, characters]);
 
   const moduleMeta = {
-    chapters: { title: "章节目录", count: `${chapters.length} 章 · 共 ${todayCount} 字` },
+    chapters: { title: "章节目录", count: `${chapters.length} 章 · 共 ${totalWordCount} 字` },
     characters: { title: "角色管理", count: `${characters.length} 个角色` },
     settings: { title: "设定资料", count: `${settings.length} 条设定` }
   }[activeTab];
@@ -427,11 +439,23 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     setTitle(chapter?.title ?? "");
     setSummary(chapter?.summary ?? "");
     setSummaryDraft(chapter?.summary ?? "");
-    setContent(chapter?.content ?? "");
+    const nextContent = chapter?.content ?? "";
+    setContent(nextContent);
+    draftContentRef.current = nextContent;
+    pendingAddedWordsRef.current = 0;
     setSuggestions([]);
     setActiveSuggestionIndex(null);
     setOverlay(false);
     setAnalysisNotice("");
+  }, []);
+
+  const recordContentDraft = useCallback((value: string) => {
+    const previousCount = wordCount(draftContentRef.current);
+    const nextCount = wordCount(value);
+    if (nextCount > previousCount) {
+      pendingAddedWordsRef.current += nextCount - previousCount;
+    }
+    draftContentRef.current = value;
   }, []);
 
   const loadMessages = useCallback(
@@ -529,10 +553,17 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       try {
         const bootstrap = await client.getWorkspaceBootstrap(bookId);
         setWork(bootstrap.work);
+        setVolumes(bootstrap.volumes);
         setCharacters(bootstrap.characters);
         setActiveCharacterId(bootstrap.characters[0]?.id ?? "");
         setSettings(bootstrap.settings);
         setActiveSettingId(bootstrap.settings[0]?.id ?? "");
+        setInspirationNotes(bootstrap.inspirationNotes);
+        setWritingGoal(bootstrap.writingGoal);
+        setDailyWordProgress(bootstrap.dailyWordProgress);
+        setGoalDraft({
+          targetWords: String(bootstrap.writingGoal.targetWords)
+        });
         setProfile(bootstrap.profile);
         setNicknameDraft(bootstrap.profile.user.nickname);
         const loadedChapters = bootstrap.chapters;
@@ -566,12 +597,16 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const saveCurrentChapter = useCallback(
     async (overrides: Partial<Pick<Chapter, "title" | "summary" | "content">> = {}) => {
       if (!activeChapter) return null;
+      if (overrides.content !== undefined) {
+        recordContentDraft(overrides.content);
+      }
       const nextChapter: Chapter = {
         ...activeChapter,
         title: (overrides.title ?? title).trim() || "未命名章节",
         summary: overrides.summary ?? summary,
         content: overrides.content ?? content
       };
+      const addedWords = pendingAddedWordsRef.current;
       setStatus("saving");
       setChapters((items) => items.map((chapter) => (chapter.id === nextChapter.id ? nextChapter : chapter)));
       if (nextChapter.id.startsWith("local-")) {
@@ -579,18 +614,30 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
           title: nextChapter.title,
           summary: nextChapter.summary,
           content: nextChapter.content,
-          order: nextChapter.order
+          order: nextChapter.order,
+          volumeId: nextChapter.volumeId,
+          wordsAdded: addedWords
         });
         setChapters((items) => items.map((chapter) => (chapter.id === nextChapter.id ? created : chapter)));
         setActiveChapterId(created.id);
         setTitle(created.title);
+        if (addedWords) {
+          setDailyWordProgress((value) => ({ ...value, wordsAdded: value.wordsAdded + addedWords }));
+        }
+        pendingAddedWordsRef.current = 0;
+        draftContentRef.current = created.content;
         setStatus("saved");
         return created;
       }
       try {
-        const savedChapter = await client.updateChapter(bookId, nextChapter);
+        const savedChapter = await client.updateChapter(bookId, nextChapter, addedWords);
         setChapters((items) => items.map((chapter) => (chapter.id === savedChapter.id ? savedChapter : chapter)));
         setTitle(savedChapter.title);
+        if (addedWords) {
+          setDailyWordProgress((value) => ({ ...value, wordsAdded: value.wordsAdded + addedWords }));
+        }
+        pendingAddedWordsRef.current = 0;
+        draftContentRef.current = savedChapter.content;
         setStatus("saved");
         return savedChapter;
       } catch (error) {
@@ -598,7 +645,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
         throw error;
       }
     },
-    [activeChapter, bookId, client, content, summary, title]
+    [activeChapter, bookId, client, content, recordContentDraft, summary, title]
   );
 
   useEffect(() => {
@@ -650,6 +697,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   }
 
   function updateContent(value: string) {
+    recordContentDraft(value);
     setContent(value);
     if (suggestions.length || overlay || analysisNotice) {
       clearAnalysis();
@@ -670,17 +718,19 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     syncDraft(next);
   }
 
-  async function createChapter() {
+  async function createChapter(volumeId = activeChapter?.volumeId ?? volumes[0]?.id) {
     try {
       await saveCurrentChapter();
     } catch {
       setAnalysisNotice("当前章节保存失败，暂未新建章节");
       return;
     }
+    const volumeChapterCount = chapters.filter((chapter) => chapter.volumeId === volumeId).length;
     const draft: Chapter = {
       id: `local-${Date.now()}`,
-      order: chapters.length + 1,
-      title: `第 ${chapters.length + 1} 章 未命名章节`,
+      volumeId,
+      order: volumeChapterCount + 1,
+      title: `第 ${volumeChapterCount + 1} 章 未命名章节`,
       summary: "",
       content: ""
     };
@@ -690,7 +740,9 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
         title: draft.title,
         summary: draft.summary,
         content: draft.content,
-        order: draft.order
+        order: draft.order,
+        volumeId: draft.volumeId,
+        wordsAdded: 0
       });
       setChapters((items) => [...items, created]);
       setActiveChapterId(created.id);
@@ -1270,16 +1322,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     }
   }
 
-  async function copyCharacterText(label: string, value: string) {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopyNotice(`已复制${label}`);
-      window.setTimeout(() => setCopyNotice(""), 1600);
-    } catch {
-      setCopyNotice("复制失败");
-    }
-  }
-
   async function saveWorkEdit() {
     if (!work) return;
     setWorkSaveStatus("saving");
@@ -1383,8 +1425,123 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     }
   }
 
+  function openCreateVolume() {
+    setVolumeDraft(`第 ${volumes.length + 1} 卷`);
+    setVolumeStatus("ready");
+    setVolumeCreateOpen(true);
+  }
+
+  async function saveVolume() {
+    setStatus("saving");
+    setVolumeStatus("saving");
+    try {
+      const created = await client.createVolume(bookId, volumeDraft.trim() || `第 ${volumes.length + 1} 卷`);
+      setVolumes((items) => [...items, created]);
+      setVolumeCreateOpen(false);
+      setVolumeStatus("ready");
+      setStatus("saved");
+    } catch {
+      setVolumeStatus("error");
+      setStatus("error");
+      setAnalysisNotice("新建卷失败，请稍后重试");
+    }
+  }
+
+  function startCreateNote() {
+    setNoteDraft({ title: "", content: "", category: "灵感" });
+    setActiveNoteId("");
+    setNoteMode("create");
+    setNoteStatus("ready");
+    setNoteError("");
+  }
+
+  function startEditNote(note: InspirationNote) {
+    setNoteDraft({ title: note.title, content: note.content, category: note.category });
+    setActiveNoteId(note.id);
+    setNoteMode("edit");
+    setNoteStatus("ready");
+    setNoteError("");
+  }
+
+  async function saveNote() {
+    const title = noteDraft.title.trim();
+    const content = noteDraft.content.trim();
+    const category = noteDraft.category.trim() || "灵感";
+    if (!title) {
+      setNoteStatus("error");
+      setNoteError("便签标题不能为空");
+      return;
+    }
+
+    setNoteStatus("saving");
+    setNoteError("");
+    try {
+      if (noteMode === "create") {
+        const created = await client.createInspirationNote(bookId, { title, content, category });
+        setInspirationNotes((items) => [created, ...items]);
+      } else if (activeNoteId) {
+        const updated = await client.updateInspirationNote(bookId, { id: activeNoteId, title, content, category });
+        setInspirationNotes((items) => items.map((item) => (item.id === updated.id ? updated : item)));
+      }
+      setNoteMode("idle");
+      setNoteStatus("ready");
+    } catch {
+      setNoteStatus("error");
+      setNoteError("保存便签失败，请稍后重试");
+    }
+  }
+
+  async function deleteNote(note: InspirationNote) {
+    try {
+      await client.deleteInspirationNote(bookId, note.id);
+      setInspirationNotes((items) => items.filter((item) => item.id !== note.id));
+    } catch {
+      setCopyNotice("删除便签失败");
+      window.setTimeout(() => setCopyNotice(""), 1600);
+    }
+  }
+
+  function openGoalEdit() {
+    setGoalDraft({ targetWords: String(writingGoal.targetWords || 2000) });
+    setGoalStatus("ready");
+    setGoalEditOpen(true);
+  }
+
+  async function saveGoal() {
+    const targetWords = Number(goalDraft.targetWords);
+    if (!Number.isFinite(targetWords) || targetWords < 1) {
+      setGoalStatus("error");
+      return;
+    }
+    setGoalStatus("saving");
+    try {
+      const result = await client.updateWritingGoal(bookId, {
+        targetWords: Math.round(targetWords)
+      });
+      setWritingGoal(result.goal);
+      setDailyWordProgress(result.dailyWordProgress);
+      setGoalEditOpen(false);
+      setGoalStatus("ready");
+    } catch {
+      setGoalStatus("error");
+    }
+  }
+
+  async function loadBillingProducts() {
+    setBillingStatus("loading");
+    try {
+      setBillingProducts(await client.listBillingProducts());
+      setBillingStatus("idle");
+    } catch {
+      setBillingStatus("error");
+    }
+  }
+
   async function openAccount() {
     setAccountOpen(true);
+    if (!billingProducts.plans.length && !billingProducts.creditPacks.length && billingStatus !== "loading") {
+      void loadBillingProducts();
+    }
     if (profile) return;
     setAccountStatus("loading");
     try {
@@ -1403,25 +1560,15 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     try {
       const user = await client.updateMe(nicknameDraft.trim());
       setProfile((value) => (value ? { ...value, user } : value));
+      setNicknameEditOpen(false);
       setAccountStatus("idle");
     } catch {
       setAccountStatus("error");
     }
   }
 
-  async function openBilling() {
-    setBillingOpen(true);
-    setBillingStatus("loading");
-    try {
-      setBillingProducts(await client.listBillingProducts());
-      setBillingStatus("idle");
-    } catch {
-      setBillingStatus("error");
-    }
-  }
-
   async function createOrder(productType: "plan" | "credit_pack", productId: string) {
-    setBillingOpen(false);
+    setAccountOpen(false);
     setPaymentOpen(true);
     setBillingStatus("creating");
     try {
@@ -1468,208 +1615,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     });
   }
 
-  function renderDiffResult(resultStr: string) {
-    let oldContent = "";
-    let newContent = "";
-    try {
-      const parsed = JSON.parse(resultStr);
-      oldContent = parsed.old_content_preview ?? parsed.old_content ?? "";
-      newContent = parsed.new_content_preview ?? parsed.new_content ?? "";
-    } catch {
-      return <p className="whitespace-pre-wrap">{resultStr}</p>;
-    }
-    const changes: Change[] = diffLines(oldContent, newContent);
-    return (
-      <div className="max-h-60 overflow-auto font-mono text-[11px] leading-relaxed">
-        {changes.map((change, i) => {
-          const lines = change.value.split("\n").filter((line, idx, arr) => idx < arr.length - 1 || line !== "");
-          return lines.map((line, j) => {
-            const key = `${i}-${j}`;
-            if (change.added) {
-              return <div key={key} className="bg-green-100 text-green-800 px-2">+ {line}</div>;
-            }
-            if (change.removed) {
-              return <div key={key} className="bg-red-100 text-red-800 px-2">- {line}</div>;
-            }
-            return <div key={key} className="px-2 text-gray-500">  {line}</div>;
-          });
-        })}
-      </div>
-    );
-  }
-
-  function renderCharacterList(resultStr: string) {
-    let items: Array<{ id: string; name: string; summary: string }> = [];
-    try {
-      const parsed = JSON.parse(resultStr);
-      items = Array.isArray(parsed) ? parsed : parsed.characters ?? [];
-    } catch {
-      return <p className="whitespace-pre-wrap">{resultStr}</p>;
-    }
-    if (!items.length) {
-      return <p className="text-blue-500 italic">暂无角色</p>;
-    }
-    return (
-      <div className="space-y-1">
-        {items.map((c) => (
-          <div key={c.id} className="rounded-md bg-white/60 px-2.5 py-1.5">
-            <span className="font-medium text-gray-800">{c.name}</span>
-            {c.summary ? <span className="ml-1.5 text-gray-400">— {c.summary.length > 40 ? `${c.summary.slice(0, 40)}…` : c.summary}</span> : null}
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  function renderCharacterDetail(resultStr: string) {
-    let c: Record<string, string> = {};
-    try { c = JSON.parse(resultStr); } catch {
-      return <p className="whitespace-pre-wrap">{resultStr}</p>;
-    }
-    if (c.error) return <p className="text-red-500">{c.error}</p>;
-    return (
-      <div className="space-y-2 rounded-md bg-white/60 p-3">
-        <div className="flex items-center gap-2">
-          <span className="text-base font-semibold text-gray-800">{c.name}</span>
-        </div>
-        {c.summary ? (
-          <div>
-            <span className="text-[10px] font-medium uppercase tracking-wider text-gray-400">简介</span>
-            <p className="mt-0.5 text-gray-600">{c.summary}</p>
-          </div>
-        ) : null}
-        {c.detail ? (
-          <div>
-            <span className="text-[10px] font-medium uppercase tracking-wider text-gray-400">详细描述</span>
-            <p className="mt-0.5 max-h-40 overflow-auto whitespace-pre-wrap text-gray-600 text-[11px] leading-relaxed">{c.detail}</p>
-          </div>
-        ) : null}
-      </div>
-    );
-  }
-
-  function renderChapterList(resultStr: string) {
-    let items: Array<{ id: string; order_index?: number; title: string; summary?: string }> = [];
-    try {
-      const parsed = JSON.parse(resultStr);
-      items = Array.isArray(parsed) ? parsed : parsed.chapters ?? [];
-    } catch {
-      return <p className="whitespace-pre-wrap">{resultStr}</p>;
-    }
-    if (!items.length) {
-      return <p className="text-muted-foreground italic">暂无章节</p>;
-    }
-    return (
-      <div className="space-y-1">
-        {items.map((ch) => (
-          <div key={ch.id} className="flex items-start gap-2 rounded-md bg-white/60 px-2.5 py-1.5">
-            <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded bg-primary/10 text-[10px] font-bold text-primary">
-              {ch.order_index ?? "?"}
-            </span>
-            <div className="min-w-0">
-              <span className="font-medium text-gray-800">{ch.title}</span>
-              {ch.summary ? <span className="ml-1.5 text-gray-400">— {ch.summary.length > 50 ? `${ch.summary.slice(0, 50)}…` : ch.summary}</span> : null}
-            </div>
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  function renderWorkInfo(resultStr: string) {
-    let w: Record<string, unknown> = {};
-    try { w = JSON.parse(resultStr); } catch {
-      return <p className="whitespace-pre-wrap">{resultStr}</p>;
-    }
-    if (w.error) return <p className="text-red-500">{String(w.error)}</p>;
-    return (
-      <div className="space-y-2 rounded-md bg-white/60 p-3">
-        <span className="text-base font-semibold text-gray-800">{String(w.title ?? "")}</span>
-        {w.short_intro ? (
-          <div>
-            <span className="text-[10px] font-medium uppercase tracking-wider text-gray-400">简介</span>
-            <p className="mt-0.5 text-gray-600">{String(w.short_intro)}</p>
-          </div>
-        ) : null}
-        {w.synopsis ? (
-          <div>
-            <span className="text-[10px] font-medium uppercase tracking-wider text-gray-400">大纲</span>
-            <p className="mt-0.5 max-h-40 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-gray-600">{String(w.synopsis)}</p>
-          </div>
-        ) : null}
-        {Array.isArray(w.genre_tags) && w.genre_tags.length > 0 ? (
-          <div className="flex flex-wrap gap-1">
-            {(w.genre_tags as string[]).map((tag: string) => (
-              <span key={tag} className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">{tag}</span>
-            ))}
-          </div>
-        ) : null}
-      </div>
-    );
-  }
-
-  function renderCharacterUpsert(resultStr: string) {
-    let c: Record<string, string> = {};
-    try { c = JSON.parse(resultStr); } catch {
-      return <p className="whitespace-pre-wrap">{resultStr}</p>;
-    }
-    return (
-      <div className="flex items-start gap-2 rounded-md bg-white/60 p-2.5">
-        <span className="rounded bg-blue-100 px-1.5 py-0.5 font-mono text-[10px] text-blue-500">{c.id?.slice(0, 8)}</span>
-        <div className="min-w-0">
-          <p className="font-medium text-gray-800">{c.name}</p>
-          {c.summary ? <p className="text-gray-400 text-[11px]">{c.summary.length > 60 ? `${c.summary.slice(0, 60)}…` : c.summary}</p> : null}
-        </div>
-      </div>
-    );
-  }
-
-  function renderCharacterDelete(resultStr: string) {
-    let d: Record<string, string> = {};
-    try { d = JSON.parse(resultStr); } catch {
-      return <p className="whitespace-pre-wrap">{resultStr}</p>;
-    }
-    return (
-      <div className="flex items-center gap-2 rounded-md bg-red-50 px-3 py-2 text-red-600">
-        <span className="font-medium">已删除角色「{d.name}」</span>
-        <span className="font-mono text-[10px] text-red-400">{d.character_id?.slice(0, 8)}</span>
-      </div>
-    );
-  }
-
-  function renderToolResult(block: ToolCallBlock) {
-    if (!block.result) return null;
-    const tool = block.tool;
-    if (tool === "update_chapter_content") {
-      return <div className="px-3 py-2">{renderDiffResult(block.result)}</div>;
-    }
-    if (tool === "list_characters") {
-      return <div className="px-3 py-2">{renderCharacterList(block.result)}</div>;
-    }
-    if (tool === "get_character") {
-      return <div className="px-3 py-2">{renderCharacterDetail(block.result)}</div>;
-    }
-    if (tool === "create_or_update_character") {
-      return <div className="px-3 py-2">{renderCharacterUpsert(block.result)}</div>;
-    }
-    if (tool === "delete_character") {
-      return <div className="px-3 py-2">{renderCharacterDelete(block.result)}</div>;
-    }
-    if (tool === "list_chapters") {
-      return <div className="px-3 py-2">{renderChapterList(block.result)}</div>;
-    }
-    if (tool === "get_work_info") {
-      return <div className="px-3 py-2">{renderWorkInfo(block.result)}</div>;
-    }
-    return (
-      <div className="px-3 py-2 text-muted-foreground">
-        <p className="line-clamp-6 whitespace-pre-wrap">
-          {block.result.length > 500 ? `${block.result.slice(0, 500)}...` : block.result}
-        </p>
-      </div>
-    );
-  }
-
   function renderMessageContent(message: ChatMessage) {
     const isStreaming = message.id === streamingMessageId;
 
@@ -1689,39 +1634,12 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
             const isStarted = block.status === "started";
             const isExpanded = expandedTools.has(toolKey) || isStarted;
             return (
-              <div key={`tool-${index}`} className="rounded-md border border-border bg-muted/40 text-xs">
-                <button
-                  type="button"
-                  className="flex w-full cursor-pointer select-none items-center gap-2 rounded-md px-3 py-2 text-left transition-colors hover:bg-accent/50"
-                  onClick={() => toggleToolExpand(toolKey)}
-                >
-                  {isStarted ? (
-                    <Loader2 size={14} className="animate-spin text-primary" />
-                  ) : (
-                    <Check size={14} className="text-green-600" />
-                  )}
-                  <span className="font-semibold text-primary">{toolLabel(block.tool)}</span>
-                  {block.display && block.display !== toolLabel(block.tool) ? (
-                    <span className="truncate text-muted-foreground">{block.display}</span>
-                  ) : null}
-                  <ChevronDown
-                    size={14}
-                    className={cn(
-                      "ml-auto shrink-0 text-muted-foreground transition-transform duration-300",
-                      isExpanded && "rotate-180"
-                    )}
-                  />
-                </button>
-                <div className={cn("tool-collapse", isExpanded && "expanded")}>
-                  <div>
-                    <div className="border-t border-border px-3 py-2 pl-5">
-                      <div className="border-l-2 border-primary pl-3">
-                        {renderToolResult(block)}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <WorkspaceToolCall
+                key={`tool-${index}`}
+                block={block}
+                expanded={isExpanded}
+                onToggle={() => toggleToolExpand(toolKey)}
+              />
             );
           })}
         </div>
@@ -1759,7 +1677,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   }
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-background font-sans text-foreground">
+    <div className="flex h-screen w-screen overflow-hidden bg-white font-sans text-foreground">
       {workspaceLayoutLoaded ? (
       <ResizablePanelGroup
         defaultLayout={workspaceDefaultLayout}
@@ -1797,10 +1715,12 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
             activeTab={activeTab}
             onActiveTabChange={setActiveTab}
             moduleMeta={moduleMeta}
+            volumes={volumes}
             chapters={chapters}
             activeChapterId={activeChapterId}
             onSelectChapter={(chapterId) => void selectChapter(chapterId)}
-            onCreateChapter={() => void createChapter()}
+            onCreateChapter={(volumeId) => void createChapter(volumeId)}
+            onCreateVolume={openCreateVolume}
             isWorkspaceLoading={status === "loading"}
             characterSearch={characterSearch}
             onCharacterSearchChange={setCharacterSearch}
@@ -1819,7 +1739,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
               selectCharacter(item);
               setCharacterDeleteConfirm(true);
             }}
-            onCopyCharacterText={(label, value) => void copyCharacterText(label, value)}
             settingSearch={settingSearch}
             onSettingSearchChange={setSettingSearch}
             settingType={settingType}
@@ -1839,10 +1758,13 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
               selectSetting(item);
               setSettingDeleteConfirm(true);
             }}
-            profile={profile}
-            showPointsDetail={showPointsDetail}
-            onTogglePointsDetail={() => setShowPointsDetail((value) => !value)}
-            onOpenBilling={() => void openBilling()}
+            inspirationNotes={inspirationNotes}
+            writingGoal={writingGoal}
+            dailyWordProgress={dailyWordProgress}
+            onStartCreateNote={startCreateNote}
+            onStartEditNote={startEditNote}
+            onDeleteNote={(item) => void deleteNote(item)}
+            onOpenGoalEdit={openGoalEdit}
             formatUpdatedAt={formatUpdatedAt}
           />
         </ResizablePanel>
@@ -1870,6 +1792,8 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
             analysisNotice={analysisNotice}
             suggestions={suggestions}
             activeSuggestionIndex={activeSuggestionIndex}
+            accountLabel={profile?.user.nickname || "账户中心"}
+            accountSubtitle={profile?.subscription ? "VIP 创作中" : "免费版"}
             styleSettings={{
               fontStack: editorFontStack,
               fontSize: editorSettings.fontSize,
@@ -1881,6 +1805,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
             onOpenSummaryModal={openSummaryModal}
             onDeleteChapter={() => setChapterDeleteOpen(true)}
             onOpenEditorSettings={() => setEditorSettingsOpen(true)}
+            onOpenAccount={() => void openAccount()}
             onAnalyze={() => void analyze()}
             onContentChange={updateContent}
             onActivateSuggestion={(index) => {
@@ -1955,28 +1880,28 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       ) : null}
 
       <Dialog open={summaryModalOpen} onOpenChange={setSummaryModalOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>编辑章节提要</DialogTitle>
-            <DialogDescription>章节提要会作为列表预览和 AI 上下文的一部分。</DialogDescription>
+        <DialogContent className="overflow-hidden p-0 sm:max-w-lg [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:bg-white">
+          <DialogHeader className="border-b border-neutral-200 bg-white px-6 py-5">
+            <DialogTitle className="text-2xl font-black tracking-tight">编辑章节提要</DialogTitle>
+            <DialogDescription className="text-xs text-neutral-500">章节提要会作为列表预览和 AI 上下文的一部分。</DialogDescription>
           </DialogHeader>
-          <FieldGroup>
+          <FieldGroup className="bg-white p-6 outline outline-1 -outline-offset-8 outline-white">
             <Field>
               <FieldLabel>章节提要</FieldLabel>
               <Textarea
                 aria-label="章节提要"
                 value={summaryDraft}
                 onChange={(event) => setSummaryDraft(event.target.value)}
-                className="h-40 resize-none"
+                className="h-40 resize-none rounded-xl border-neutral-300 bg-white leading-6"
                 placeholder="写下这一章的核心事件、情绪转折或悬念..."
               />
             </Field>
           </FieldGroup>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setSummaryModalOpen(false)}>
+          <DialogFooter className="h-[72px] border-t border-neutral-200 bg-white p-0 sm:justify-center">
+            <Button variant="outline" className="rounded-xl border-neutral-300 bg-white" onClick={() => setSummaryModalOpen(false)}>
               取消
             </Button>
-            <Button onClick={() => void saveSummary()}>
+            <Button className="rounded-xl bg-neutral-950 text-white hover:bg-neutral-800" onClick={() => void saveSummary()}>
               <Check data-icon="inline-start" />
               保存更改
             </Button>
@@ -1985,16 +1910,16 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       </Dialog>
 
       <AlertDialog open={chapterDeleteOpen} onOpenChange={setChapterDeleteOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>确认删除章节？</AlertDialogTitle>
-            <AlertDialogDescription>
+        <AlertDialogContent className="overflow-hidden rounded-2xl border-neutral-200 bg-white p-0 outline outline-1 -outline-offset-8 outline-white sm:max-w-sm">
+          <AlertDialogHeader className="border-b border-neutral-200 bg-white px-6 py-5 text-left">
+            <AlertDialogTitle className="text-2xl font-black tracking-tight">确认删除章节？</AlertDialogTitle>
+            <AlertDialogDescription className="text-sm leading-6 text-neutral-500">
               将删除「{activeChapter?.title ?? "当前章节"}」的标题、正文和提要。删除后会自动切换到相邻章节。
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void deleteActiveChapter()}>确认删除</AlertDialogAction>
+          <AlertDialogFooter className="m-0 h-[72px] justify-center rounded-none border-t border-neutral-200 bg-white p-0">
+            <AlertDialogCancel className="rounded-xl border-neutral-300 bg-white">取消</AlertDialogCancel>
+            <AlertDialogAction className="rounded-xl bg-red-700 text-white hover:bg-red-800" onClick={() => void deleteActiveChapter()}>确认删除</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -2005,66 +1930,66 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
           if (!open) setCharacterMode("detail");
         }}
       >
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
+        <DialogContent className="w-[calc(100vw-2rem)] overflow-hidden p-0 sm:max-w-3xl lg:max-w-4xl [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:z-20 [&_[data-slot=dialog-close]]:bg-white">
+          <DialogHeader className="sr-only">
             <DialogTitle>{characterMode === "create" ? "新建角色" : "编辑角色"}</DialogTitle>
             <DialogDescription>维护角色名称、简介和可供 AI 引用的详细设定。</DialogDescription>
           </DialogHeader>
-          <FieldGroup>
-            <Field>
-              <FieldLabel>角色名称</FieldLabel>
-              <Input
-                aria-label="角色名称"
-                value={characterDraft.name}
-                onChange={(event) => setCharacterDraft((value) => ({ ...value, name: event.target.value }))}
-                placeholder="角色名称"
-              />
-            </Field>
-            <Field>
-              <FieldLabel>角色简介</FieldLabel>
-              <Textarea
-                aria-label="角色简介"
-                value={characterDraft.summary}
-                onChange={(event) => setCharacterDraft((value) => ({ ...value, summary: event.target.value }))}
-                className="min-h-24 resize-none"
-                placeholder="角色简介"
-              />
-            </Field>
-            <Field>
-              <FieldLabel>角色详情</FieldLabel>
-              <Textarea
-                aria-label="角色详情"
-                value={characterDraft.detail}
-                onChange={(event) => setCharacterDraft((value) => ({ ...value, detail: event.target.value }))}
-                className="min-h-32 resize-none"
-                placeholder="角色详情"
-              />
-            </Field>
-            {characterStatus === "error" && characterError ? <FieldError>{characterError}</FieldError> : null}
-          </FieldGroup>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCharacterMode("detail")}>
-              取消
-            </Button>
-            <Button onClick={() => void saveCharacter()} disabled={characterStatus === "saving"}>
-              {characterStatus === "saving" ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Save data-icon="inline-start" />}
-              保存角色
-            </Button>
-          </DialogFooter>
+          <div className="bg-white text-neutral-950">
+            <div className="border-b border-neutral-200 bg-white px-6 py-5">
+              <div className="flex items-center gap-3">
+                <span className="grid size-10 place-items-center rounded-full border border-neutral-300 bg-white text-neutral-950"><UserRound size={18} /></span>
+                <div>
+                  <h2 className="text-xl font-black">{characterMode === "create" ? "新建角色" : "编辑角色"}</h2>
+                  <p className="mt-1 text-xs text-neutral-500">角色资料会进入 AI 可引用的作品上下文。</p>
+                </div>
+              </div>
+            </div>
+            <div className="grid gap-5 p-6 sm:grid-cols-[220px_minmax(0,1fr)]">
+              <aside className="rounded-2xl border border-neutral-950 bg-neutral-950 p-5 text-white">
+                <h3 className="line-clamp-2 text-2xl font-black tracking-tight">{characterDraft.name || "未命名角色"}</h3>
+                <p className="mt-3 line-clamp-5 text-xs leading-6 text-white/60">{characterDraft.summary || "用一句话写清角色身份、气质或当前处境。"}</p>
+              </aside>
+              <FieldGroup>
+                <Field>
+                  <FieldLabel>角色名称</FieldLabel>
+                  <Input aria-label="角色名称" value={characterDraft.name} onChange={(event) => setCharacterDraft((value) => ({ ...value, name: event.target.value }))} className="h-11 rounded-xl border-neutral-300 bg-white font-semibold" placeholder="例如：林雾" />
+                </Field>
+                <Field>
+                  <FieldLabel>角色简介</FieldLabel>
+                  <Textarea aria-label="角色简介" value={characterDraft.summary} onChange={(event) => setCharacterDraft((value) => ({ ...value, summary: event.target.value }))} className="min-h-24 resize-none rounded-xl border-neutral-300 bg-white leading-6" placeholder="一句话说明身份、气质或当前处境。" />
+                </Field>
+                <Field>
+                  <FieldLabel>角色详情</FieldLabel>
+                  <Textarea aria-label="角色详情" value={characterDraft.detail} onChange={(event) => setCharacterDraft((value) => ({ ...value, detail: event.target.value }))} className="min-h-40 resize-none rounded-xl border-neutral-300 bg-white leading-6" placeholder="经历、关系、能力、秘密、人物弧光。" />
+                </Field>
+                {characterStatus === "error" && characterError ? <FieldError>{characterError}</FieldError> : null}
+              </FieldGroup>
+            </div>
+            <DialogFooter className="h-[72px] border-t border-neutral-200 bg-white p-0 sm:justify-center">
+              <Button variant="outline" className="rounded-xl border-neutral-300 bg-white" onClick={() => setCharacterMode("detail")}>
+                取消
+              </Button>
+              <Button className="rounded-xl bg-neutral-950 text-white hover:bg-neutral-800" onClick={() => void saveCharacter()} disabled={characterStatus === "saving"}>
+                {characterStatus === "saving" ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Save data-icon="inline-start" />}
+                保存角色
+              </Button>
+            </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
 
       <AlertDialog open={characterDeleteConfirm} onOpenChange={setCharacterDeleteConfirm}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>确认删除角色？</AlertDialogTitle>
-            <AlertDialogDescription>
+        <AlertDialogContent className="overflow-hidden rounded-2xl border-neutral-200 bg-white p-0 outline outline-1 -outline-offset-8 outline-white sm:max-w-sm">
+          <AlertDialogHeader className="border-b border-neutral-200 bg-white px-6 py-5 text-left">
+            <AlertDialogTitle className="text-2xl font-black tracking-tight">确认删除角色？</AlertDialogTitle>
+            <AlertDialogDescription className="text-sm leading-6 text-neutral-500">
               将删除角色「{activeCharacter?.name ?? "选中角色"}」的所有信息。此操作不可撤销。
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void deleteCharacterConfirm()}>确认删除</AlertDialogAction>
+          <AlertDialogFooter className="m-0 h-[72px] justify-center rounded-none border-t border-neutral-200 bg-white p-0">
+            <AlertDialogCancel className="rounded-xl border-neutral-300 bg-white">取消</AlertDialogCancel>
+            <AlertDialogAction className="rounded-xl bg-red-700 text-white hover:bg-red-800" onClick={() => void deleteCharacterConfirm()}>确认删除</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -2075,136 +2000,431 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
           if (!open) setSettingMode("detail");
         }}
       >
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
+        <DialogContent className="w-[calc(100vw-2rem)] overflow-hidden p-0 sm:max-w-3xl lg:max-w-4xl [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:z-20 [&_[data-slot=dialog-close]]:bg-white">
+          <DialogHeader className="sr-only">
             <DialogTitle>{settingMode === "create" ? "新建设定" : "编辑设定"}</DialogTitle>
             <DialogDescription>维护设定类型、简介和可供 AI 引用的详细内容。</DialogDescription>
           </DialogHeader>
-          <FieldGroup>
+          <div className="bg-white text-neutral-950">
+            <div className="border-b border-neutral-200 bg-white px-6 py-5">
+              <div className="flex items-center gap-3">
+                <span className="grid size-10 place-items-center rounded-full border border-neutral-300 bg-white text-neutral-950"><Database size={18} /></span>
+                <div>
+                  <h2 className="text-xl font-black">{settingMode === "create" ? "新建设定" : "编辑设定"}</h2>
+                  <p className="mt-1 text-xs text-neutral-500">地点、规则、组织和物品都可以作为设定保存。</p>
+                </div>
+              </div>
+            </div>
+            <div className="grid gap-5 p-6 sm:grid-cols-[220px_minmax(0,1fr)]">
+              <aside className="rounded-2xl border border-neutral-950 bg-white p-5">
+                <h3 className="line-clamp-2 text-2xl font-black tracking-tight">{settingDraft.name || "未命名设定"}</h3>
+                <p className="mt-3 line-clamp-5 text-xs leading-6 text-neutral-500">{settingDraft.summary || "用一句话说明这个设定的作用。"}</p>
+              </aside>
+              <FieldGroup>
+                <div className="grid gap-4 sm:grid-cols-[180px_minmax(0,1fr)]">
+                  <Field>
+                    <FieldLabel>设定类型</FieldLabel>
+                    <Select value={settingDraft.type} onValueChange={(value) => setSettingDraft((draft) => ({ ...draft, type: value }))}>
+                      <SelectTrigger className="h-11 w-full rounded-xl border-neutral-300 bg-white" aria-label="设定类型"><SelectValue /></SelectTrigger>
+                      <SelectContent><SelectGroup>{settingTypes.filter((item) => item.value !== "all").map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectGroup></SelectContent>
+                    </Select>
+                  </Field>
+                  <Field>
+                    <FieldLabel>设定名称</FieldLabel>
+                    <Input aria-label="设定名称" value={settingDraft.name} onChange={(event) => setSettingDraft((value) => ({ ...value, name: event.target.value }))} className="h-11 rounded-xl border-neutral-300 bg-white font-semibold" placeholder="例如：雾港学院" />
+                  </Field>
+                </div>
+                <Field>
+                  <FieldLabel>设定简介</FieldLabel>
+                  <Textarea aria-label="设定简介" value={settingDraft.summary} onChange={(event) => setSettingDraft((value) => ({ ...value, summary: event.target.value }))} className="min-h-24 resize-none rounded-xl border-neutral-300 bg-white leading-6" placeholder="一句话说明这个设定的作用。" />
+                </Field>
+                <Field>
+                  <FieldLabel>设定详情</FieldLabel>
+                  <Textarea aria-label="设定详情" className="min-h-40 resize-none rounded-xl border-neutral-300 bg-white leading-6" value={settingDraft.detail} onChange={(event) => setSettingDraft((value) => ({ ...value, detail: event.target.value }))} placeholder="规则、限制、历史、和角色或章节的关联。" />
+                </Field>
+                {settingStatus === "error" && settingError ? <FieldError>{settingError}</FieldError> : null}
+              </FieldGroup>
+            </div>
+            <DialogFooter className="h-[72px] border-t border-neutral-200 bg-white p-0 sm:justify-center">
+              <Button variant="outline" className="rounded-xl border-neutral-300 bg-white" onClick={() => setSettingMode("detail")}>
+                取消
+              </Button>
+              <Button className="rounded-xl bg-neutral-950 text-white hover:bg-neutral-800" onClick={() => void saveSetting()} disabled={settingStatus === "saving"}>
+                {settingStatus === "saving" ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Save data-icon="inline-start" />}
+                保存设定
+              </Button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={settingDeleteConfirm} onOpenChange={setSettingDeleteConfirm}>
+        <AlertDialogContent className="overflow-hidden rounded-2xl border-neutral-200 bg-white p-0 outline outline-1 -outline-offset-8 outline-white sm:max-w-sm">
+          <AlertDialogHeader className="border-b border-neutral-200 bg-white px-6 py-5 text-left">
+            <AlertDialogTitle className="text-2xl font-black tracking-tight">确认删除设定？</AlertDialogTitle>
+            <AlertDialogDescription className="text-sm leading-6 text-neutral-500">
+              将删除设定「{activeSetting?.name ?? "选中设定"}」的所有信息。此操作不可撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="m-0 h-[72px] justify-center rounded-none border-t border-neutral-200 bg-white p-0">
+            <AlertDialogCancel className="rounded-xl border-neutral-300 bg-white">取消</AlertDialogCancel>
+            <AlertDialogAction className="rounded-xl bg-red-700 text-white hover:bg-red-800" onClick={() => void deleteSettingConfirm()}>确认删除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={volumeCreateOpen} onOpenChange={setVolumeCreateOpen}>
+        <DialogContent className="overflow-hidden p-0 sm:max-w-md [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:bg-white">
+          <DialogHeader className="border-b border-neutral-200 bg-white px-6 py-5">
+            <DialogTitle className="text-2xl font-black tracking-tight">新建卷</DialogTitle>
+            <DialogDescription className="text-xs text-neutral-500">卷会绑定当前作品，新章节可以按卷归档。</DialogDescription>
+          </DialogHeader>
+          <FieldGroup className="p-6">
+            <div className="rounded-2xl border border-neutral-950 bg-white p-4">
+              <h3 className="text-xl font-black">卷目录</h3>
+              <p className="mt-2 text-xs leading-6 text-neutral-500">建议用阶段、地点或主线变化命名。</p>
+            </div>
             <Field>
-              <FieldLabel>设定类型</FieldLabel>
-              <Select value={settingDraft.type} onValueChange={(value) => setSettingDraft((draft) => ({ ...draft, type: value }))}>
-                <SelectTrigger className="w-full" aria-label="设定类型">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    {settingTypes.filter((item) => item.value !== "all").map((item) => (
-                      <SelectItem key={item.value} value={item.value}>
-                        {item.label}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field>
-              <FieldLabel>设定名称</FieldLabel>
+              <FieldLabel>卷名</FieldLabel>
               <Input
-                aria-label="设定名称"
-                value={settingDraft.name}
-                onChange={(event) => setSettingDraft((value) => ({ ...value, name: event.target.value }))}
+                aria-label="卷名"
+                value={volumeDraft}
+                onChange={(event) => setVolumeDraft(event.target.value)}
+                className="h-11 rounded-xl border-neutral-300 bg-white font-semibold"
+                placeholder="例如：第一卷 雾港"
               />
             </Field>
-            <Field>
-              <FieldLabel>设定简介</FieldLabel>
-              <Textarea
-                aria-label="设定简介"
-                value={settingDraft.summary}
-                onChange={(event) => setSettingDraft((value) => ({ ...value, summary: event.target.value }))}
-                className="min-h-24 resize-none"
-              />
-            </Field>
-            <Field>
-              <FieldLabel>设定详情</FieldLabel>
-              <Textarea
-                aria-label="设定详情"
-                className="min-h-32 resize-none"
-                value={settingDraft.detail}
-                onChange={(event) => setSettingDraft((value) => ({ ...value, detail: event.target.value }))}
-              />
-            </Field>
-            {settingStatus === "error" && settingError ? <FieldError>{settingError}</FieldError> : null}
+            {volumeStatus === "error" ? <FieldError>新建卷失败，请稍后重试</FieldError> : null}
           </FieldGroup>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setSettingMode("detail")}>
-              取消
-            </Button>
-            <Button onClick={() => void saveSetting()} disabled={settingStatus === "saving"}>
-              {settingStatus === "saving" ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Save data-icon="inline-start" />}
-              保存设定
+          <DialogFooter className="h-[72px] border-t border-neutral-200 bg-white p-0 sm:justify-center">
+            <Button variant="outline" className="rounded-xl border-neutral-300 bg-white" onClick={() => setVolumeCreateOpen(false)}>取消</Button>
+            <Button className="rounded-xl bg-neutral-950 text-white hover:bg-neutral-800" onClick={() => void saveVolume()} disabled={volumeStatus === "saving"}>
+              {volumeStatus === "saving" ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Save data-icon="inline-start" />}
+              创建卷
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={settingDeleteConfirm} onOpenChange={setSettingDeleteConfirm}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>确认删除设定？</AlertDialogTitle>
-            <AlertDialogDescription>
-              将删除设定「{activeSetting?.name ?? "选中设定"}」的所有信息。此操作不可撤销。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void deleteSettingConfirm()}>确认删除</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <Dialog open={accountOpen} onOpenChange={setAccountOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>账户中心</DialogTitle>
-            <DialogDescription>查看账户状态、积分余额并修改昵称。</DialogDescription>
+      <Dialog
+        open={noteMode === "create" || noteMode === "edit"}
+        onOpenChange={(open) => {
+          if (!open) setNoteMode("idle");
+        }}
+      >
+        <DialogContent className="w-[calc(100vw-2rem)] overflow-hidden p-0 sm:max-w-2xl [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:z-20 [&_[data-slot=dialog-close]]:bg-white">
+          <DialogHeader className="sr-only">
+            <DialogTitle>{noteMode === "create" ? "新建灵感便签" : "编辑灵感便签"}</DialogTitle>
+            <DialogDescription>记录绑定当前作品的伏笔、剧情灵感或临时想法。</DialogDescription>
           </DialogHeader>
-          <FieldGroup>
-            <Field>
-              <FieldLabel>邮箱</FieldLabel>
-              <Input value={profile?.user.email ?? ""} readOnly aria-label="账户邮箱" />
-            </Field>
-            <Field>
-              <FieldLabel>昵称</FieldLabel>
-              <Input value={nicknameDraft} onChange={(event) => setNicknameDraft(event.target.value)} aria-label="昵称" />
-            </Field>
-            <div className="grid grid-cols-3 gap-2 rounded-lg border bg-muted p-3 text-sm">
-              <div>
-                <p className="text-xs text-muted-foreground">总积分</p>
-                <p className="font-semibold">{profile?.points.totalPoints ?? 0}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">VIP 每日</p>
-                <p className="font-semibold">{profile?.points.vipDailyPoints ?? 0}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">加油包</p>
-                <p className="font-semibold">{profile?.points.creditPackPoints ?? 0}</p>
+          <div className="bg-white text-neutral-950">
+            <div className="border-b border-neutral-200 bg-white px-6 py-5">
+              <div className="flex items-center gap-3">
+                <span className="grid size-10 place-items-center rounded-full border border-neutral-300 bg-white text-neutral-950"><Lightbulb size={18} /></span>
+                <div>
+                  <h2 className="text-xl font-black">{noteMode === "create" ? "新建灵感便签" : "编辑灵感便签"}</h2>
+                  <p className="mt-1 text-xs text-neutral-500">便签绑定当前作品，用来暂存伏笔、桥段和灵感。</p>
+                </div>
               </div>
             </div>
-            {accountStatus === "error" ? <FieldError>账户信息保存失败，请稍后重试</FieldError> : null}
+            <FieldGroup className="p-6">
+              <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
+                <Field>
+                  <FieldLabel>标题</FieldLabel>
+                  <Input
+                    aria-label="便签标题"
+                    value={noteDraft.title}
+                    onChange={(event) => setNoteDraft((draft) => ({ ...draft, title: event.target.value }))}
+                    className="h-11 rounded-xl border-neutral-300 bg-white font-semibold"
+                    placeholder="例如：学院入学考转折"
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel>分类</FieldLabel>
+                  <Input
+                    aria-label="便签分类"
+                    value={noteDraft.category}
+                    onChange={(event) => setNoteDraft((draft) => ({ ...draft, category: event.target.value }))}
+                    className="h-11 rounded-xl border-neutral-300 bg-white"
+                    placeholder="灵感 / 伏笔"
+                  />
+                </Field>
+              </div>
+              <Field>
+                <FieldLabel>内容</FieldLabel>
+                <Textarea
+                  aria-label="便签内容"
+                  value={noteDraft.content}
+                  onChange={(event) => setNoteDraft((draft) => ({ ...draft, content: event.target.value }))}
+                  className="min-h-44 resize-none rounded-xl border-neutral-300 bg-white leading-6"
+                  placeholder="把一闪而过的桥段先放在这里。"
+                />
+              </Field>
+              {noteStatus === "error" && noteError ? <FieldError>{noteError}</FieldError> : null}
+            </FieldGroup>
+            <DialogFooter className="h-[72px] border-t border-neutral-200 bg-white p-0 sm:justify-center">
+              <Button variant="outline" className="rounded-xl border-neutral-300 bg-white" onClick={() => setNoteMode("idle")}>取消</Button>
+              <Button className="rounded-xl bg-neutral-950 text-white hover:bg-neutral-800" onClick={() => void saveNote()} disabled={noteStatus === "saving"}>
+                {noteStatus === "saving" ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Save data-icon="inline-start" />}
+                保存便签
+              </Button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={goalEditOpen} onOpenChange={setGoalEditOpen}>
+        <DialogContent className="overflow-hidden p-0 sm:max-w-md [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:bg-white">
+          <DialogHeader className="border-b border-neutral-200 bg-white px-6 py-5">
+            <DialogTitle className="text-2xl font-black tracking-tight">今日创作目标</DialogTitle>
+            <DialogDescription className="text-xs text-neutral-500">目标绑定当前作品，今日新增字数按保存时正向增量累计。</DialogDescription>
+          </DialogHeader>
+          <FieldGroup className="p-6">
+            <div className="grid grid-cols-3 gap-2">
+              <div className="rounded-xl border border-neutral-200 bg-white p-3 text-center">
+                <p className="text-lg font-black">{dailyWordProgress.wordsAdded}</p>
+                <p className="mt-1 text-[11px] text-neutral-500">今日新增</p>
+              </div>
+              <div className="rounded-xl border border-neutral-200 bg-white p-3 text-center">
+                <p className="text-lg font-black">{writingGoal.targetWords}</p>
+                <p className="mt-1 text-[11px] text-neutral-500">当前目标</p>
+              </div>
+              <div className="rounded-xl border border-neutral-200 bg-white p-3 text-center">
+                <p className="text-lg font-black">{writingGoal.targetWords ? Math.min(100, Math.round((dailyWordProgress.wordsAdded / writingGoal.targetWords) * 100)) : 0}%</p>
+                <p className="mt-1 text-[11px] text-neutral-500">完成度</p>
+              </div>
+            </div>
+            <Field>
+              <FieldLabel>目标字数</FieldLabel>
+              <Input
+                aria-label="目标字数"
+                inputMode="numeric"
+                value={goalDraft.targetWords}
+                onChange={(event) => setGoalDraft((draft) => ({ ...draft, targetWords: event.target.value }))}
+                className="h-11 rounded-xl border-neutral-300 bg-white font-semibold"
+              />
+            </Field>
+            {goalStatus === "error" ? <FieldError>目标字数需要大于 0，请稍后重试</FieldError> : null}
           </FieldGroup>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => void openBilling()}>
-              套餐与积分
+          <DialogFooter className="h-[72px] border-t border-neutral-200 bg-white p-0 sm:justify-center">
+            <Button variant="outline" className="rounded-xl border-neutral-300 bg-white" onClick={() => setGoalEditOpen(false)}>取消</Button>
+            <Button className="rounded-xl bg-neutral-950 text-white hover:bg-neutral-800" onClick={() => void saveGoal()} disabled={goalStatus === "saving"}>
+              {goalStatus === "saving" ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Save data-icon="inline-start" />}
+              保存目标
             </Button>
-            <Button onClick={() => void saveNickname()} disabled={accountStatus === "saving"}>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={accountOpen} onOpenChange={setAccountOpen}>
+        <DialogContent className="overflow-hidden p-0 sm:max-w-5xl xl:max-w-6xl [&_[data-slot=dialog-close]]:right-5 [&_[data-slot=dialog-close]]:top-5 [&_[data-slot=dialog-close]]:z-20 [&_[data-slot=dialog-close]]:bg-white/85 [&_[data-slot=dialog-close]]:backdrop-blur">
+          <DialogHeader className="sr-only">
+            <DialogTitle>账户中心</DialogTitle>
+            <DialogDescription>查看会员状态、积分余额并选择创作套餐。</DialogDescription>
+          </DialogHeader>
+          <div className="relative bg-[#f7f3ea] text-neutral-950">
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_12%,rgba(202,138,4,0.18),transparent_28%),linear-gradient(135deg,rgba(23,23,23,0.05)_0_1px,transparent_1px_12px)]" />
+            <div className="relative grid max-h-[82vh] gap-5 overflow-y-auto p-6 pt-14 lg:grid-cols-[360px_minmax(0,1fr)]">
+              <section className="rounded-[1.6rem] border border-neutral-900 bg-neutral-950 p-5 text-white shadow-[12px_12px_0_rgba(23,23,23,0.12)]">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-semibold text-white/45">账户卡片</p>
+                    <h3 className="mt-3 max-w-64 truncate text-2xl font-black tracking-tight">{profile?.user.nickname || "创作者"}</h3>
+                    <p className="mt-1 flex items-center gap-1.5 text-xs text-white/55">
+                      <Mail size={12} />
+                      {profile?.user.email || "账户信息加载中"}
+                    </p>
+                  </div>
+                  <button
+                    className="grid size-10 place-items-center rounded-full border border-white/15 bg-white/10 text-white/65 transition-colors hover:bg-white hover:text-neutral-950"
+                    onClick={() => {
+                      setNicknameDraft(profile?.user.nickname ?? "");
+                      setNicknameEditOpen(true);
+                    }}
+                    aria-label="修改昵称"
+                  >
+                    <PencilLine size={17} />
+                  </button>
+                </div>
+
+                <div className="mt-7 rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] text-white/45">当前身份</p>
+                      <p className="mt-1 text-lg font-bold">{profile?.subscription ? "VIP 创作会员" : "免费创作版"}</p>
+                    </div>
+                    <span className="grid size-11 place-items-center rounded-full border border-white/15 bg-white/10">
+                      <Crown size={20} className={profile?.subscription ? "text-amber-200" : "text-white/45"} />
+                    </span>
+                  </div>
+                  <div className="mt-5 grid grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <p className="text-white/40">会员周期</p>
+                      <p className="mt-1 font-semibold text-white/80">31 天</p>
+                    </div>
+                    <div>
+                      <p className="text-white/40">有效期至</p>
+                      <p className="mt-1 font-semibold text-white/80">
+                        {profile?.subscription ? formatUpdatedAt(profile.subscription.end_at) : "未开通"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-2">
+                  {[
+                    { label: "可用合计", value: profile?.points.totalPoints ?? 0, hint: "AI 写作可消耗" },
+                    { label: "今日 VIP 积分", value: profile?.points.vipDailyPoints ?? 0, hint: "每日额度，适合持续创作" },
+                    { label: "加油包积分", value: profile?.points.creditPackPoints ?? 0, hint: "一次到账，长期有效" },
+                  ].map((item) => (
+                    <div key={item.label} className="rounded-2xl border border-white/10 bg-white/90 px-4 py-3 text-neutral-950">
+                      <div className="flex items-baseline justify-between gap-3">
+                        <p className="text-[11px] font-bold text-neutral-500">{item.label}</p>
+                        <p className="text-xl font-black tabular-nums tracking-tight">{item.value.toLocaleString()}</p>
+                      </div>
+                      <p className="mt-1 text-[10px] text-neutral-400">{item.hint}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {accountStatus === "loading" ? (
+                  <p className="mt-4 flex items-center gap-2 text-xs text-white/55">
+                    <Loader2 size={13} className="animate-spin" />
+                    正在读取账户信息...
+                  </p>
+                ) : null}
+                {accountStatus === "error" ? <p className="mt-4 text-xs text-rose-200">账户信息保存失败，请稍后重试</p> : null}
+              </section>
+
+              <section className="min-w-0 rounded-[1.6rem] border border-neutral-200 bg-white/86 p-5 shadow-sm backdrop-blur">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-[11px] font-black text-neutral-400">套餐升级</p>
+                    <h3 className="mt-2 text-2xl font-black tracking-tight text-neutral-950">选择适合本书节奏的创作额度</h3>
+                    <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-500">
+                      月卡提供每日 VIP 积分和一笔加油包积分，适合稳定写作、AI 对话和章节分析；加油包一次到账、长期有效，适合临时加速。
+                    </p>
+                  </div>
+                </div>
+
+                {billingStatus === "loading" ? (
+                  <div className="mt-6 grid min-h-56 place-items-center rounded-2xl border border-dashed border-neutral-200 text-sm text-neutral-400">
+                    <span className="flex items-center gap-2">
+                      <Loader2 size={15} className="animate-spin" />
+                      正在读取套餐配置...
+                    </span>
+                  </div>
+                ) : null}
+
+                {billingStatus === "error" ? (
+                  <div className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                    套餐信息加载失败。
+                    <button className="ml-2 font-bold underline underline-offset-2" onClick={() => void loadBillingProducts()}>
+                      重试
+                    </button>
+                  </div>
+                ) : null}
+
+                {billingStatus !== "loading" && billingStatus !== "error" ? (
+                  <div className="mt-6 space-y-5">
+                    <div className="grid gap-3 md:grid-cols-3">
+                      {billingProducts.plans.map((plan, index) => {
+                        const featured = index === 1 || (billingProducts.plans.length === 1 && index === 0);
+                        return (
+                          <article
+                            key={plan.id}
+                            className={cn(
+                              "relative flex min-h-64 flex-col overflow-hidden rounded-2xl border p-4 transition-transform hover:-translate-y-0.5",
+                              featured ? "border-neutral-950 bg-neutral-950 text-white shadow-[8px_8px_0_rgba(23,23,23,0.12)]" : "border-neutral-200 bg-[#fbfaf6] text-neutral-950"
+                            )}
+                          >
+                            {featured ? <span className="absolute right-3 top-3 rounded-full bg-amber-200 px-2 py-0.5 text-[10px] font-black text-neutral-950">推荐</span> : null}
+                            <p className={cn("text-[10px] font-black", featured ? "text-white/55" : "text-neutral-400")}>31 天月卡</p>
+                            <h4 className="mt-2 text-lg font-black">{plan.name}</h4>
+                            <div className="mt-4 flex items-end gap-1">
+                              <span className={cn("mb-1 text-xs font-bold", featured ? "text-white/45" : "text-neutral-500")}>¥</span>
+                              <span className="text-3xl font-black tracking-[-0.08em]">{plan.priceAmount}</span>
+                              <span className={cn("mb-1 text-xs", featured ? "text-white/45" : "text-neutral-500")}>/31天</span>
+                            </div>
+                            <div className={cn("mt-4 space-y-2 rounded-xl border p-3 text-xs", featured ? "border-white/10 bg-white/5 text-white/72" : "border-neutral-200 bg-white text-neutral-600")}>
+                              <p>每日发放 {plan.vipDailyPoints.toLocaleString()} VIP 积分</p>
+                              <p>附带 {plan.bundledCreditPackPoints.toLocaleString()} 加油包积分</p>
+                              <p>用于 AI 对话、章节分析与续写辅助</p>
+                            </div>
+                            <Button
+                              className={cn("mt-auto h-10 rounded-xl font-bold", featured ? "bg-amber-200 text-neutral-950 hover:bg-amber-100" : "bg-neutral-950 text-white hover:bg-neutral-800")}
+                              onClick={() => void createOrder("plan", plan.id)}
+                              disabled={billingStatus === "creating"}
+                            >
+                              {billingStatus === "creating" ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Crown data-icon="inline-start" />}
+                              创建订单
+                            </Button>
+                          </article>
+                        );
+                      })}
+                    </div>
+
+                    {billingProducts.creditPacks.length ? (
+                      <div>
+                        <div className="mb-3 flex items-center gap-2">
+                          <Zap size={15} className="fill-neutral-950" />
+                          <h4 className="text-sm font-black text-neutral-950">灵感加油包</h4>
+                          <span className="text-xs text-neutral-400">长期有效，适合临时补充</span>
+                        </div>
+                        <div className="grid gap-2 md:grid-cols-3">
+                          {billingProducts.creditPacks.map((pack) => (
+                            <button
+                              key={pack.id}
+                              className="group flex items-center justify-between gap-3 rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-left transition-all hover:-translate-y-0.5 hover:border-neutral-950 disabled:opacity-60"
+                              onClick={() => void createOrder("credit_pack", pack.id)}
+                              disabled={billingStatus === "creating"}
+                            >
+                              <span className="min-w-0">
+                                <span className="block truncate text-sm font-black text-neutral-950">{pack.name}</span>
+                                <span className="mt-1 block text-xs text-neutral-500">{pack.points.toLocaleString()} 积分 · ¥{pack.priceAmount}</span>
+                              </span>
+                              {billingStatus === "creating" ? <Loader2 size={14} className="animate-spin text-neutral-400" /> : <ArrowRight size={14} className="text-neutral-300 transition-colors group-hover:text-neutral-950" />}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </section>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={nicknameEditOpen} onOpenChange={setNicknameEditOpen}>
+        <DialogContent className="overflow-hidden p-0 sm:max-w-sm [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:bg-white">
+          <DialogHeader className="border-b border-neutral-200 bg-white px-6 py-5">
+            <DialogTitle className="text-2xl font-black tracking-tight">修改昵称</DialogTitle>
+            <DialogDescription className="text-xs text-neutral-500">昵称只影响账户展示，不会改变登录邮箱。</DialogDescription>
+          </DialogHeader>
+          <FieldGroup className="p-6">
+            <Field>
+              <FieldLabel>昵称</FieldLabel>
+              <Input
+                value={nicknameDraft}
+                onChange={(event) => setNicknameDraft(event.target.value)}
+                aria-label="昵称"
+                className="h-11 rounded-xl border-neutral-300 bg-white font-semibold"
+                placeholder="输入创作者昵称"
+              />
+            </Field>
+            {accountStatus === "error" ? <FieldError>昵称保存失败，请稍后重试</FieldError> : null}
+          </FieldGroup>
+          <DialogFooter className="h-[72px] border-t border-neutral-200 bg-white p-0 sm:justify-center">
+            <Button variant="outline" className="rounded-xl border-neutral-300 bg-white" onClick={() => setNicknameEditOpen(false)}>取消</Button>
+            <Button className="rounded-xl bg-neutral-950 text-white hover:bg-neutral-800" onClick={() => void saveNickname()} disabled={accountStatus === "saving"}>
               {accountStatus === "saving" ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Save data-icon="inline-start" />}
               保存昵称
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <BillingDialog
-        open={billingOpen}
-        onOpenChange={setBillingOpen}
-        products={billingProducts}
-        loading={billingStatus === "loading"}
-        error={billingStatus === "error"}
-        purchasing={billingStatus === "creating"}
-        onPurchase={(type, id) => void createOrder(type, id)}
-      />
 
       <PaymentDialog
         open={paymentOpen}
@@ -2216,16 +2436,16 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       />
 
       <Dialog open={editorSettingsOpen} onOpenChange={setEditorSettingsOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>编辑器排版设置</DialogTitle>
-            <DialogDescription>自定义编辑器的字体和排版，设置仅保存在本地浏览器。</DialogDescription>
+        <DialogContent className="w-[calc(100vw-2rem)] overflow-hidden p-0 sm:max-w-2xl [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:bg-white">
+          <DialogHeader className="border-b border-neutral-200 bg-white px-6 py-5">
+            <DialogTitle className="text-2xl font-black tracking-tight">编辑器排版设置</DialogTitle>
+            <DialogDescription className="text-xs text-neutral-500">自定义字体和排版，设置仅保存在本地浏览器。</DialogDescription>
           </DialogHeader>
-          <div className="space-y-5">
+          <div className="max-h-[58vh] space-y-5 overflow-y-auto p-6">
             <Field>
               <FieldLabel>字体</FieldLabel>
               <Select value={editorSettings.fontFamily} onValueChange={(v) => updateEditorSetting("fontFamily", v)}>
-                <SelectTrigger className="w-full">
+                <SelectTrigger className="h-11 w-full rounded-xl border-neutral-300 bg-white">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -2239,7 +2459,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                 </SelectContent>
               </Select>
               <p
-                className="mt-2 rounded-lg border border-border bg-muted/50 p-3 text-sm leading-relaxed text-foreground"
+                className="mt-2 rounded-xl border border-neutral-300 bg-white p-4 text-sm leading-relaxed text-neutral-950"
                 style={{ fontFamily: editorFontStack, fontSize: `${Math.min(editorSettings.fontSize, 16)}px`, lineHeight: editorSettings.lineHeight, letterSpacing: `${editorSettings.letterSpacing}px` }}
               >
                 天地玄黄，宇宙洪荒。日月盈昃，辰宿列张。寒来暑往，秋收冬藏。
@@ -2310,97 +2530,183 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
               </div>
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => {
+          <DialogFooter className="h-[72px] border-t border-neutral-200 bg-white p-0 sm:justify-center">
+            <Button variant="outline" className="rounded-xl border-neutral-300 bg-white" onClick={() => {
               setEditorSettings(DEFAULT_EDITOR_SETTINGS);
               window.localStorage.setItem(EDITOR_SETTINGS_KEY, JSON.stringify(DEFAULT_EDITOR_SETTINGS));
             }}>
               恢复默认
+            </Button>
+            <Button className="rounded-xl bg-neutral-950 text-white hover:bg-neutral-800" onClick={() => setEditorSettingsOpen(false)}>
+              完成
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={workEditOpen} onOpenChange={setWorkEditOpen}>
-        <DialogContent className="sm:max-w-lg max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
+        <DialogContent className="overflow-hidden p-0 sm:max-w-5xl xl:max-w-6xl [&_[data-slot=dialog-close]]:right-5 [&_[data-slot=dialog-close]]:top-5 [&_[data-slot=dialog-close]]:z-20 [&_[data-slot=dialog-close]]:bg-white/85 [&_[data-slot=dialog-close]]:backdrop-blur">
+          <DialogHeader className="sr-only">
             <DialogTitle>编辑作品信息</DialogTitle>
             <DialogDescription>修改作品的基本设定、大纲和创作规则。</DialogDescription>
           </DialogHeader>
-          <FieldGroup>
-            <Field>
-              <FieldLabel>作品标题</FieldLabel>
-              <Input
-                aria-label="作品标题"
-                value={workDraft.title}
-                onChange={(e) => setWorkDraft((d) => ({ ...d, title: e.target.value }))}
-              />
-            </Field>
-            <Field>
-              <FieldLabel>简介</FieldLabel>
-              <Textarea
-                aria-label="简介"
-                value={workDraft.shortIntro}
-                onChange={(e) => setWorkDraft((d) => ({ ...d, shortIntro: e.target.value }))}
-                className="min-h-20 resize-none"
-              />
-            </Field>
-            <Field>
-              <FieldLabel>大纲</FieldLabel>
-              <Textarea
-                aria-label="大纲"
-                value={workDraft.synopsis}
-                onChange={(e) => setWorkDraft((d) => ({ ...d, synopsis: e.target.value }))}
-                className="min-h-24 resize-none"
-              />
-            </Field>
-            <Field>
-              <FieldLabel>背景规则</FieldLabel>
-              <Textarea
-                aria-label="背景规则"
-                value={workDraft.backgroundRules}
-                onChange={(e) => setWorkDraft((d) => ({ ...d, backgroundRules: e.target.value }))}
-                className="min-h-20 resize-none"
-              />
-            </Field>
-            <Field>
-              <FieldLabel>创作重点</FieldLabel>
-              <Textarea
-                aria-label="创作重点"
-                value={workDraft.focusRequirements}
-                onChange={(e) => setWorkDraft((d) => ({ ...d, focusRequirements: e.target.value }))}
-                className="min-h-20 resize-none"
-              />
-            </Field>
-            <Field>
-              <FieldLabel>禁忌要求</FieldLabel>
-              <Textarea
-                aria-label="禁忌要求"
-                value={workDraft.forbiddenRequirements}
-                onChange={(e) => setWorkDraft((d) => ({ ...d, forbiddenRequirements: e.target.value }))}
-                className="min-h-20 resize-none"
-              />
-            </Field>
-            <Field>
-              <FieldLabel>类型标签（逗号分隔）</FieldLabel>
-              <Input
-                aria-label="类型标签"
-                value={workDraft.tags}
-                onChange={(e) => setWorkDraft((d) => ({ ...d, tags: e.target.value }))}
-                placeholder="奇幻, 冒险, 群像"
-              />
-            </Field>
-            {workSaveStatus === "error" && <FieldError>保存失败，请稍后重试</FieldError>}
-          </FieldGroup>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setWorkEditOpen(false)}>
-              取消
-            </Button>
-            <Button onClick={() => void saveWorkEdit()} disabled={workSaveStatus === "saving"}>
-              {workSaveStatus === "saving" ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Save data-icon="inline-start" />}
-              保存
-            </Button>
-          </DialogFooter>
+
+          <div className="relative flex max-h-[84vh] flex-col overflow-hidden bg-white text-neutral-950">
+            <div className="relative min-h-0 flex-1 overflow-y-auto">
+              <div className="grid gap-5 p-6 pt-14 lg:grid-cols-[320px_minmax(0,1fr)]">
+              <aside className="flex flex-col rounded-[1.6rem] border border-neutral-950 bg-neutral-950 p-5 text-white shadow-[12px_12px_0_rgba(23,23,23,0.12)]">
+                <span className="inline-flex w-fit items-center gap-2 rounded-full bg-white px-3 py-1 text-[11px] font-black text-neutral-950">
+                  <BookMarked size={13} />
+                  作品档案
+                </span>
+                <div className="mt-8">
+                  <p className="text-xs font-semibold text-white/40">作品标题</p>
+                  <h2 className="mt-2 line-clamp-3 text-3xl font-black leading-tight tracking-tight">
+                    {workDraft.title || "未命名作品"}
+                  </h2>
+                  <p className="mt-4 line-clamp-5 text-sm leading-6 text-white/58">
+                    {workDraft.shortIntro || "给作品留下一句清晰的入口介绍，方便你和 AI 快速回到这本书的语气与方向。"}
+                  </p>
+                </div>
+
+                <div className="mt-8 grid gap-2">
+                  {[
+                    { label: "大纲", value: workDraft.synopsis, icon: FileText },
+                    { label: "背景规则", value: workDraft.backgroundRules, icon: Compass },
+                    { label: "禁忌要求", value: workDraft.forbiddenRequirements, icon: ShieldAlert },
+                  ].map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <div key={item.label} className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-3 py-2">
+                        <span className="inline-flex items-center gap-2 text-xs text-white/55">
+                          <Icon size={13} />
+                          {item.label}
+                        </span>
+                        <span className="text-[10px] font-semibold text-white/35">{item.value.trim() ? "已填写" : "待补充"}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-auto pt-8">
+                  <div className="rounded-2xl border border-white/10 bg-white/90 p-4 text-neutral-950">
+                    <p className="flex items-center gap-2 text-xs font-black text-neutral-500">
+                      <Tags size={13} />
+                      类型标签
+                    </p>
+                    <p className="mt-2 line-clamp-2 text-sm font-semibold">
+                      {workDraft.tags || "奇幻, 冒险, 群像"}
+                    </p>
+                  </div>
+                </div>
+              </aside>
+
+              <section className="min-w-0 rounded-[1.6rem] border border-neutral-200 bg-white shadow-sm">
+                <div className="border-b border-neutral-200 px-5 py-4">
+                  <p className="text-[11px] font-black text-neutral-400">作品信息</p>
+                  <h3 className="mt-1 text-2xl font-black tracking-tight text-neutral-950">编辑作品档案</h3>
+                  <p className="mt-1 text-sm text-neutral-500">这些信息会影响作品展示，也会作为 AI 理解作品时的重要上下文。</p>
+                </div>
+
+                <div className="grid gap-5 p-5">
+                  <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_260px]">
+                    <Field>
+                      <FieldLabel>作品标题</FieldLabel>
+                      <Input
+                        aria-label="作品标题"
+                        value={workDraft.title}
+                        onChange={(e) => setWorkDraft((d) => ({ ...d, title: e.target.value }))}
+                        className="h-12 rounded-2xl border-neutral-200 bg-neutral-50 text-base font-bold"
+                        placeholder="例如：雾港学院"
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel>类型标签（逗号分隔）</FieldLabel>
+                      <Input
+                        aria-label="类型标签"
+                        value={workDraft.tags}
+                        onChange={(e) => setWorkDraft((d) => ({ ...d, tags: e.target.value }))}
+                        className="h-12 rounded-2xl border-neutral-200 bg-neutral-50"
+                        placeholder="奇幻, 冒险, 群像"
+                      />
+                    </Field>
+                  </div>
+
+                  <Field>
+                    <FieldLabel>一句话简介</FieldLabel>
+                    <Textarea
+                      aria-label="简介"
+                      value={workDraft.shortIntro}
+                      onChange={(e) => setWorkDraft((d) => ({ ...d, shortIntro: e.target.value }))}
+                      className="min-h-24 resize-none rounded-2xl border-neutral-200 bg-neutral-50 leading-6"
+                      placeholder="这本书最想让读者记住的钩子。"
+                    />
+                  </Field>
+
+                  <div className="grid gap-4 xl:grid-cols-2">
+                    <Field>
+                      <FieldLabel className="inline-flex items-center gap-2"><FileText size={14} />大纲</FieldLabel>
+                      <Textarea
+                        aria-label="大纲"
+                        value={workDraft.synopsis}
+                        onChange={(e) => setWorkDraft((d) => ({ ...d, synopsis: e.target.value }))}
+                        className="min-h-44 resize-none rounded-2xl border-neutral-200 bg-white leading-6"
+                        placeholder="主线、阶段目标、关键反转。"
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel className="inline-flex items-center gap-2"><Compass size={14} />背景规则</FieldLabel>
+                      <Textarea
+                        aria-label="背景规则"
+                        value={workDraft.backgroundRules}
+                        onChange={(e) => setWorkDraft((d) => ({ ...d, backgroundRules: e.target.value }))}
+                        className="min-h-44 resize-none rounded-2xl border-neutral-200 bg-white leading-6"
+                        placeholder="世界运行规则、能力限制、组织秩序。"
+                      />
+                    </Field>
+                  </div>
+
+                  <div className="grid gap-4 xl:grid-cols-2">
+                    <Field>
+                      <FieldLabel>创作重点</FieldLabel>
+                      <Textarea
+                        aria-label="创作重点"
+                        value={workDraft.focusRequirements}
+                        onChange={(e) => setWorkDraft((d) => ({ ...d, focusRequirements: e.target.value }))}
+                        className="min-h-36 resize-none rounded-2xl border-neutral-200 bg-white leading-6"
+                        placeholder="希望 AI 和作者始终优先照顾的风格、节奏、人物关系。"
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel className="inline-flex items-center gap-2"><ShieldAlert size={14} />禁忌要求</FieldLabel>
+                      <Textarea
+                        aria-label="禁忌要求"
+                        value={workDraft.forbiddenRequirements}
+                        onChange={(e) => setWorkDraft((d) => ({ ...d, forbiddenRequirements: e.target.value }))}
+                        className="min-h-36 resize-none rounded-2xl border-neutral-200 bg-white leading-6"
+                        placeholder="不要出现的桥段、语气、设定冲突或风格偏差。"
+                      />
+                    </Field>
+                  </div>
+
+                  {workSaveStatus === "error" ? <FieldError>保存失败，请稍后重试</FieldError> : null}
+                </div>
+
+              </section>
+              </div>
+            </div>
+            <DialogFooter className="relative h-[72px] border-t border-neutral-200 bg-white p-0 sm:items-center sm:justify-center">
+              <div className="flex w-full gap-2 px-6 sm:w-auto sm:px-0">
+                <Button variant="outline" className="flex-1 rounded-xl border-neutral-300 bg-white text-neutral-950 hover:bg-neutral-100 sm:flex-none" onClick={() => setWorkEditOpen(false)}>
+                  取消
+                </Button>
+                <Button className="flex-1 rounded-xl bg-neutral-950 text-white hover:bg-neutral-800 sm:flex-none" onClick={() => void saveWorkEdit()} disabled={workSaveStatus === "saving"}>
+                  {workSaveStatus === "saving" ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Save data-icon="inline-start" />}
+                  保存作品档案
+                </Button>
+              </div>
+            </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
 

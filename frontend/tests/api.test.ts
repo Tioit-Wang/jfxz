@@ -5,7 +5,11 @@ import {
   defaultApiBaseUrl,
   mapChapter,
   mapChatSession,
+  mapDailyWordProgress,
+  mapInspirationNote,
   mapNamedContent,
+  mapVolume,
+  mapWritingGoal,
   mapWork,
   normalizeBaseUrl
 } from "../src/api";
@@ -61,10 +65,15 @@ describe("api client", () => {
     });
     expect(mapChapter({ id: "c1", order_index: 1, title: "章", summary: null, content: "正文" })).toEqual({
       id: "c1",
+      volumeId: undefined,
       order: 1,
       title: "章",
       summary: "",
       content: "正文"
+    });
+    expect(mapChapter({ id: "c-vol", volume_id: "v1", order_index: 1, title: "章", summary: "", content: "" })).toMatchObject({
+      id: "c-vol",
+      volumeId: "v1"
     });
     expect(mapChapter({ id: "c2", order_index: 2, title: "章二", summary: "摘要", content: "正文" }).summary).toBe(
       "摘要"
@@ -100,6 +109,29 @@ describe("api client", () => {
         last_active_at: "now"
       })
     ).toEqual({ id: "s1", title: "会话", sourceType: "manual", lastMessagePreview: "", lastActiveAt: "now" });
+    expect(mapVolume({ id: "v1", work_id: "w1", title: "默认卷", order_index: 1, updated_at: "now" })).toEqual({
+      id: "v1",
+      title: "默认卷",
+      order: 1,
+      updatedAt: "now"
+    });
+    expect(mapInspirationNote({ id: "n1", work_id: "w1", title: "灵感", content: "内容", category: "伏笔" })).toEqual({
+      id: "n1",
+      title: "灵感",
+      content: "内容",
+      category: "伏笔",
+      updatedAt: ""
+    });
+    expect(mapWritingGoal({ id: "g1", work_id: "w1", target_words: 3000 })).toEqual({
+      id: "g1",
+      targetWords: 3000,
+      updatedAt: ""
+    });
+    expect(mapDailyWordProgress({ date: "2026-05-08", words_added: 1200 })).toEqual({
+      date: "2026-05-08",
+      wordsAdded: 1200,
+      updatedAt: ""
+    });
   });
 
   it("logs in with cookies and calls user workspace endpoints", async () => {
@@ -113,10 +145,11 @@ describe("api client", () => {
       .mockResolvedValueOnce(jsonResponse({ id: "w1", title: "作品", short_intro: "", synopsis: "", genre_tags: [], background_rules: "" }))
       .mockResolvedValueOnce(jsonResponse({ id: "w1", title: "作品改", short_intro: "短", synopsis: "梗概", genre_tags: ["奇幻"], background_rules: "规则" }))
       .mockResolvedValueOnce(jsonResponse({ ok: true }))
-      .mockResolvedValueOnce(jsonResponse([{ id: "c1", order_index: 1, title: "章", summary: "摘要", content: "正文" }]))
-      .mockResolvedValueOnce(jsonResponse({ id: "c2", order_index: 2, title: "新章", summary: "提要", content: "" }))
+      .mockResolvedValueOnce(jsonResponse([{ id: "c1", volume_id: "v1", order_index: 1, title: "章", summary: "摘要", content: "正文" }]))
+      .mockResolvedValueOnce(jsonResponse({ id: "c2", volume_id: "v1", order_index: 2, title: "新章", summary: "提要", content: "" }))
       .mockResolvedValueOnce(jsonResponse({ id: "c3", order_index: 3, title: "只给标题", summary: "", content: "正文" }))
-      .mockResolvedValueOnce(jsonResponse({ id: "c1", order_index: 1, title: "章改", summary: "摘要", content: "正文" }))
+      .mockResolvedValueOnce(jsonResponse({ id: "c1", volume_id: "v1", order_index: 1, title: "章改", summary: "摘要", content: "正文" }))
+      .mockResolvedValueOnce(jsonResponse({ id: "v2", work_id: "w1", title: "第二卷", order_index: 2 }))
       .mockResolvedValueOnce(jsonResponse({ ok: true }))
       .mockResolvedValueOnce(jsonResponse({ suggestions: [{ quote: "正文", issue: "问题", options: ["改文"] }] }))
       .mockResolvedValueOnce(jsonResponse([{ id: "char-1", work_id: "w1", name: "角色", summary: "摘要", detail: "详情" }]))
@@ -129,6 +162,16 @@ describe("api client", () => {
       .mockResolvedValueOnce(jsonResponse([{ id: "set-4", work_id: "w1", name: "规则设定", summary: "摘要", detail: null, type: "rule" }]))
       .mockResolvedValueOnce(jsonResponse({ id: "set-2", work_id: "w1", name: "设定改", summary: "新摘要", detail: "详情", type: "rule" }))
       .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse([{ id: "note-1", work_id: "w1", title: "灵感", content: "内容", category: "伏笔" }]))
+      .mockResolvedValueOnce(jsonResponse({ id: "note-2", work_id: "w1", title: "新灵感", content: "", category: "灵感" }))
+      .mockResolvedValueOnce(jsonResponse({ id: "note-2", work_id: "w1", title: "改灵感", content: "细节", category: "灵感" }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          goal: { id: "goal-1", work_id: "w1", target_words: 3200 },
+          daily_word_progress: { date: "2026-05-08", words_added: 900 }
+        })
+      )
       .mockResolvedValueOnce(
         jsonResponse({
           user: { id: "u1", email: "a@example.com", nickname: "A", role: "user", status: "active" },
@@ -232,8 +275,8 @@ describe("api client", () => {
       })
     ).resolves.toMatchObject({ title: "作品改", backgroundRules: "规则" });
     await expect(client.deleteWork("w1")).resolves.toBeUndefined();
-    await expect(client.listChapters("w1")).resolves.toMatchObject([{ id: "c1" }]);
-    await expect(client.createChapter("w1", { title: "新章", summary: "提要", order: 2 })).resolves.toMatchObject({
+    await expect(client.listChapters("w1")).resolves.toMatchObject([{ id: "c1", volumeId: "v1" }]);
+    await expect(client.createChapter("w1", { title: "新章", summary: "提要", order: 2, volumeId: "v1", wordsAdded: 4 })).resolves.toMatchObject({
       id: "c2",
       title: "新章"
     });
@@ -242,8 +285,9 @@ describe("api client", () => {
       summary: ""
     });
     await expect(
-      client.updateChapter("w1", { id: "c1", order: 1, title: "章改", summary: "摘要", content: "正文" })
+      client.updateChapter("w1", { id: "c1", volumeId: "v1", order: 1, title: "章改", summary: "摘要", content: "正文" }, 2)
     ).resolves.toMatchObject({ title: "章改" });
+    await expect(client.createVolume("w1", "第二卷")).resolves.toMatchObject({ id: "v2", order: 2 });
     await expect(client.deleteChapter("w1", "c1")).resolves.toBeUndefined();
     await expect(client.analyzeChapter("w1", "正文")).resolves.toMatchObject([{ quote: "正文" }]);
     await expect(client.listCharacters("w1", "角")).resolves.toMatchObject([{ id: "char-1" }]);
@@ -266,6 +310,19 @@ describe("api client", () => {
       client.updateSetting("w1", { id: "set-2", name: "设定改", summary: "新摘要", detail: "详情" })
     ).resolves.toMatchObject({ name: "设定改", type: "rule" });
     await expect(client.deleteSetting("w1", "set-2")).resolves.toBeUndefined();
+    await expect(client.listInspirationNotes("w1")).resolves.toMatchObject([{ id: "note-1" }]);
+    await expect(client.createInspirationNote("w1", { title: "新灵感" })).resolves.toMatchObject({
+      id: "note-2",
+      category: "灵感"
+    });
+    await expect(
+      client.updateInspirationNote("w1", { id: "note-2", title: "改灵感", content: "细节" })
+    ).resolves.toMatchObject({ title: "改灵感" });
+    await expect(client.deleteInspirationNote("w1", "note-2")).resolves.toBeUndefined();
+    await expect(client.updateWritingGoal("w1", { targetWords: 3200 })).resolves.toMatchObject({
+      goal: { targetWords: 3200 },
+      dailyWordProgress: { wordsAdded: 900 }
+    });
     await expect(client.getMe()).resolves.toMatchObject({ points: { totalPoints: 15 }, subscription: null });
     await expect(client.getMe()).resolves.toMatchObject({ points: { totalPoints: 0 }, subscription: { id: "sub-1" } });
     await expect(client.getMe()).resolves.toMatchObject({ points: { totalPoints: 0 }, subscription: null });
@@ -293,9 +350,13 @@ describe("api client", () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(
       jsonResponse({
         work: { id: "w1", title: "作品", short_intro: "短", synopsis: "梗概", genre_tags: ["奇幻"], background_rules: "规则" },
-        chapters: [{ id: "c1", order_index: 1, title: "第一章", summary: null, content: "正文" }],
+        volumes: [{ id: "v1", work_id: "w1", title: "默认卷", order_index: 1 }],
+        chapters: [{ id: "c1", volume_id: "v1", order_index: 1, title: "第一章", summary: null, content: "正文" }],
         characters: [{ id: "char-1", work_id: "w1", name: "角色", summary: "摘要", detail: null }],
         settings: [{ id: "set-1", work_id: "w1", name: "设定", summary: "摘要", detail: "详情", type: "rule" }],
+        inspiration_notes: [{ id: "note-1", work_id: "w1", title: "灵感", content: "内容", category: "伏笔" }],
+        writing_goal: { id: "goal-1", work_id: "w1", target_words: 2000 },
+        daily_word_progress: { date: "2026-05-08", words_added: 800 },
         sessions: [
           {
             id: "s1",
@@ -330,9 +391,13 @@ describe("api client", () => {
 
     await expect(client.getWorkspaceBootstrap("w1")).resolves.toMatchObject({
       work: { id: "w1" },
-      chapters: [{ id: "c1", summary: "" }],
+      volumes: [{ id: "v1", title: "默认卷" }],
+      chapters: [{ id: "c1", volumeId: "v1", summary: "" }],
       characters: [{ id: "char-1", detail: "" }],
       settings: [{ id: "set-1", type: "rule" }],
+      inspirationNotes: [{ id: "note-1", category: "伏笔" }],
+      writingGoal: { targetWords: 2000 },
+      dailyWordProgress: { wordsAdded: 800 },
       activeSession: { id: "s1", lastMessagePreview: "" },
       messages: { messages: [{ id: "m1" }], hasMore: false },
       profile: { points: { totalPoints: 3 } }

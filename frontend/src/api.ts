@@ -23,6 +23,7 @@ export type ApiWork = {
 
 export type ApiChapter = {
   id: string;
+  volume_id?: string | null;
   order_index: number;
   title: string;
   summary: string | null;
@@ -45,12 +46,71 @@ export type ApiNamedContent = {
   updated_at?: string | null;
 };
 
+export type ApiInspirationNote = {
+  id: string;
+  work_id: string;
+  title: string;
+  content: string;
+  category: string;
+  updated_at?: string | null;
+};
+
+export type ApiVolume = {
+  id: string;
+  work_id: string;
+  title: string;
+  order_index: number;
+  updated_at?: string | null;
+};
+
+export type ApiWritingGoal = {
+  id: string;
+  work_id: string;
+  target_words: number;
+  updated_at?: string | null;
+};
+
+export type ApiDailyWordProgress = {
+  id?: string;
+  work_id?: string;
+  date: string;
+  words_added: number;
+  updated_at?: string | null;
+};
+
 export type NamedContent = {
   id: string;
   name: string;
   summary: string;
   detail: string;
   type?: string;
+  updatedAt: string;
+};
+
+export type InspirationNote = {
+  id: string;
+  title: string;
+  content: string;
+  category: string;
+  updatedAt: string;
+};
+
+export type Volume = {
+  id: string;
+  title: string;
+  order: number;
+  updatedAt: string;
+};
+
+export type WritingGoal = {
+  id: string;
+  targetWords: number;
+  updatedAt: string;
+};
+
+export type DailyWordProgress = {
+  date: string;
+  wordsAdded: number;
   updatedAt: string;
 };
 
@@ -131,9 +191,13 @@ export type ChatMessagePage = {
 
 export type WorkspaceBootstrap = {
   work: Work;
+  volumes: Volume[];
   chapters: Chapter[];
   characters: NamedContent[];
   settings: NamedContent[];
+  inspirationNotes: InspirationNote[];
+  writingGoal: WritingGoal;
+  dailyWordProgress: DailyWordProgress;
   sessions: ChatSession[];
   activeSession: ChatSession;
   messages: ChatMessagePage;
@@ -510,6 +574,7 @@ function workPayload(work: WorkDraft): Record<string, unknown> {
 export function mapChapter(chapter: ApiChapter): Chapter {
   return {
     id: chapter.id,
+    volumeId: chapter.volume_id ?? undefined,
     order: chapter.order_index,
     title: chapter.title,
     summary: chapter.summary ?? "",
@@ -524,6 +589,41 @@ export function mapNamedContent(item: ApiNamedContent): NamedContent {
     summary: item.summary,
     detail: item.detail ?? "",
     type: item.type ?? undefined,
+    updatedAt: item.updated_at ?? ""
+  };
+}
+
+export function mapInspirationNote(item: ApiInspirationNote): InspirationNote {
+  return {
+    id: item.id,
+    title: item.title,
+    content: item.content,
+    category: item.category,
+    updatedAt: item.updated_at ?? ""
+  };
+}
+
+export function mapVolume(item: ApiVolume): Volume {
+  return {
+    id: item.id,
+    title: item.title,
+    order: item.order_index,
+    updatedAt: item.updated_at ?? ""
+  };
+}
+
+export function mapWritingGoal(item: ApiWritingGoal): WritingGoal {
+  return {
+    id: item.id,
+    targetWords: item.target_words,
+    updatedAt: item.updated_at ?? ""
+  };
+}
+
+export function mapDailyWordProgress(item: ApiDailyWordProgress): DailyWordProgress {
+  return {
+    date: item.date,
+    wordsAdded: item.words_added,
     updatedAt: item.updated_at ?? ""
   };
 }
@@ -767,9 +867,13 @@ export class ApiClient {
     const params = new URLSearchParams({ session_limit: String(sessionLimit), message_limit: String(messageLimit) });
     const data = await this.request<{
       work: ApiWork;
+      volumes: ApiVolume[];
       chapters: ApiChapter[];
       characters: ApiNamedContent[];
       settings: ApiNamedContent[];
+      inspiration_notes: ApiInspirationNote[];
+      writing_goal: ApiWritingGoal;
+      daily_word_progress: ApiDailyWordProgress;
       sessions: ApiChatSession[];
       active_session: ApiChatSession;
       messages: {
@@ -796,9 +900,13 @@ export class ApiClient {
     }>(`/works/${workId}/workspace-bootstrap?${params}`, { method: "POST" });
     return {
       work: mapWork(data.work),
+      volumes: data.volumes.map(mapVolume),
       chapters: data.chapters.map(mapChapter),
       characters: data.characters.map(mapNamedContent),
       settings: data.settings.map(mapNamedContent),
+      inspirationNotes: data.inspiration_notes.map(mapInspirationNote),
+      writingGoal: mapWritingGoal(data.writing_goal),
+      dailyWordProgress: mapDailyWordProgress(data.daily_word_progress),
       sessions: data.sessions.map(mapChatSession),
       activeSession: mapChatSession(data.active_session),
       messages: {
@@ -835,7 +943,7 @@ export class ApiClient {
 
   async createChapter(
     workId: string,
-    chapter: { title: string; content?: string; summary?: string; order?: number }
+    chapter: { title: string; content?: string; summary?: string; order?: number; volumeId?: string; wordsAdded?: number }
   ): Promise<Chapter> {
     const data = await this.request<ApiChapter>(`/works/${workId}/chapters`, {
       method: "POST",
@@ -843,23 +951,35 @@ export class ApiClient {
         title: chapter.title,
         content: chapter.content ?? "",
         summary: chapter.summary ?? "",
-        order_index: chapter.order
+        order_index: chapter.order,
+        volume_id: chapter.volumeId,
+        words_added: chapter.wordsAdded
       })
     });
     return mapChapter(data);
   }
 
-  async updateChapter(workId: string, chapter: Chapter): Promise<Chapter> {
+  async updateChapter(workId: string, chapter: Chapter, wordsAdded?: number): Promise<Chapter> {
     const data = await this.request<ApiChapter>(`/works/${workId}/chapters/${chapter.id}`, {
       method: "PATCH",
       body: JSON.stringify({
         title: chapter.title,
         content: chapter.content,
         summary: chapter.summary,
-        order_index: chapter.order
+        order_index: chapter.order,
+        volume_id: chapter.volumeId,
+        words_added: wordsAdded
       })
     });
     return mapChapter(data);
+  }
+
+  async createVolume(workId: string, title: string): Promise<Volume> {
+    const data = await this.request<ApiVolume>(`/works/${workId}/volumes`, {
+      method: "POST",
+      body: JSON.stringify({ title })
+    });
+    return mapVolume(data);
   }
 
   async deleteChapter(workId: string, chapterId: string): Promise<void> {
@@ -952,6 +1072,63 @@ export class ApiClient {
     await this.request<{ ok: boolean }>(`/works/${workId}/settings/${settingId}`, {
       method: "DELETE"
     });
+  }
+
+  async listInspirationNotes(workId: string): Promise<InspirationNote[]> {
+    const data = await this.request<ApiInspirationNote[]>(`/works/${workId}/inspiration-notes`);
+    return data.map(mapInspirationNote);
+  }
+
+  async createInspirationNote(
+    workId: string,
+    item: { title: string; content?: string; category?: string }
+  ): Promise<InspirationNote> {
+    const data = await this.request<ApiInspirationNote>(`/works/${workId}/inspiration-notes`, {
+      method: "POST",
+      body: JSON.stringify({
+        title: item.title,
+        content: item.content ?? "",
+        category: item.category ?? "灵感"
+      })
+    });
+    return mapInspirationNote(data);
+  }
+
+  async updateInspirationNote(
+    workId: string,
+    item: { id: string; title: string; content: string; category?: string }
+  ): Promise<InspirationNote> {
+    const data = await this.request<ApiInspirationNote>(`/works/${workId}/inspiration-notes/${item.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        title: item.title,
+        content: item.content,
+        category: item.category ?? "灵感"
+      })
+    });
+    return mapInspirationNote(data);
+  }
+
+  async deleteInspirationNote(workId: string, noteId: string): Promise<void> {
+    await this.request<{ ok: boolean }>(`/works/${workId}/inspiration-notes/${noteId}`, {
+      method: "DELETE"
+    });
+  }
+
+  async updateWritingGoal(
+    workId: string,
+    item: { targetWords: number }
+  ): Promise<{ goal: WritingGoal; dailyWordProgress: DailyWordProgress }> {
+    const data = await this.request<{ goal: ApiWritingGoal; daily_word_progress: ApiDailyWordProgress }>(
+      `/works/${workId}/writing-goal`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          target_words: item.targetWords
+        })
+      }
+    );
+    return { goal: mapWritingGoal(data.goal), dailyWordProgress: mapDailyWordProgress(data.daily_word_progress) };
   }
 
   async listBillingProducts(): Promise<BillingProducts> {

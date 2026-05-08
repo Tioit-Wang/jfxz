@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, Edit3, Loader2, Settings, Trash2, Wand2, type LucideIcon } from "lucide-react";
+import { AlertCircle, Edit3, Loader2, Settings, Trash2, UserCircle, Wand2, type LucideIcon } from "lucide-react";
 import type { ApiSuggestion } from "@/api";
 import { ChapterPlainTextEditor } from "@/components/ChapterPlainTextEditor";
 import { cn } from "@/lib/utils";
@@ -22,6 +22,8 @@ type WorkspaceEditorPanelProps = {
   analysisNotice: string;
   suggestions: ApiSuggestion[];
   activeSuggestionIndex: number | null;
+  accountLabel: string;
+  accountSubtitle: string;
   styleSettings: {
     fontStack: string;
     fontSize: number;
@@ -33,6 +35,7 @@ type WorkspaceEditorPanelProps = {
   onOpenSummaryModal: () => void;
   onDeleteChapter: () => void;
   onOpenEditorSettings: () => void;
+  onOpenAccount: () => void;
   onAnalyze: () => void;
   onContentChange: (value: string) => void;
   onActivateSuggestion: (index: number) => void;
@@ -52,29 +55,24 @@ export function WorkspaceEditorPanel({
   analysisNotice,
   suggestions,
   activeSuggestionIndex,
+  accountLabel,
+  accountSubtitle,
   styleSettings,
   onTitleChange,
   onOpenSummaryModal,
   onDeleteChapter,
   onOpenEditorSettings,
+  onOpenAccount,
   onAnalyze,
   onContentChange,
   onActivateSuggestion,
 }: WorkspaceEditorPanelProps) {
+  const readingMinutes = count > 0 ? Math.max(1, Math.ceil(count / 500)) : 0;
+
   return (
-    <main data-testid="workspace-editor-panel" className="relative z-0 flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background">
-      <div className="z-10 flex h-14 shrink-0 items-center justify-between border-b border-border bg-background px-6">
+    <main data-testid="workspace-editor-panel" className="relative z-0 flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-white">
+      <div className="z-10 flex h-14 shrink-0 items-center justify-between border-b border-border bg-white px-6">
         <div className="flex items-center gap-4">
-          <div className="flex select-none items-center gap-1.5 text-xs text-gray-400">
-            <StatusIcon
-              size={14}
-              className={cn(
-                statusTone === "success" ? "text-green-500" : "text-gray-400",
-                (status === "saving" || status === "loading" || status === "analyzing") && "animate-spin"
-              )}
-            />
-            <span>{statusLabel}</span>
-          </div>
           <button
             className="rounded p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600"
             onClick={onDeleteChapter}
@@ -90,14 +88,25 @@ export function WorkspaceEditorPanel({
             <Settings size={16} />
           </button>
         </div>
-        <button
-          className="flex items-center gap-1.5 rounded-full bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-60"
-          onClick={onAnalyze}
-          disabled={status === "analyzing"}
-        >
-          {status === "analyzing" ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
-          <span>AI 分析本章</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            className="hidden items-center gap-2 rounded-full border border-neutral-200 bg-[#f7f3ea] px-3 py-1.5 text-left shadow-sm transition-all hover:-translate-y-px hover:border-neutral-950 sm:flex"
+            onClick={onOpenAccount}
+            aria-label="账户中心"
+          >
+            <UserCircle size={17} className="text-neutral-950" />
+            <span className="max-w-28 truncate text-xs font-bold text-neutral-950">{accountLabel}</span>
+            <span className="max-w-20 truncate rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-neutral-500">{accountSubtitle}</span>
+          </button>
+          <button
+            className="flex items-center gap-1.5 rounded-full bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-60"
+            onClick={onAnalyze}
+            disabled={status === "analyzing"}
+          >
+            {status === "analyzing" ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
+            <span>AI 分析本章</span>
+          </button>
+        </div>
       </div>
 
       <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto">
@@ -155,10 +164,20 @@ export function WorkspaceEditorPanel({
         </div>
       </div>
 
-      <div className="flex h-10 shrink-0 items-center justify-between border-t border-border bg-muted/40 px-6 text-[12px] font-medium text-muted-foreground">
-        <div className="flex items-center">
-          <span className="mr-2 h-1.5 w-1.5 rounded-full bg-green-500" />
-          本章字数: {count}
+      <div className="flex h-10 shrink-0 items-center justify-between border-t border-border bg-white px-6 text-[12px] font-medium text-muted-foreground">
+        <div className="flex min-w-0 items-center gap-4">
+          <span className="flex select-none items-center gap-1.5">
+            <StatusIcon
+              size={14}
+              className={cn(
+                statusTone === "success" ? "text-green-500" : "text-gray-400",
+                (status === "saving" || status === "loading" || status === "analyzing") && "animate-spin"
+              )}
+            />
+            {statusLabel}
+          </span>
+          <span>本章字数: {count}</span>
+          <span>预计阅读: {readingMinutes} 分钟</span>
         </div>
         <div>今日字数: {todayCount}</div>
       </div>

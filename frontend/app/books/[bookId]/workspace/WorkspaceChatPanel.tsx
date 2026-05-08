@@ -151,7 +151,7 @@ export function WorkspaceChatPanel({
   }
 
   return (
-    <aside data-testid="workspace-chat-panel" className="relative z-20 flex h-full min-h-0 min-w-0 flex-col border-l border-border bg-card shadow-[-2px_0_12px_rgba(0,0,0,0.03)]">
+    <aside data-testid="workspace-chat-panel" className="relative z-20 flex h-full min-h-0 min-w-0 flex-col border-l border-border bg-white shadow-[-2px_0_12px_rgba(0,0,0,0.03)]">
       <div className="flex h-14 items-center justify-between border-b border-border p-4">
         <div className="flex min-w-0 items-center gap-2">
           <span

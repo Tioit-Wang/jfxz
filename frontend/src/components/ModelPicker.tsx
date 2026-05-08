@@ -21,6 +21,7 @@ function scoreTone(score: number): string {
 export function ModelPicker({ models, selectedId, onSelect }: ModelPickerProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const listboxId = "model-picker-listbox";
 
   useEffect(() => {
     if (!open) return;
@@ -43,6 +44,7 @@ export function ModelPicker({ models, selectedId, onSelect }: ModelPickerProps) 
         aria-label="选择对话模型"
         aria-expanded={open}
         aria-haspopup="listbox"
+        aria-controls={listboxId}
         className="flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-xs transition-colors hover:bg-accent"
         onClick={() => setOpen((v) => !v)}
       >
@@ -56,6 +58,7 @@ export function ModelPicker({ models, selectedId, onSelect }: ModelPickerProps) 
 
       {open ? (
         <div
+          id={listboxId}
           role="listbox"
           aria-label="模型列表"
           className="absolute bottom-full left-0 z-30 mb-1 w-[264px] rounded-xl border border-border bg-popover p-1 shadow-lg"

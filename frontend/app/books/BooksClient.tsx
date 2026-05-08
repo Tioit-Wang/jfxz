@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, BatteryCharging, BookOpen, ChevronDown, ChevronRight, Clock, Crown, FileText, Layers, LayoutGrid, List, Loader2, LogOut, MoreHorizontal, Plus, Search, Trash2, Zap } from "lucide-react";
+import { ArrowRight, BatteryCharging, BookOpen, ChevronDown, Clock, Crown, FileText, Layers, LayoutGrid, List, Loader2, LogOut, MoreHorizontal, Plus, Search, Trash2, Zap } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";

@@ -122,6 +122,10 @@ export default function AdminProductsPage() {
   const [costPreviewLoading, setCostPreviewLoading] = useState(false);
   const [costPreviewOpen, setCostPreviewOpen] = useState(false);
   const costPreviewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const formKind = form?.kind;
+  const formBundledCreditPackPoints = form?.bundledCreditPackPoints;
+  const formVipDailyPoints = form?.vipDailyPoints;
+  const formPriceAmount = form?.priceAmount;
 
   // Load models for cost preview selector
   useEffect(() => {
@@ -136,7 +140,7 @@ export default function AdminProductsPage() {
 
   // Debounced cost preview fetch
   useEffect(() => {
-    if (!form || form.kind !== "plans" || !selectedModelId) {
+    if (formKind !== "plans" || !selectedModelId) {
       setCostPreview(null);
       return;
     }
@@ -146,10 +150,10 @@ export default function AdminProductsPage() {
       try {
         const result = await client.previewPlanCost({
           modelId: selectedModelId,
-          bundledCreditPackPoints: Number(form.bundledCreditPackPoints || 0),
-          dailyVipPoints: Number(form.vipDailyPoints || 0),
+          bundledCreditPackPoints: Number(formBundledCreditPackPoints || 0),
+          dailyVipPoints: Number(formVipDailyPoints || 0),
           durationDays: 31,
-          priceAmount: form.priceAmount || undefined,
+          priceAmount: formPriceAmount || undefined,
         });
         setCostPreview(result);
       } catch {
@@ -161,7 +165,7 @@ export default function AdminProductsPage() {
     return () => {
       if (costPreviewTimer.current) clearTimeout(costPreviewTimer.current);
     };
-  }, [form?.bundledCreditPackPoints, form?.vipDailyPoints, form?.priceAmount, form?.kind, selectedModelId, client]);
+  }, [formBundledCreditPackPoints, formVipDailyPoints, formPriceAmount, formKind, selectedModelId, client]);
 
   async function load(kind = activeKind, nextPage = page) {
     setLoading(true);

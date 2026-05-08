@@ -392,16 +392,23 @@ describe("ModelPicker", () => {
       prose_score: 7,
       knowledge_score: 4,
       max_context_tokens: 1000000,
-      max_output_tokens: 1536
+      max_output_tokens: 1536,
+      temperature: "0.70",
+      status: "active",
+      sort_order: 1
     },
     {
       id: "m2",
       display_name: "轻量续写",
+      description: null,
       logic_score: 6,
       prose_score: 8,
       knowledge_score: 5,
       max_context_tokens: 32000,
-      max_output_tokens: 4000
+      max_output_tokens: 4000,
+      temperature: "0.70",
+      status: "active",
+      sort_order: 2
     }
   ];
 

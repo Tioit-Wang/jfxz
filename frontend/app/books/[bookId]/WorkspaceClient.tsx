@@ -283,8 +283,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const [aiModels, setAiModels] = useState<AiModelOption[]>([]);
   const [selectedModelId, setSelectedModelId] = useState("");
   const [modelStatus, setModelStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [thinkingEnabled, setThinkingEnabled] = useState(false);
-  const [thinkingIntensity, setThinkingIntensity] = useState(0.5);
+  const [thinkingIntensity, setThinkingIntensity] = useState<"none" | "low" | "medium" | "high" | "xhigh">("xhigh");
 
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
@@ -938,7 +937,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
           );
         },
         selectedModelId,
-        thinkingEnabled ? thinkingIntensity : undefined,
+        thinkingIntensity !== "none" ? ({ low: 0.25, medium: 0.5, high: 0.75, xhigh: 1.0 }[thinkingIntensity]) : undefined,
         (tool, status, data) => {
           setMessages((items) =>
             items.map((item) => {
@@ -1774,7 +1773,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
         <ResizablePanel
           id="workspace-sidebar"
           defaultSize={`${workspaceDefaultLayout?.["workspace-sidebar"] ?? 18}%`}
-          minSize="160px"
+          minSize="220px"
           maxSize="30%"
           panelRef={workspaceSidebarRef}
           className="min-h-0 min-w-0"
@@ -1927,8 +1926,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
             selectedModelId={selectedModelId}
             onRetryModels={() => void retryModels()}
             onSelectChatModel={selectChatModel}
-            thinkingEnabled={thinkingEnabled}
-            onThinkingEnabledChange={setThinkingEnabled}
             thinkingIntensity={thinkingIntensity}
             onThinkingIntensityChange={setThinkingIntensity}
             chatInputRef={chatInputRef}

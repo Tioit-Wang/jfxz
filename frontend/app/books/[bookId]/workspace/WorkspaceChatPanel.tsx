@@ -1,7 +1,7 @@
 "use client";
 
 import { AlertCircle, Brain, Clock3, History, MessageSquare, Wand2, X } from "lucide-react";
-import { type ReactNode, type RefObject, useRef, useState } from "react";
+import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
 import type {
   AiModelOption,
   ApiSuggestion,
@@ -14,9 +14,35 @@ import { ChatMentionInput, type ChatMentionInputHandle } from "@/components/Chat
 import { ModelPicker } from "@/components/ModelPicker";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { readWorkspaceMentionDragData, type WorkspaceMentionReference } from "./dnd";
+
+const THINKING_LEVELS = ["none", "low", "medium", "high", "xhigh"] as const;
+type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+
+const THINKING_LABELS: Record<ThinkingLevel, string> = {
+  none: "不思考",
+  low: "低",
+  medium: "中",
+  high: "高",
+  xhigh: "极限",
+};
+
+const THINKING_ICON_COLORS: Record<ThinkingLevel, string> = {
+  none: "text-muted-foreground/30",
+  low: "text-emerald-400",
+  medium: "text-sky-400",
+  high: "text-amber-400",
+  xhigh: "text-rose-500",
+};
+
+const THINKING_BAR_COLORS: Record<ThinkingLevel, string> = {
+  none: "bg-muted",
+  low: "bg-emerald-400",
+  medium: "bg-sky-400",
+  high: "bg-amber-400",
+  xhigh: "bg-rose-500",
+};
 
 type WorkspaceChatPanelProps = {
   overlay: boolean;
@@ -44,10 +70,8 @@ type WorkspaceChatPanelProps = {
   selectedModelId: string;
   onRetryModels: () => void;
   onSelectChatModel: (modelId: string) => void;
-  thinkingEnabled: boolean;
-  onThinkingEnabledChange: (value: boolean) => void;
-  thinkingIntensity: number;
-  onThinkingIntensityChange: (value: number) => void;
+  thinkingIntensity: ThinkingLevel;
+  onThinkingIntensityChange: (value: ThinkingLevel) => void;
   chatInputRef: RefObject<ChatMentionInputHandle | null>;
   chatInput: string;
   chatMentions: ChatMention[];
@@ -89,8 +113,6 @@ export function WorkspaceChatPanel({
   selectedModelId,
   onRetryModels,
   onSelectChatModel,
-  thinkingEnabled,
-  onThinkingEnabledChange,
   thinkingIntensity,
   onThinkingIntensityChange,
   chatInputRef,
@@ -109,6 +131,19 @@ export function WorkspaceChatPanel({
 }: WorkspaceChatPanelProps) {
   const dragDepthRef = useRef(0);
   const [isDropActive, setIsDropActive] = useState(false);
+  const [showThinkingPopup, setShowThinkingPopup] = useState(false);
+  const thinkingPopupRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showThinkingPopup) return;
+    function onClickOutside(e: MouseEvent) {
+      if (thinkingPopupRef.current && !thinkingPopupRef.current.contains(e.target as Node)) {
+        setShowThinkingPopup(false);
+      }
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [showThinkingPopup]);
 
   function readDraggedReference(dataTransfer: DataTransfer | null | undefined) {
     if (chatInputDisabled) return null;
@@ -267,8 +302,8 @@ export function WorkspaceChatPanel({
               onMentionDrop(reference);
             }}
           >
-            <div className="flex items-center justify-between pl-3 pr-4 py-2">
-              <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+            <div className="flex items-center pl-3 pr-4 py-2">
+              <div className="flex min-w-0 items-center text-xs text-muted-foreground">
                 {modelStatus === "loading" ? (
                   <span className="text-muted-foreground/50">模型加载中...</span>
                 ) : modelStatus === "error" ? (
@@ -284,23 +319,51 @@ export function WorkspaceChatPanel({
                   <ModelPicker models={aiModels} selectedId={selectedModelId} onSelect={onSelectChatModel} />
                 )}
               </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Brain size={12} className="text-muted-foreground/60" />
-                  <span>思考</span>
-                  <Switch checked={thinkingEnabled} onCheckedChange={onThinkingEnabledChange} aria-label="开启思考" />
-                </div>
-                {thinkingEnabled ? (
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={Math.round(thinkingIntensity * 100)}
-                    onChange={(event) => onThinkingIntensityChange(Number(event.target.value) / 100)}
-                    className="h-1 w-16 cursor-pointer accent-primary"
-                    aria-label="思考强度"
-                  />
-                ) : null}
+              <div className="relative ml-[2px]" ref={thinkingPopupRef}>
+                <button
+                  className={cn(
+                    "flex items-center justify-center rounded p-1 transition-colors",
+                    THINKING_ICON_COLORS[thinkingIntensity]
+                  )}
+                  onClick={() => setShowThinkingPopup((v) => !v)}
+                  aria-label="思考设置"
+                >
+                  <Brain size={14} />
+                </button>
+                {showThinkingPopup && (
+                  <div className="absolute bottom-full left-0 z-50 mb-2 w-52 rounded-lg border border-border bg-popover p-3 shadow-lg">
+                    <span className="text-[11px] text-muted-foreground">思考强度</span>
+                    <div className="mt-2 flex gap-1">
+                      {THINKING_LEVELS.map((level, index) => {
+                        const activeIndex = THINKING_LEVELS.indexOf(thinkingIntensity);
+                        const isFilled = thinkingIntensity !== "none" && index <= activeIndex;
+                        return (
+                          <button
+                            key={level}
+                            className={cn(
+                              "h-2 flex-1 rounded-full transition-all",
+                              isFilled ? THINKING_BAR_COLORS[thinkingIntensity] : "bg-muted"
+                            )}
+                            onClick={() => onThinkingIntensityChange(level)}
+                          />
+                        );
+                      })}
+                    </div>
+                    <div className="mt-1.5 flex">
+                      {THINKING_LEVELS.map((level) => (
+                        <span
+                          key={level}
+                          className={cn(
+                            "flex-1 text-center text-[10px] transition-colors",
+                            level === thinkingIntensity ? THINKING_ICON_COLORS[thinkingIntensity] : "text-muted-foreground/60"
+                          )}
+                        >
+                          {THINKING_LABELS[level]}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 

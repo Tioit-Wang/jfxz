@@ -424,118 +424,79 @@ export function WorkspaceSidebarPanel({
         ) : null}
       </div>
 
-      <div className="border-t border-border/60 bg-muted/20 p-4">
-        <div
-          className={cn(
-            "group relative cursor-pointer overflow-hidden rounded-2xl border p-4 transition-all duration-300",
-            profile?.subscription
-              ? "border-amber-200/50 bg-gradient-to-br from-amber-50/50 via-background to-orange-50/30 hover:border-amber-300/60 hover:shadow-[0_4px_20px_-8px_rgba(245,158,11,0.2)]"
-              : "border-border bg-card hover:border-primary/30 hover:shadow-md"
-          )}
-          onClick={onTogglePointsDetail}
-        >
-          {profile?.subscription ? (
-            <div className="absolute -right-6 -top-6 h-24 w-24 rounded-full bg-gradient-to-br from-amber-400/20 to-orange-500/20 blur-2xl transition-all group-hover:scale-110" />
-          ) : null}
+      <div
+        className={cn(
+          "relative shrink-0 border-t border-border/60 px-3 py-2.5",
+          profile?.subscription
+            ? "bg-gradient-to-br from-amber-50/50 via-background to-orange-50/20"
+            : "bg-muted/20"
+        )}
+      >
+        {profile?.subscription ? (
+          <div className="absolute -right-4 -top-4 h-16 w-16 rounded-full bg-gradient-to-br from-amber-400/15 to-orange-500/15 blur-xl" />
+        ) : null}
 
-          <div className="relative flex items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-3">
-              <div
-                className={cn(
-                  "relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white shadow-sm ring-2 ring-background",
-                  profile?.subscription
-                    ? "bg-gradient-to-br from-amber-400 to-orange-500 shadow-amber-500/20"
-                    : "bg-gradient-to-br from-slate-400 to-slate-500"
-                )}
-              >
-                {(profile?.user.nickname || profile?.user.email || "U").slice(0, 1).toUpperCase()}
-                {profile?.subscription ? (
-                  <div className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-white shadow-sm">
-                    <Crown size={10} className="text-amber-500" />
-                  </div>
-                ) : null}
-              </div>
-              <div className="min-w-0">
-                <span className="block truncate text-sm font-bold text-foreground">{profile?.user.nickname || "账户中心"}</span>
-                <span className={cn("block text-[11px] font-medium", profile?.subscription ? "text-amber-600" : "text-muted-foreground")}>
-                  {profile?.subscription ? "尊享 VIP 创作中" : "免费版体验中"}
-                </span>
-              </div>
-            </div>
-            {showPointsDetail ? (
-              <button
-                className={cn(
-                  "inline-flex shrink-0 items-center gap-1 rounded-full px-3 py-1.5 text-[11px] font-bold shadow-sm transition-all active:scale-[0.97]",
-                  profile?.subscription
-                    ? "bg-gradient-to-r from-amber-500 to-orange-500 text-white hover:from-amber-600 hover:to-orange-600 hover:shadow-amber-500/25"
-                    : "bg-primary text-primary-foreground hover:bg-primary/90"
-                )}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onOpenBilling();
-                }}
-              >
-                <Sparkles size={12} className={profile?.subscription ? "text-amber-100" : ""} />
-                {profile?.subscription ? "续费套餐" : "升级解锁"}
-              </button>
-            ) : (
-              <div className="shrink-0 text-right text-[11px] tabular-nums leading-relaxed text-muted-foreground">
-                <div className="font-medium text-foreground">
-                  <Zap size={10} className="mb-0.5 mr-0.5 inline text-amber-500" />
-                  {(profile?.points.vipDailyPoints ?? 0) + (profile?.points.creditPackPoints ?? 0)}
+        <div className="relative flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <div
+              className={cn(
+                "relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white shadow-sm ring-2 ring-background",
+                profile?.subscription
+                  ? "bg-gradient-to-br from-amber-400 to-orange-500 shadow-amber-500/20"
+                  : "bg-gradient-to-br from-slate-400 to-slate-500"
+              )}
+            >
+              {(profile?.user.nickname || profile?.user.email || "U").slice(0, 1).toUpperCase()}
+              {profile?.subscription ? (
+                <div className="absolute -right-0.5 -bottom-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-white shadow-sm">
+                  <Crown size={8} className="text-amber-500" />
                 </div>
-                <div className="text-[10px] opacity-70">可用积分</div>
-              </div>
+              ) : null}
+            </div>
+            <div className="min-w-0">
+              <span className="block truncate text-sm font-bold text-foreground">{profile?.user.nickname || "账户中心"}</span>
+              <span className={cn("block text-[11px] font-medium", profile?.subscription ? "text-amber-600" : "text-muted-foreground")}>
+                {profile?.subscription ? "尊享 VIP 创作中" : "免费版体验中"}
+              </span>
+            </div>
+          </div>
+          <button
+            className={cn(
+              "inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold shadow-sm transition-all active:scale-[0.97]",
+              profile?.subscription
+                ? "bg-gradient-to-r from-amber-500 to-orange-500 text-white hover:from-amber-600 hover:to-orange-600 hover:shadow-amber-500/25"
+                : "bg-primary text-primary-foreground hover:bg-primary/90"
             )}
+            onClick={onOpenBilling}
+          >
+            <Sparkles size={11} className={profile?.subscription ? "text-amber-100" : ""} />
+            {profile?.subscription ? "续费" : "升级"}
+          </button>
+        </div>
+
+        <div className="relative mt-2 space-y-1">
+          <div className="flex items-center justify-between">
+            <span className="flex min-w-0 items-center gap-1 text-[11px] font-medium text-foreground">
+              <div className="flex shrink-0 rounded bg-amber-100 p-0.5 text-amber-600">
+                <Crown size={10} />
+              </div>
+              每日畅写
+            </span>
+            <span className="shrink-0 tabular-nums text-[11px] font-semibold text-foreground">
+              {(profile?.points.vipDailyPoints ?? 0).toFixed(1)} <span className="text-[10px] font-normal text-muted-foreground">/日</span>
+            </span>
           </div>
 
-          <div
-            className={cn(
-              "relative overflow-hidden transition-all duration-500 ease-in-out",
-              showPointsDetail ? "mt-5 max-h-48 opacity-100" : "max-h-0 opacity-0"
-            )}
-          >
-            <div className="space-y-4">
-              <div>
-                <div className="mb-1.5 flex items-center justify-between text-xs">
-                  <span className="flex items-center gap-1.5 font-medium text-foreground">
-                    <div className="flex rounded bg-amber-100 p-0.5 text-amber-600">
-                      <Crown size={12} />
-                    </div>
-                    每日畅写积分
-                  </span>
-                  <span className="tabular-nums font-semibold text-foreground">
-                    {(profile?.points.vipDailyPoints ?? 0).toFixed(1)} <span className="text-[10px] font-normal text-muted-foreground">/日</span>
-                  </span>
-                </div>
-                <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted/60 shadow-inner">
-                  <div
-                    className="h-full rounded-full bg-gradient-to-r from-amber-400 to-orange-400 transition-all duration-1000 ease-out"
-                    style={{ width: `${Math.min(100, ((profile?.points.vipDailyPoints ?? 0) / 2000) * 100)}%` }}
-                  />
-                </div>
+          <div className="flex items-center justify-between">
+            <span className="flex min-w-0 items-center gap-1 text-[11px] font-medium text-foreground">
+              <div className="flex shrink-0 rounded bg-blue-100 p-0.5 text-blue-600">
+                <Zap size={10} />
               </div>
-
-              <div>
-                <div className="mb-1.5 flex items-center justify-between text-xs">
-                  <span className="flex items-center gap-1.5 font-medium text-foreground">
-                    <div className="flex rounded bg-blue-100 p-0.5 text-blue-600">
-                      <Zap size={12} />
-                    </div>
-                    永久灵感加油包
-                  </span>
-                  <span className="tabular-nums font-semibold text-foreground">
-                    {(profile?.points.creditPackPoints ?? 0).toFixed(1)} <span className="text-[10px] font-normal text-muted-foreground">点</span>
-                  </span>
-                </div>
-                <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted/60 shadow-inner">
-                  <div
-                    className="h-full rounded-full bg-gradient-to-r from-blue-400 to-cyan-400 transition-all duration-1000 ease-out"
-                    style={{ width: `${Math.min(100, ((profile?.points.creditPackPoints ?? 0) / 2000) * 100)}%` }}
-                  />
-                </div>
-              </div>
-            </div>
+              灵感加油包
+            </span>
+            <span className="shrink-0 tabular-nums text-[11px] font-semibold text-foreground">
+              {(profile?.points.creditPackPoints ?? 0).toFixed(1)} <span className="text-[10px] font-normal text-muted-foreground">点</span>
+            </span>
           </div>
         </div>
       </div>

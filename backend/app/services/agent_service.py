@@ -2,6 +2,7 @@ import asyncio
 import json
 from datetime import datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from agno.agent import Agent
 from agno.db.base import BaseDb
@@ -12,10 +13,11 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.models import Chapter, Character, SettingItem, Work
+from app.models import Chapter, Character, DailyWordProgress, SettingItem, Volume, Work
 
 _db: BaseDb | None = None
 _work_db_locks: dict[tuple[int, str], asyncio.Lock] = {}
+SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 
 
 def _work_db_lock(work_id: str) -> asyncio.Lock:
@@ -109,15 +111,24 @@ PROMPT_TEMPLATE = """\
 
 ### 章节创作
 
+- `list_volumes(limit?)` — 列出作品卷信息，按卷顺序排列，默认最多返回 20 条
+  返回 id / order_index / title。需要确认章节所属卷、查看卷结构时使用。
+
+- `create_volume(title)` — 创建新卷，自动追加到最后一卷之后
+  title 必填。创建成功后返回新卷 id / order_index / title。
+
+- `update_volume(volume_id, title, order_index?)` — 修改指定卷
+  title 覆盖原卷名；order_index 可选，仅在需要调整卷顺序时传入。
+
 - `get_chapter(chapter_id)` — 获取指定章节完整信息，含正文全文（content 字段）
   数据量较大，仅在需要阅读或参考正文时调用。
   与 `list_chapters` 的区别：本工具返回正文全文；`list_chapters` 只返回目录概览，浏览章节结构时优先使用。
 
 - `list_chapters(limit?)` — 列出章节目录，按章节顺序排列，默认最多返回 20 条
-  只返回 id / order_index / title / summary，不包含正文。
+  只返回 id / volume_id / order_index / title / summary，不包含正文。
   了解章节结构、确定当前进度、拟定下一章标题时使用。
 
-- `create_chapter(title, summary?)` — 创建新章节，自动追加到最后一章之后
+- `create_chapter(title, summary?, volume_id?)` — 创建新章节，自动追加到指定卷最后一章之后；未指定 volume_id 时写入默认第一卷
   title 必填；summary 可选。用户未指定标题时，先调用 `list_chapters` 了解已有结构后再拟定标题。
 
 - `update_chapter_summary(chapter_id, summary)` — 更新指定章节的摘要
@@ -245,6 +256,43 @@ def _normalize_list_limit(limit: int, default: int = 20, maximum: int = 100) -> 
     return max(1, min(limit, maximum))
 
 
+def _count_words(value: str) -> int:
+    return len("".join(value.split()))
+
+
+async def _add_daily_words(db: AsyncSession, work_id: str, words: int) -> None:
+    if words <= 0:
+        return
+    today = datetime.now(SHANGHAI_TZ).date()
+    result = await db.execute(
+        select(DailyWordProgress).where(
+            DailyWordProgress.work_id == work_id,
+            DailyWordProgress.date == today,
+        )
+    )
+    progress = result.scalar_one_or_none()
+    if progress is None:
+        progress = DailyWordProgress(work_id=work_id, date=today, words_added=0)
+        db.add(progress)
+    progress.words_added += words
+
+
+async def _ensure_default_volume(db: AsyncSession, work_id: str) -> Volume:
+    result = await db.execute(
+        select(Volume).where(Volume.work_id == work_id).order_by(Volume.order_index)
+    )
+    volume = result.scalars().first()
+    if volume is None:
+        volume = Volume(work_id=work_id, order_index=1, title="默认卷")
+        db.add(volume)
+        await db.flush()
+    for chapter in (
+        await db.execute(select(Chapter).where(Chapter.work_id == work_id, Chapter.volume_id.is_(None)))
+    ).scalars():
+        chapter.volume_id = volume.id
+    return volume
+
+
 class GoodguaTools(Toolkit):
     def __init__(self, db: AsyncSession, work_id: str):
         super().__init__(name="goodgua_tools")
@@ -259,6 +307,9 @@ class GoodguaTools(Toolkit):
         self.register(self.list_settings)
         self.register(self.create_or_update_setting)
         self.register(self.delete_setting)
+        self.register(self.list_volumes)
+        self.register(self.create_volume)
+        self.register(self.update_volume)
         self.register(self.get_chapter)
         self.register(self.list_chapters)
         self.register(self.create_chapter)
@@ -447,6 +498,70 @@ class GoodguaTools(Toolkit):
                 await self.db.rollback()
                 raise
 
+    async def list_volumes(self, limit: int = 20) -> str:
+        """列出当前作品卷概览，按卷顺序排列。默认最多返回 20 条，返回 id/order_index/title。创建章节时如需指定所属卷，先用本工具确认 volume_id。"""
+        limit = _normalize_list_limit(limit)
+        await _ensure_default_volume(self.db, self.work_id)
+        result = await self.db.execute(
+            select(Volume)
+            .where(Volume.work_id == self.work_id)
+            .order_by(Volume.order_index)
+            .limit(limit)
+        )
+        items = [_serialize_lite(v, ["id", "order_index", "title"]) for v in result.scalars()]
+        return json.dumps(items, ensure_ascii=False)
+
+    async def create_volume(self, title: str) -> str:
+        """创建新卷，自动追加到最后一卷之后。title 为必填卷名。创建成功后返回 id/order_index/title/时间戳。"""
+        async with self._db_lock:
+            try:
+                await _ensure_default_volume(self.db, self.work_id)
+                count_result = await self.db.execute(
+                    select(func.count(Volume.id)).where(Volume.work_id == self.work_id)
+                )
+                order_index = int(count_result.scalar() or 0) + 1
+                volume = Volume(
+                    work_id=self.work_id,
+                    order_index=order_index,
+                    title=title.strip() or f"第 {order_index} 卷",
+                )
+                self.db.add(volume)
+                await self.db.commit()
+                await self.db.refresh(volume)
+                return json.dumps(
+                    _serialize_lite(
+                        volume, ["id", "order_index", "title", "created_at", "updated_at"]
+                    ),
+                    ensure_ascii=False,
+                )
+            except Exception:
+                await self.db.rollback()
+                raise
+
+    async def update_volume(
+        self, volume_id: str, title: str, order_index: int | None = None
+    ) -> str:
+        """修改指定卷。title 覆盖原卷名；order_index 可选，仅在需要调整卷顺序时传入。返回更新后的 id/order_index/title/updated_at。"""
+        async with self._db_lock:
+            try:
+                result = await self.db.execute(
+                    select(Volume).where(Volume.id == volume_id, Volume.work_id == self.work_id)
+                )
+                volume = result.scalar_one_or_none()
+                if volume is None:
+                    return json.dumps({"error": "volume not found"}, ensure_ascii=False)
+                volume.title = title.strip() or volume.title
+                if order_index is not None:
+                    volume.order_index = order_index
+                await self.db.commit()
+                return json.dumps(
+                    _serialize_lite(volume, ["id", "order_index", "title", "updated_at"]),
+                    ensure_ascii=False,
+                )
+            except Exception:
+                await self.db.rollback()
+                raise
+
     async def get_chapter(self, chapter_id: str) -> str:
         """获取指定章节的完整信息，包含正文全文（content 字段）。章节不存在时返回 error。数据量较大，仅在需要阅读或参考正文时调用。与 list_chapters 的区别：本工具返回正文全文，list_chapters 只返回目录概览（不含 content），浏览章节结构时优先使用 list_chapters。"""
         result = await self.db.execute(
@@ -458,29 +573,42 @@ class GoodguaTools(Toolkit):
         return json.dumps(_serialize(chapter), ensure_ascii=False)
 
     async def list_chapters(self, limit: int = 20) -> str:
-        """列出当前作品章节目录概览，按章节顺序排列。默认最多返回 20 条，仅返回 id/order_index/title/summary 四个字段，不包含正文（content）。需查看正文内容时使用 get_chapter。"""
+        """列出当前作品章节目录概览，按章节顺序排列。默认最多返回 20 条，仅返回 id/volume_id/order_index/title/summary，不包含正文（content）。需查看正文内容时使用 get_chapter。"""
         limit = _normalize_list_limit(limit)
+        await _ensure_default_volume(self.db, self.work_id)
         result = await self.db.execute(
             select(Chapter)
             .where(Chapter.work_id == self.work_id)
-            .order_by(Chapter.order_index)
+            .order_by(Chapter.volume_id, Chapter.order_index)
             .limit(limit)
         )
         items = [
-            _serialize_lite(c, ["id", "order_index", "title", "summary"]) for c in result.scalars()
+            _serialize_lite(c, ["id", "volume_id", "order_index", "title", "summary"]) for c in result.scalars()
         ]
         return json.dumps(items, ensure_ascii=False)
 
-    async def create_chapter(self, title: str, summary: str = "") -> str:
-        """创建新章节，自动追加到最后一章之后。title 为必填的章节标题，summary 为可选的章节摘要。用户未指定标题时，应先调用 list_chapters 了解已有章节结构后再拟定标题。创建成功后返回新章节的 id/order_index/title/summary/时间戳。"""
+    async def create_chapter(
+        self, title: str, summary: str = "", volume_id: str | None = None
+    ) -> str:
+        """创建新章节，自动追加到指定卷最后一章之后。未传 volume_id 时使用默认第一卷。title 为必填章节标题，summary 为可选章节摘要。创建成功后返回新章节的 id/volume_id/order_index/title/summary/时间戳。"""
         async with self._db_lock:
             try:
+                if volume_id:
+                    volume_result = await self.db.execute(
+                        select(Volume).where(Volume.id == volume_id, Volume.work_id == self.work_id)
+                    )
+                    volume = volume_result.scalar_one_or_none()
+                    if volume is None:
+                        return json.dumps({"error": "volume not found"}, ensure_ascii=False)
+                else:
+                    volume = await _ensure_default_volume(self.db, self.work_id)
                 max_result = await self.db.execute(
-                    select(func.max(Chapter.order_index)).where(Chapter.work_id == self.work_id)
+                    select(func.max(Chapter.order_index)).where(Chapter.volume_id == volume.id)
                 )
                 max_order = max_result.scalar() or 0
                 chapter = Chapter(
                     work_id=self.work_id,
+                    volume_id=volume.id,
                     order_index=max_order + 1,
                     title=title,
                     content="",
@@ -492,7 +620,7 @@ class GoodguaTools(Toolkit):
                 return json.dumps(
                     _serialize_lite(
                         chapter,
-                        ["id", "order_index", "title", "summary", "created_at", "updated_at"],
+                        ["id", "volume_id", "order_index", "title", "summary", "created_at", "updated_at"],
                     ),
                     ensure_ascii=False,
                 )
@@ -532,6 +660,9 @@ class GoodguaTools(Toolkit):
                     return json.dumps({"error": "chapter not found"}, ensure_ascii=False)
                 old_content = chapter.content or ""
                 chapter.content = content
+                await _add_daily_words(
+                    self.db, self.work_id, _count_words(content) - _count_words(old_content)
+                )
                 await self.db.commit()
                 return json.dumps(
                     {

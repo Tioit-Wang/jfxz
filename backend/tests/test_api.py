@@ -170,14 +170,29 @@ async def test_character_setting_chapter_and_analysis(client: AsyncClient) -> No
 
     chapters = (await client.get(f"/works/{work_id}/chapters", headers=headers)).json()
     assert chapters[0]["order_index"] == 1
+    volumes = (await client.get(f"/works/{work_id}/volumes", headers=headers)).json()
+    assert volumes[0]["title"] == "默认卷"
+    assert chapters[0]["volume_id"] == volumes[0]["id"]
+    second_volume = (
+        await client.post(f"/works/{work_id}/volumes", headers=headers, json={"title": "第二卷"})
+    ).json()
+    assert second_volume["order_index"] == 2
+    assert (
+        await client.patch(
+            f"/works/{work_id}/volumes/{second_volume['id']}",
+            headers=headers,
+            json={"title": "远航卷"},
+        )
+    ).json()["title"] == "远航卷"
     chapter = (
         await client.post(
             f"/works/{work_id}/chapters",
             headers=headers,
-            json={"title": "第二章", "content": "潮汐退去", "summary": "退潮"},
+            json={"title": "第二章", "content": "潮汐退去", "summary": "退潮", "volume_id": second_volume["id"]},
         )
     ).json()
-    assert chapter["order_index"] == 2
+    assert chapter["order_index"] == 1
+    assert chapter["volume_id"] == second_volume["id"]
     assert (
         await client.patch(
             f"/works/{work_id}/chapters/{chapter['id']}",
@@ -185,6 +200,40 @@ async def test_character_setting_chapter_and_analysis(client: AsyncClient) -> No
             json={"title": "第二章 潮", "content": "潮汐回来", "summary": "涨潮", "order_index": 2},
         )
     ).json()["title"] == "第二章 潮"
+    progress = (await client.get(f"/works/{work_id}/writing-goal", headers=headers)).json()
+    assert progress["goal"]["target_words"] == 2000
+    assert progress["daily_word_progress"]["words_added"] == len("潮汐退去")
+    await client.patch(
+        f"/works/{work_id}/chapters/{chapter['id']}",
+        headers=headers,
+        json={"title": "第二章 潮", "content": "短", "summary": "删改", "order_index": 1, "words_added": 2},
+    )
+    assert (await client.get(f"/works/{work_id}/writing-goal", headers=headers)).json()["daily_word_progress"][
+        "words_added"
+    ] == len("潮汐退去") + 2
+    goal = (
+        await client.patch(
+            f"/works/{work_id}/writing-goal",
+            headers=headers,
+            json={"target_words": 3000},
+        )
+    ).json()
+    assert goal["goal"]["target_words"] == 3000
+    note = (
+        await client.post(
+            f"/works/{work_id}/inspiration-notes",
+            headers=headers,
+            json={"title": "入学考", "content": "学院晚钟响三次", "category": "伏笔"},
+        )
+    ).json()
+    assert (await client.get(f"/works/{work_id}/inspiration-notes", headers=headers)).json()[0]["title"] == "入学考"
+    assert (
+        await client.patch(
+            f"/works/{work_id}/inspiration-notes/{note['id']}",
+            headers=headers,
+            json={"title": "晚钟", "content": "钟声改成两次", "category": ""},
+        )
+    ).json()["category"] == "灵感"
     assert (await client.post(f"/works/{work_id}/analyze", headers=headers, json={"content": ""})).json() == {
         "suggestions": []
     }
@@ -202,6 +251,7 @@ async def test_character_setting_chapter_and_analysis(client: AsyncClient) -> No
     assert (await client.delete(f"/works/{work_id}/chapters/{chapter['id']}", headers=headers)).json()["ok"]
     assert (await client.delete(f"/works/{work_id}/settings/{setting['id']}", headers=headers)).json()["ok"]
     assert (await client.delete(f"/works/{work_id}/characters/{character['id']}", headers=headers)).json()["ok"]
+    assert (await client.delete(f"/works/{work_id}/inspiration-notes/{note['id']}", headers=headers)).json()["ok"]
 
 
 async def test_billing_chat_and_admin(client: AsyncClient) -> None:

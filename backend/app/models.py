@@ -1,10 +1,11 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from uuid import uuid4
 
 from sqlalchemy import (
     JSON,
     Boolean,
+    Date,
     DateTime,
     ForeignKey,
     Integer,
@@ -75,7 +76,11 @@ class Work(Base, TimestampMixin):
     focus_requirements: Mapped[str | None] = mapped_column(Text)
     forbidden_requirements: Mapped[str | None] = mapped_column(Text)
 
+    volumes: Mapped[list["Volume"]] = relationship(cascade="all, delete-orphan")
     chapters: Mapped[list["Chapter"]] = relationship(cascade="all, delete-orphan")
+    inspiration_notes: Mapped[list["InspirationNote"]] = relationship(cascade="all, delete-orphan")
+    writing_goals: Mapped[list["WritingGoal"]] = relationship(cascade="all, delete-orphan")
+    daily_word_progress: Mapped[list["DailyWordProgress"]] = relationship(cascade="all, delete-orphan")
 
 
 class Character(Base, TimestampMixin):
@@ -99,16 +104,57 @@ class SettingItem(Base, TimestampMixin):
     detail: Mapped[str | None] = mapped_column(Text)
 
 
-class Chapter(Base, TimestampMixin):
-    __tablename__ = "chapters"
+class Volume(Base, TimestampMixin):
+    __tablename__ = "volumes"
     __table_args__ = (UniqueConstraint("work_id", "order_index"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     work_id: Mapped[str] = mapped_column(ForeignKey("works.id", ondelete="CASCADE"), index=True)
     order_index: Mapped[int] = mapped_column(Integer, index=True)
     title: Mapped[str] = mapped_column(String(200))
+
+
+class Chapter(Base, TimestampMixin):
+    __tablename__ = "chapters"
+    __table_args__ = (UniqueConstraint("volume_id", "order_index"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    work_id: Mapped[str] = mapped_column(ForeignKey("works.id", ondelete="CASCADE"), index=True)
+    volume_id: Mapped[str | None] = mapped_column(ForeignKey("volumes.id", ondelete="SET NULL"), index=True)
+    order_index: Mapped[int] = mapped_column(Integer, index=True)
+    title: Mapped[str] = mapped_column(String(200))
     content: Mapped[str] = mapped_column(Text, default="")
     summary: Mapped[str | None] = mapped_column(Text)
+
+
+class InspirationNote(Base, TimestampMixin):
+    __tablename__ = "inspiration_notes"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    work_id: Mapped[str] = mapped_column(ForeignKey("works.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str] = mapped_column(String(100))
+    content: Mapped[str] = mapped_column(Text, default="")
+    category: Mapped[str] = mapped_column(String(50), default="灵感", index=True)
+
+
+class WritingGoal(Base, TimestampMixin):
+    __tablename__ = "writing_goals"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    work_id: Mapped[str] = mapped_column(
+        ForeignKey("works.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    target_words: Mapped[int] = mapped_column(Integer, default=2000)
+
+
+class DailyWordProgress(Base, TimestampMixin):
+    __tablename__ = "daily_word_progress"
+    __table_args__ = (UniqueConstraint("work_id", "date"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    work_id: Mapped[str] = mapped_column(ForeignKey("works.id", ondelete="CASCADE"), index=True)
+    date: Mapped[date] = mapped_column(Date, index=True)
+    words_added: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class ChatSession(Base, TimestampMixin):

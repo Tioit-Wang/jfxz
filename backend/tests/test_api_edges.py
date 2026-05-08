@@ -14,7 +14,7 @@ import pytest
 import pytest_asyncio
 from fastapi import HTTPException, Response
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import app.api.routes as routes_module
@@ -27,6 +27,9 @@ _TOOL_ACTION_MAP = {
     "list_characters": "list_characters",
     "get_setting": "get_setting",
     "list_settings": "list_settings",
+    "list_volumes": "list_volumes",
+    "create_volume": "create_volume",
+    "update_volume": "update_volume",
     "get_chapter": "get_chapter",
     "list_chapters": "list_chapters",
     "update_chapter_summary": "update_chapter_summary",
@@ -52,11 +55,14 @@ from app.api.routes import (
     ChatSessionIn,
     ConfigValueIn,
     EmailLogin,
+    InspirationNoteIn,
     NamedContentIn,
     OrderIn,
     ProductIn,
     RegisterIn,
     UserPatch,
+    VolumeIn,
+    WritingGoalIn,
     WorkIn,
     active_ai_models,
     admin_configs,
@@ -85,20 +91,24 @@ from app.api.routes import (
     create_chapter,
     create_character,
     create_chat_session,
+    create_inspiration_note,
     create_order,
     create_setting,
     create_user_account,
+    create_volume,
     create_work,
     current_admin,
     current_user,
     delete_chapter,
     delete_character,
+    delete_inspiration_note,
     delete_setting,
     delete_work,
     encode_sse,
     ensure_point_account,
     get_me,
     get_order,
+    get_writing_goal,
     get_work,
     grant_order,
     list_by_work,
@@ -106,7 +116,9 @@ from app.api.routes import (
     list_characters,
     list_chat_messages,
     list_chat_sessions,
+    list_inspiration_notes,
     list_settings,
+    list_volumes,
     list_works,
     login_email,
     message_page,
@@ -121,7 +133,10 @@ from app.api.routes import (
     simulate_paid,
     update_chapter,
     update_character,
+    update_inspiration_note,
     update_setting,
+    update_volume,
+    update_writing_goal,
     update_work,
     workspace_bootstrap,
 )
@@ -152,6 +167,7 @@ async def _mock_resolve_editor_model(*args, **kwargs) -> AiModel:
 
 from agno.run.agent import RunEvent
 from app.core.config import Settings, get_settings
+import app.core.database as database_module
 from app.core.database import _drop_agent_sessions_if_invalid, get_session, init_database
 from app.core.security import (
     hash_legacy_sha256,
@@ -381,12 +397,62 @@ async def test_workspace_bootstrap_returns_initial_workspace_bundle(session: Asy
     bundle = await workspace_bootstrap(work["id"], user, session)
 
     assert bundle["work"]["id"] == work["id"]
+    assert bundle["volumes"][0]["title"] == "默认卷"
     assert bundle["chapters"]
+    assert bundle["chapters"][0]["volume_id"] == bundle["volumes"][0]["id"]
     assert bundle["characters"][0]["id"] == character["id"]
     assert bundle["settings"][0]["id"] == setting["id"]
+    assert bundle["inspiration_notes"] == []
+    assert bundle["writing_goal"]["target_words"] == 2000
+    assert bundle["daily_word_progress"]["words_added"] == 0
     assert bundle["sessions"][0]["id"] == bundle["active_session"]["id"]
     assert bundle["messages"] == {"messages": [], "has_more": False, "next_before": None}
     assert bundle["profile"]["user"]["id"] == user.id
+
+
+async def test_inspiration_goal_routes_and_daily_progress(session: AsyncSession) -> None:
+    user = await create_user_account(session, "inspiration@example.com", "user12345", "Inspiration")
+    await session.commit()
+    work = await create_work(
+        WorkIn(title="灵感作品", short_intro="", synopsis="", genre_tags=[], background_rules=""),
+        user,
+        session,
+    )
+
+    await create_chapter(
+        work["id"],
+        ChapterIn(title="第二章", content="潮汐退去", summary="退潮"),
+        user,
+        session,
+    )
+    progress = await get_writing_goal(work["id"], user, session)
+    assert progress["daily_word_progress"]["words_added"] == 4
+
+    goal = await update_writing_goal(
+        work["id"],
+        WritingGoalIn(target_words=3000),
+        user,
+        session,
+    )
+    assert goal["goal"]["target_words"] == 3000
+
+    note = await create_inspiration_note(
+        work["id"],
+        InspirationNoteIn(title="入学考", content="钟声三次", category="伏笔"),
+        user,
+        session,
+    )
+    assert [item["id"] for item in await list_inspiration_notes(work["id"], user, session)] == [note["id"]]
+
+    updated = await update_inspiration_note(
+        work["id"],
+        note["id"],
+        InspirationNoteIn(title="晚钟", content="钟声两次", category=""),
+        user,
+        session,
+    )
+    assert updated["category"] == "灵感"
+    assert await delete_inspiration_note(work["id"], note["id"], user, session) == {"ok": True}
 
 
 async def test_reference_context_batches_refs_without_session_get(session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -458,6 +524,7 @@ async def test_chat_helpers_and_error_branches(session: AsyncSession) -> None:
     assert page["messages"][0]["id"] == "m2"
     assert page["has_more"] is True
     assert _tool_action("update_work_info") == {"type": "update_work_info", "label": "更新作品信息"}
+    assert _tool_action("create_volume") == {"type": "create_volume", "label": "创建卷"}
     assert _tool_action("create_or_update_character") == {"type": "save_character", "label": "创建/更新角色"}
     assert _tool_action("nonexistent") is None
     assert "event: done" in encode_sse("done", {"ok": True}).decode()
@@ -1177,22 +1244,52 @@ async def test_direct_user_routes_cover_core_documented_workflows(session: Async
         )
     )["type"] == "location"
 
+    default_volume = (await list_volumes(work_id, user, session))[0]
+    assert default_volume["title"] == "默认卷"
+    new_volume = await create_volume(work_id, VolumeIn(title="第二卷"), user, session)
+    assert new_volume["order_index"] == 2
+    explicit_volume = await create_volume(work_id, VolumeIn(title="", order_index=5), user, session)
+    assert explicit_volume["title"] == "第 5 卷"
+    assert explicit_volume["order_index"] == 5
+    assert (
+        await update_volume(work_id, new_volume["id"], VolumeIn(title="第二卷改", order_index=4), user, session)
+    )["title"] == "第二卷改"
+    assert (
+        await update_volume(work_id, new_volume["id"], VolumeIn(title="第二卷终"), user, session)
+    )["order_index"] == 4
+
     chapter = await create_chapter(
         work_id,
-        ChapterIn(title="第二章", content="正文", summary="摘要"),
+        ChapterIn(title="第二章", content="正文", summary="摘要", volume_id=new_volume["id"]),
         user,
         session,
     )
+    assert chapter["volume_id"] == new_volume["id"]
     assert len(await list_chapters(work_id, user, session)) == 2
     assert (
         await update_chapter(
             work_id,
             chapter["id"],
-            ChapterIn(title="第二章 改", content="正文2", summary="摘要2", order_index=2),
+            ChapterIn(
+                title="第二章 改",
+                content="正文2",
+                summary="摘要2",
+                order_index=2,
+                volume_id=default_volume["id"],
+            ),
             user,
             session,
         )
     )["title"] == "第二章 改"
+    assert (
+        await update_chapter(
+            work_id,
+            chapter["id"],
+            ChapterIn(title="第二章 终", content="正文3", summary="摘要3", order_index=3),
+            user,
+            session,
+        )
+    )["title"] == "第二章 终"
     account = await ensure_point_account(session, user.id)
     account.vip_daily_points_balance = 100
     await session.commit()
@@ -1746,6 +1843,44 @@ async def test_init_database_auto_create_disabled(monkeypatch: pytest.MonkeyPatc
     )
 
     await init_database()
+
+
+async def test_legacy_workspace_helpers_create_default_volume(session: AsyncSession) -> None:
+    user = await create_user_account(session, "legacy-volume@example.com", "user12345", "Legacy")
+    work = Work(user_id=user.id, title="旧作品")
+    session.add(work)
+    await session.flush()
+    chapter = Chapter(work_id=work.id, order_index=1, title="旧章", content="", summary="")
+    session.add(chapter)
+    await session.commit()
+
+    volumes = await list_volumes(work.id, user, session)
+
+    assert volumes[0]["title"] == "默认卷"
+    refreshed_chapter = await session.get(Chapter, chapter.id, populate_existing=True)
+    assert refreshed_chapter.volume_id == volumes[0]["id"]
+
+
+async def test_ensure_workspace_schema_handles_missing_and_legacy_chapters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    empty_engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    monkeypatch.setattr(database_module, "engine", empty_engine)
+    await database_module._ensure_workspace_schema()
+    await empty_engine.dispose()
+
+    legacy_engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with legacy_engine.begin() as conn:
+        await conn.execute(text("CREATE TABLE chapters (id VARCHAR(36) PRIMARY KEY)"))
+    monkeypatch.setattr(database_module, "engine", legacy_engine)
+
+    await database_module._ensure_workspace_schema()
+
+    async with legacy_engine.connect() as conn:
+        result = await conn.execute(text("PRAGMA table_info(chapters)"))
+        columns = {row[1] for row in result}
+    await legacy_engine.dispose()
+    assert "volume_id" in columns
 
 
 def test_create_admin_module_entrypoint_runs_real_cli(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:

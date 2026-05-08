@@ -42,11 +42,31 @@ async def _drop_agent_sessions_if_invalid() -> None:
             await conn.commit()
 
 
+async def _ensure_workspace_schema() -> None:
+    """Add lightweight schema fixes for local databases without a migration system."""
+    async with engine.connect() as conn:
+        chapters_exists = await conn.run_sync(
+            lambda sync_conn: inspect(sync_conn).has_table("chapters")
+        )
+        if not chapters_exists:
+            return
+
+        def has_chapter_volume_id(sync_conn) -> bool:
+            columns = {c["name"] for c in inspect(sync_conn).get_columns("chapters")}
+            return "volume_id" in columns
+
+        if not await conn.run_sync(has_chapter_volume_id):
+            logger.warning("Adding missing chapters.volume_id column")
+            await conn.execute(text("ALTER TABLE chapters ADD COLUMN volume_id VARCHAR(36)"))
+            await conn.commit()
+
+
 async def init_database() -> None:
     if get_settings().auto_create_tables:
         await _drop_agent_sessions_if_invalid()
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+        await _ensure_workspace_schema()
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:

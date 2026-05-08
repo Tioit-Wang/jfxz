@@ -5,10 +5,11 @@ import json
 import logging
 import secrets
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Query, Request, Response
@@ -36,7 +37,9 @@ from app.models import (
     Character,
     ChatSession,
     CreditPack,
+    DailyWordProgress,
     GlobalConfig,
+    InspirationNote,
     LoginAudit,
     PaymentNotifyLog,
     PaymentRecord,
@@ -46,6 +49,8 @@ from app.models import (
     SettingItem,
     User,
     UserSubscription,
+    Volume,
+    WritingGoal,
     Work,
     now,
 )
@@ -61,6 +66,7 @@ SECRET_MASK = "******"
 MAX_LOGIN_FAILURES = 5
 LOGIN_LOCK_SECONDS = 15 * 60
 UNSAFE_METHODS = {"POST", "PATCH", "DELETE"}
+SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 _login_failures: dict[tuple[str, str, str], list[datetime]] = {}
 
 
@@ -102,6 +108,23 @@ class ChapterIn(BaseModel):
     content: str = Field(default="", max_length=200000)
     summary: str | None = Field(default=None, max_length=4000)
     order_index: int | None = None
+    volume_id: str | None = Field(default=None, max_length=36)
+    words_added: int | None = Field(default=None, ge=0, le=1000000)
+
+
+class VolumeIn(BaseModel):
+    title: str = Field(default="", max_length=200)
+    order_index: int | None = None
+
+
+class InspirationNoteIn(BaseModel):
+    title: str = Field(min_length=1, max_length=100)
+    content: str = Field(default="", max_length=10000)
+    category: str = Field(default="灵感", max_length=50)
+
+
+class WritingGoalIn(BaseModel):
+    target_words: int = Field(default=2000, ge=1, le=1000000)
 
 
 class ChatIn(BaseModel):
@@ -228,6 +251,7 @@ def _agent_run_lock(session_id: str) -> asyncio.Lock:
 
 
 def public(model: Any) -> dict[str, Any]:
+    from datetime import date as _Date
     from datetime import datetime as _DateTime
     from decimal import Decimal as _Decimal
 
@@ -235,6 +259,8 @@ def public(model: Any) -> dict[str, Any]:
     for column in model.__table__.columns:
         value = getattr(model, column.name)
         if isinstance(value, _DateTime):
+            value = value.isoformat()
+        elif isinstance(value, _Date):
             value = value.isoformat()
         elif isinstance(value, _Decimal):
             value = float(value)
@@ -244,6 +270,14 @@ def public(model: Any) -> dict[str, Any]:
     if "password_changed_at" in data:
         del data["password_changed_at"]
     return data
+
+
+def beijing_today() -> date:
+    return datetime.now(SHANGHAI_TZ).date()
+
+
+def count_words(value: str) -> int:
+    return len("".join(value.split()))
 
 
 def public_ai_model(model: AiModel) -> dict[str, Any]:
@@ -909,7 +943,19 @@ async def create_work(
     work = Work(user_id=user.id, **values)
     session.add(work)
     await session.flush()
-    session.add(Chapter(work_id=work.id, order_index=1, title="第一章", content="", summary=""))
+    volume = Volume(work_id=work.id, order_index=1, title="默认卷")
+    session.add(volume)
+    await session.flush()
+    session.add(
+        Chapter(
+            work_id=work.id,
+            volume_id=volume.id,
+            order_index=1,
+            title="第一章",
+            content="",
+            summary="",
+        )
+    )
     await session.commit()
     return public(work)
 
@@ -932,9 +978,13 @@ async def workspace_bootstrap(
 ) -> dict[str, Any]:
     work = await owned_work(session, user.id, work_id)
     profile = await profile_payload(session, user)
+    await ensure_default_volume(session, work_id)
 
+    volumes_result = await session.execute(
+        select(Volume).where(Volume.work_id == work_id).order_by(Volume.order_index)
+    )
     chapters_result = await session.execute(
-        select(Chapter).where(Chapter.work_id == work_id).order_by(Chapter.order_index)
+        select(Chapter).where(Chapter.work_id == work_id).order_by(Chapter.volume_id, Chapter.order_index)
     )
     characters_result = await session.execute(
         select(Character).where(Character.work_id == work_id).order_by(Character.updated_at.desc())
@@ -944,15 +994,24 @@ async def workspace_bootstrap(
         .where(SettingItem.work_id == work_id)
         .order_by(SettingItem.updated_at.desc())
     )
+    notes_result = await session.execute(
+        select(InspirationNote)
+        .where(InspirationNote.work_id == work_id)
+        .order_by(InspirationNote.updated_at.desc())
+    )
     sessions_result = await session.execute(
         select(ChatSession)
         .where(ChatSession.work_id == work_id)
         .order_by(ChatSession.last_active_at.desc())
         .limit(session_limit)
     )
+    volumes = list(volumes_result.scalars())
     chapters = list(chapters_result.scalars())
     characters = list(characters_result.scalars())
     settings = list(settings_result.scalars())
+    inspiration_notes = list(notes_result.scalars())
+    writing_goal = await get_or_create_writing_goal(session, work_id)
+    daily_word_progress = await daily_progress_payload(session, work_id)
     chat_sessions = list(sessions_result.scalars())
     active_session = chat_sessions[0] if chat_sessions else None
     if active_session is None:
@@ -975,9 +1034,13 @@ async def workspace_bootstrap(
     await session.commit()
     return {
         "work": public(work),
+        "volumes": [public(item) for item in volumes],
         "chapters": [public(item) for item in chapters],
         "characters": [public(item) for item in characters],
         "settings": [public(item) for item in settings],
+        "inspiration_notes": [public(item) for item in inspiration_notes],
+        "writing_goal": public(writing_goal),
+        "daily_word_progress": daily_word_progress,
         "sessions": [public(item) for item in chat_sessions],
         "active_session": public(active_session),
         "messages": message_page(agent.runs if agent else [], message_limit),
@@ -1018,6 +1081,116 @@ async def list_by_work(
         statement = statement.where(model.name.ilike(f"%{search}%"))
     result = await session.execute(statement.order_by(model.updated_at.desc()))
     return [public(item) for item in result.scalars()]
+
+
+async def ensure_default_volume(session: AsyncSession, work_id: str) -> Volume:
+    result = await session.execute(
+        select(Volume).where(Volume.work_id == work_id).order_by(Volume.order_index)
+    )
+    volume = result.scalars().first()
+    if volume is None:
+        volume = Volume(work_id=work_id, order_index=1, title="默认卷")
+        session.add(volume)
+        await session.flush()
+    await session.execute(
+        update(Chapter)
+        .where(Chapter.work_id == work_id, Chapter.volume_id.is_(None))
+        .values(volume_id=volume.id)
+    )
+    return volume
+
+
+async def get_or_create_writing_goal(session: AsyncSession, work_id: str) -> WritingGoal:
+    goal = await one(session, select(WritingGoal).where(WritingGoal.work_id == work_id))
+    if goal is None:
+        goal = WritingGoal(work_id=work_id, target_words=2000)
+        session.add(goal)
+        await session.flush()
+    return goal
+
+
+async def daily_progress_payload(session: AsyncSession, work_id: str) -> dict[str, Any]:
+    today = beijing_today()
+    progress = await one(
+        session,
+        select(DailyWordProgress).where(
+            DailyWordProgress.work_id == work_id,
+            DailyWordProgress.date == today,
+        ),
+    )
+    if progress is None:
+        return {"date": today.isoformat(), "words_added": 0}
+    return public(progress)
+
+
+async def add_daily_words(session: AsyncSession, work_id: str, words: int) -> None:
+    if words <= 0:
+        return
+    today = beijing_today()
+    progress = await one(
+        session,
+        select(DailyWordProgress).where(
+            DailyWordProgress.work_id == work_id,
+            DailyWordProgress.date == today,
+        ),
+    )
+    if progress is None:
+        progress = DailyWordProgress(work_id=work_id, date=today, words_added=0)
+        session.add(progress)
+    progress.words_added += words
+
+
+@router.get("/works/{work_id}/volumes")
+async def list_volumes(
+    work_id: str, user: User = Depends(current_user), session: AsyncSession = Depends(get_session)
+) -> list[dict[str, Any]]:
+    await owned_work(session, user.id, work_id)
+    await ensure_default_volume(session, work_id)
+    result = await session.execute(
+        select(Volume).where(Volume.work_id == work_id).order_by(Volume.order_index)
+    )
+    await session.commit()
+    return [public(item) for item in result.scalars()]
+
+
+@router.post("/works/{work_id}/volumes")
+async def create_volume(
+    work_id: str,
+    payload: VolumeIn,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    await owned_work(session, user.id, work_id)
+    await ensure_default_volume(session, work_id)
+    order_index = payload.order_index
+    if order_index is None:
+        count = await one(session, select(func.count(Volume.id)).where(Volume.work_id == work_id))
+        order_index = int(count) + 1
+    volume = Volume(
+        work_id=work_id,
+        order_index=order_index,
+        title=payload.title.strip() or f"第 {order_index} 卷",
+    )
+    session.add(volume)
+    await session.commit()
+    return public(volume)
+
+
+@router.patch("/works/{work_id}/volumes/{volume_id}")
+async def update_volume(
+    work_id: str,
+    volume_id: str,
+    payload: VolumeIn,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    await owned_work(session, user.id, work_id)
+    volume = await must_get_in_work(session, Volume, volume_id, work_id)
+    volume.title = payload.title.strip() or volume.title
+    if payload.order_index is not None:
+        volume.order_index = payload.order_index
+    await session.commit()
+    return public(volume)
 
 
 @router.get("/works/{work_id}/characters")
@@ -1142,14 +1315,104 @@ async def delete_setting(
     return {"ok": True}
 
 
+@router.get("/works/{work_id}/inspiration-notes")
+async def list_inspiration_notes(
+    work_id: str, user: User = Depends(current_user), session: AsyncSession = Depends(get_session)
+) -> list[dict[str, Any]]:
+    await owned_work(session, user.id, work_id)
+    result = await session.execute(
+        select(InspirationNote)
+        .where(InspirationNote.work_id == work_id)
+        .order_by(InspirationNote.updated_at.desc())
+    )
+    return [public(item) for item in result.scalars()]
+
+
+@router.post("/works/{work_id}/inspiration-notes")
+async def create_inspiration_note(
+    work_id: str,
+    payload: InspirationNoteIn,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    await owned_work(session, user.id, work_id)
+    item = InspirationNote(
+        work_id=work_id,
+        title=payload.title.strip(),
+        content=payload.content,
+        category=payload.category.strip() or "灵感",
+    )
+    session.add(item)
+    await session.commit()
+    return public(item)
+
+
+@router.patch("/works/{work_id}/inspiration-notes/{item_id}")
+async def update_inspiration_note(
+    work_id: str,
+    item_id: str,
+    payload: InspirationNoteIn,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    await owned_work(session, user.id, work_id)
+    item = await must_get_in_work(session, InspirationNote, item_id, work_id)
+    item.title = payload.title.strip()
+    item.content = payload.content
+    item.category = payload.category.strip() or "灵感"
+    await session.commit()
+    return public(item)
+
+
+@router.delete("/works/{work_id}/inspiration-notes/{item_id}")
+async def delete_inspiration_note(
+    work_id: str,
+    item_id: str,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, bool]:
+    await owned_work(session, user.id, work_id)
+    await session.delete(await must_get_in_work(session, InspirationNote, item_id, work_id))
+    await session.commit()
+    return {"ok": True}
+
+
+@router.get("/works/{work_id}/writing-goal")
+async def get_writing_goal(
+    work_id: str, user: User = Depends(current_user), session: AsyncSession = Depends(get_session)
+) -> dict[str, Any]:
+    await owned_work(session, user.id, work_id)
+    goal = await get_or_create_writing_goal(session, work_id)
+    progress = await daily_progress_payload(session, work_id)
+    await session.commit()
+    return {"goal": public(goal), "daily_word_progress": progress}
+
+
+@router.patch("/works/{work_id}/writing-goal")
+async def update_writing_goal(
+    work_id: str,
+    payload: WritingGoalIn,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    await owned_work(session, user.id, work_id)
+    goal = await get_or_create_writing_goal(session, work_id)
+    goal.target_words = payload.target_words
+    progress = await daily_progress_payload(session, work_id)
+    await session.commit()
+    return {"goal": public(goal), "daily_word_progress": progress}
+
+
 @router.get("/works/{work_id}/chapters")
 async def list_chapters(
     work_id: str, user: User = Depends(current_user), session: AsyncSession = Depends(get_session)
 ) -> list[dict[str, Any]]:
     await owned_work(session, user.id, work_id)
+    await ensure_default_volume(session, work_id)
     result = await session.execute(
-        select(Chapter).where(Chapter.work_id == work_id).order_by(Chapter.order_index)
+        select(Chapter).where(Chapter.work_id == work_id).order_by(Chapter.volume_id, Chapter.order_index)
     )
+    await session.commit()
     return [public(item) for item in result.scalars()]
 
 
@@ -1161,14 +1424,28 @@ async def create_chapter(
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     await owned_work(session, user.id, work_id)
+    volume = (
+        await must_get_in_work(session, Volume, payload.volume_id, work_id)
+        if payload.volume_id
+        else await ensure_default_volume(session, work_id)
+    )
     order_index = payload.order_index
     if order_index is None:
-        count = await one(session, select(func.count(Chapter.id)).where(Chapter.work_id == work_id))
+        count = await one(session, select(func.count(Chapter.id)).where(Chapter.volume_id == volume.id))
         order_index = int(count) + 1
+    values = payload.model_dump(exclude={"order_index", "volume_id", "words_added"})
     chapter = Chapter(
-        work_id=work_id, order_index=order_index, **payload.model_dump(exclude={"order_index"})
+        work_id=work_id,
+        volume_id=volume.id,
+        order_index=order_index,
+        **values,
     )
     session.add(chapter)
+    await add_daily_words(
+        session,
+        work_id,
+        payload.words_added if payload.words_added is not None else count_words(chapter.content),
+    )
     await session.commit()
     return public(chapter)
 
@@ -1183,8 +1460,19 @@ async def update_chapter(
 ) -> dict[str, Any]:
     await owned_work(session, user.id, work_id)
     chapter = await must_get_in_work(session, Chapter, chapter_id, work_id)
-    for key, value in payload.model_dump(exclude_none=True).items():
+    previous_words = count_words(chapter.content)
+    values = payload.model_dump(exclude_none=True, exclude={"words_added"})
+    if "volume_id" in values:
+        await must_get_in_work(session, Volume, values["volume_id"], work_id)
+    for key, value in values.items():
         setattr(chapter, key, value)
+    await add_daily_words(
+        session,
+        work_id,
+        payload.words_added
+        if payload.words_added is not None
+        else count_words(chapter.content) - previous_words,
+    )
     await session.commit()
     return public(chapter)
 
@@ -1630,6 +1918,9 @@ _TOOL_DISPLAY_NAMES = {
     "list_settings": "列出设定",
     "create_or_update_setting": "创建/更新设定",
     "delete_setting": "删除设定",
+    "list_volumes": "列出卷",
+    "create_volume": "创建卷",
+    "update_volume": "更新卷",
     "get_chapter": "查询章节",
     "list_chapters": "列出章节",
     "create_chapter": "创建章节",
@@ -1648,6 +1939,9 @@ _TOOL_ACTION_TYPES = {
     "list_characters": "list_characters",
     "get_setting": "get_setting",
     "list_settings": "list_settings",
+    "list_volumes": "list_volumes",
+    "create_volume": "create_volume",
+    "update_volume": "update_volume",
     "get_chapter": "get_chapter",
     "list_chapters": "list_chapters",
     "update_chapter_summary": "update_chapter_summary",

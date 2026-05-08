@@ -15,6 +15,7 @@ from app.models import (
     Base,
     Character,
     Chapter,
+    DailyWordProgress,
     PointAccount,
     PointTransaction,
     SettingItem,
@@ -136,6 +137,7 @@ class TestAgentServiceHelpers:
         assert "港城故事" in prompt
         assert "奇幻" in prompt
         assert "get_character" in prompt
+        assert "list_volumes" in prompt
 
     def test_build_system_prompt_includes_refs(self) -> None:
         work = Work(title="作品")
@@ -315,6 +317,7 @@ class TestGoodguaTools:
 
         listed = json.loads(await tools.list_chapters())
         assert len(listed) == 1
+        assert listed[0]["volume_id"]
 
         fetched = json.loads(await tools.get_chapter(chapter.id))
         assert fetched["title"] == "第一章"
@@ -328,6 +331,15 @@ class TestGoodguaTools:
         assert "new_content" not in content_result
         assert content_result["new_content_length"] == len(long_content)
         assert content_result["preview_truncated"] is True
+        progress = (
+            await session.execute(select(DailyWordProgress).where(DailyWordProgress.work_id == tools.work_id))
+        ).scalar_one()
+        assert progress.words_added == len(long_content) - len("正文内容")
+        extended_content = f"{long_content}追加"
+        await tools.update_chapter_content(chapter.id, extended_content)
+        assert progress.words_added == len(extended_content) - len("正文内容")
+        await tools.update_chapter_content(chapter.id, "短")
+        assert progress.words_added == len(extended_content) - len("正文内容")
 
         not_found = json.loads(await tools.get_chapter("nonexistent"))
         assert "error" in not_found
@@ -335,6 +347,43 @@ class TestGoodguaTools:
         created = json.loads(await tools.create_chapter("第二章", "摘要"))
         assert created["order_index"] == 2
         assert created["summary"] == "摘要"
+        assert created["volume_id"] == listed[0]["volume_id"]
+
+    async def test_volume_tools_and_chapter_volume_assignment(
+        self, tools: GoodguaTools, session: AsyncSession
+    ) -> None:
+        default_volumes = json.loads(await tools.list_volumes())
+        assert default_volumes[0]["title"] == "默认卷"
+
+        created_volume = json.loads(await tools.create_volume("第二卷"))
+        assert created_volume["order_index"] == 2
+
+        updated_volume = json.loads(await tools.update_volume(created_volume["id"], "远航卷"))
+        assert updated_volume["title"] == "远航卷"
+
+        chapter = json.loads(await tools.create_chapter("远航第一章", "出发", created_volume["id"]))
+        assert chapter["volume_id"] == created_volume["id"]
+        assert chapter["order_index"] == 1
+
+        missing = json.loads(await tools.create_chapter("失落章", volume_id="missing"))
+        assert "error" in missing
+        assert "error" in json.loads(await tools.update_volume("missing", "无"))
+
+    async def test_volume_tools_roll_back_on_commit_error(
+        self, tools: GoodguaTools, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        created_volume = json.loads(await tools.create_volume("第二卷"))
+        real_rollback = tools.db.rollback
+        rollback = AsyncMock(side_effect=real_rollback)
+        monkeypatch.setattr(tools.db, "commit", AsyncMock(side_effect=RuntimeError("boom")))
+        monkeypatch.setattr(tools.db, "rollback", rollback)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            await tools.create_volume("失败卷")
+        with pytest.raises(RuntimeError, match="boom"):
+            await tools.update_volume(created_volume["id"], "失败改名", order_index=3)
+
+        assert rollback.await_count == 2
 
     async def test_work_info(self, tools: GoodguaTools, session: AsyncSession) -> None:
         info = json.loads(await tools.get_work_info())

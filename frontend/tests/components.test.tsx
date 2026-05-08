@@ -1,11 +1,15 @@
-import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import React, { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ApiClient, ChatReference } from "../src/api";
+import type { AiModelOption, ApiClient, ChatReference } from "../src/api";
 import { AuthModal } from "../src/components/AuthModal";
 import { ChatMentionInput, type ChatMentionInputHandle } from "../src/components/ChatMentionInput";
+import { ModelPicker } from "../src/components/ModelPicker";
+import { BillingDialog } from "../src/components/billing/BillingDialog";
+import { PaymentDialog } from "../src/components/billing/PaymentDialog";
 import { useIsMobile } from "../src/hooks/use-mobile";
+import { formatToken } from "../src/lib/format";
 import { parseWorkspaceMentionDragPayload, serializeWorkspaceMentionDragPayload } from "../app/books/[bookId]/workspace/dnd";
 
 function authClient(loginWithEmail: ApiClient["loginWithEmail"]): ApiClient {
@@ -235,6 +239,195 @@ describe("ChatMentionInput", () => {
     );
 
     expect(screen.getByRole("button", { name: "发送消息" })).toBeDisabled();
+  });
+});
+
+describe("billing dialogs", () => {
+  const products = {
+    plans: [
+      {
+        id: "plan-1",
+        name: "专业版",
+        priceAmount: 29,
+        vipDailyPoints: 1000,
+        bundledCreditPackPoints: 200,
+        points: 0
+      },
+      {
+        id: "plan-2",
+        name: "基础版",
+        priceAmount: 9,
+        vipDailyPoints: 200,
+        bundledCreditPackPoints: 0,
+        points: 0
+      }
+    ],
+    creditPacks: [
+      {
+        id: "pack-1",
+        name: "灵感加油包",
+        priceAmount: 19,
+        vipDailyPoints: 0,
+        bundledCreditPackPoints: 0,
+        points: 500
+      }
+    ]
+  };
+
+  it("renders billing states and submits purchases", async () => {
+    const user = userEvent.setup();
+    const onPurchase = vi.fn();
+    const { rerender } = render(
+      <BillingDialog
+        open
+        onOpenChange={vi.fn()}
+        products={{ plans: [], creditPacks: [] }}
+        loading
+        error={false}
+        purchasing={false}
+        onPurchase={onPurchase}
+      />
+    );
+
+    expect(screen.getByText("正在加载商品信息...")).toBeVisible();
+
+    rerender(
+      <BillingDialog
+        open
+        onOpenChange={vi.fn()}
+        products={{ plans: [], creditPacks: [] }}
+        loading={false}
+        error
+        purchasing={false}
+        onPurchase={onPurchase}
+      />
+    );
+    expect(screen.getByText("商品信息加载失败，请关闭后重试。")).toBeVisible();
+
+    rerender(
+      <BillingDialog
+        open
+        onOpenChange={vi.fn()}
+        products={products}
+        loading={false}
+        error={false}
+        purchasing={false}
+        onPurchase={onPurchase}
+      />
+    );
+
+    await user.click(screen.getAllByRole("button", { name: "升级会员" })[0]);
+    await user.click(screen.getByRole("button", { name: /充值/ }));
+
+    expect(onPurchase).toHaveBeenNthCalledWith(1, "plan", "plan-1");
+    expect(onPurchase).toHaveBeenNthCalledWith(2, "credit_pack", "pack-1");
+  });
+
+  it("renders payment states and actions", async () => {
+    const user = userEvent.setup();
+    const onOpenChange = vi.fn();
+    const onSimulatePaid = vi.fn();
+    const pendingOrder = {
+      id: "order-1",
+      orderNo: "NO1",
+      productType: "plan" as const,
+      productName: "专业版",
+      amount: "29.00",
+      status: "pending",
+      qrCode: "qr"
+    };
+    const { rerender } = render(
+      <PaymentDialog open onOpenChange={onOpenChange} order={null} creating onSimulatePaid={onSimulatePaid} />
+    );
+
+    expect(screen.getByText("正在创建支付订单...")).toBeVisible();
+
+    rerender(
+      <PaymentDialog
+        open
+        onOpenChange={onOpenChange}
+        order={pendingOrder}
+        creating={false}
+        onSimulatePaid={onSimulatePaid}
+        testEnabled
+      />
+    );
+    expect(screen.getByText("等待扫码")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "模拟支付成功" }));
+    await user.click(screen.getByRole("button", { name: "关闭" }));
+    expect(onSimulatePaid).toHaveBeenCalled();
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+
+    rerender(
+      <PaymentDialog
+        open
+        onOpenChange={onOpenChange}
+        order={{ ...pendingOrder, status: "paid", qrCode: "" }}
+        creating={false}
+        onSimulatePaid={onSimulatePaid}
+        testEnabled
+      />
+    );
+    expect(screen.getAllByText("支付成功")[0]).toBeVisible();
+
+    rerender(
+      <PaymentDialog
+        open
+        onOpenChange={onOpenChange}
+        order={{ ...pendingOrder, qrCode: "" }}
+        creating={false}
+      />
+    );
+    expect(screen.getByText("获取二维码失败")).toBeVisible();
+  });
+});
+
+describe("ModelPicker", () => {
+  const models: AiModelOption[] = [
+    {
+      id: "m1",
+      display_name: "长篇推理",
+      description: "结构强",
+      logic_score: 9,
+      prose_score: 7,
+      knowledge_score: 4,
+      max_context_tokens: 1000000,
+      max_output_tokens: 1536
+    },
+    {
+      id: "m2",
+      display_name: "轻量续写",
+      logic_score: 6,
+      prose_score: 8,
+      knowledge_score: 5,
+      max_context_tokens: 32000,
+      max_output_tokens: 4000
+    }
+  ];
+
+  it("opens, selects a model, and closes on outside click", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    render(<ModelPicker models={models} selectedId="m2" onSelect={onSelect} />);
+
+    await user.click(screen.getByRole("combobox", { name: "选择对话模型" }));
+    expect(screen.getByRole("listbox", { name: "模型列表" })).toBeVisible();
+    expect(screen.getByText("1M→1,536")).toBeVisible();
+    expect(screen.getByText("32K→4K")).toBeVisible();
+
+    await user.click(screen.getByRole("option", { name: /长篇推理/ }));
+    expect(onSelect).toHaveBeenCalledWith("m1");
+    expect(screen.queryByRole("listbox", { name: "模型列表" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("combobox", { name: "选择对话模型" }));
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole("listbox", { name: "模型列表" })).not.toBeInTheDocument();
+  });
+
+  it("formats token counts", () => {
+    expect(formatToken(1000000)).toBe("1M");
+    expect(formatToken(32000)).toBe("32K");
+    expect(formatToken(1536)).toBe("1,536");
   });
 });
 

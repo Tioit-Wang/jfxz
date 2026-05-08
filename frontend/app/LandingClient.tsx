@@ -430,7 +430,7 @@ export default function LandingPage() {
                 >
                   <h3 className="mb-1 text-lg font-semibold">{pack.name}</h3>
                   <p className="mb-5 text-sm" style={{ color: "var(--lp-ink-light)" }}>
-                    一次性充值，永久有效
+                    一次性充值，长期有效
                   </p>
                   <div className="mb-6 h-px" style={{ background: "var(--lp-border-light)" }} />
                   <div className="mb-2 flex items-baseline gap-1">

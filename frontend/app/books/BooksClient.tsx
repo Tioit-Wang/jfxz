@@ -243,7 +243,7 @@ export default function BooksClient() {
                   {(userProfile?.points.creditPackPoints ?? 0).toLocaleString()}
                 </p>
                 <p className="mt-1.5 flex items-center gap-1 text-[11px] text-gray-400">
-                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-500" /> 永久有效，优先扣除
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-500" /> 长期有效，优先扣除
                 </p>
               </div>
             </div>

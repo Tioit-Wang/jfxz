@@ -10,10 +10,12 @@ from agno.models.deepseek import DeepSeek
 from agno.models.openai import OpenAIChat
 from agno.tools import Toolkit
 from sqlalchemy import func, select
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.models import Chapter, Character, DailyWordProgress, SettingItem, Volume, Work
+from app.services.workspace_structure import move_volume_to_order, ordered_chapters_statement
 
 _db: BaseDb | None = None
 _work_db_locks: dict[tuple[int, str], asyncio.Lock] = {}
@@ -42,11 +44,35 @@ def _create_agent_db(db_url: str) -> BaseDb:  # pragma: no cover
     if db_url.startswith("mysql"):
         from agno.db.mysql.async_mysql import AsyncMySQLDb
 
-        return AsyncMySQLDb(db_url=db_url, session_table="agent_sessions")
+        db = AsyncMySQLDb(
+            db_url=db_url,
+            db_schema=_mysql_database_name(db_url),
+            session_table="agent_sessions",
+            create_schema=False,
+        )
+        _disable_mysql_agent_db_auto_create(db)
+        return db
     stripped = db_url.replace("+asyncpg", "")
     from agno.db.postgres.postgres import PostgresDb
 
     return PostgresDb(db_url=stripped, session_table="agent_sessions")
+
+
+def _mysql_database_name(db_url: str) -> str:
+    database = make_url(db_url).database
+    if not database:
+        raise ValueError("MySQL database URL must include a database name")
+    return database
+
+
+def _disable_mysql_agent_db_auto_create(db: BaseDb) -> None:
+    async def _create_table_disabled(*args, **kwargs):
+        raise RuntimeError(
+            "agent_sessions table is managed by manual SQL migrations; "
+            "execute backend/migrations/versions/*.sql before starting production services"
+        )
+
+    db._create_table = _create_table_disabled  # type: ignore[attr-defined]
 
 
 def get_agent_db(db_url: str) -> BaseDb:
@@ -552,7 +578,7 @@ class GoodguaTools(Toolkit):
                     return json.dumps({"error": "volume not found"}, ensure_ascii=False)
                 volume.title = title.strip() or volume.title
                 if order_index is not None:
-                    volume.order_index = order_index
+                    await move_volume_to_order(self.db, self.work_id, volume, order_index)
                 await self.db.commit()
                 return json.dumps(
                     _serialize_lite(volume, ["id", "order_index", "title", "updated_at"]),
@@ -576,12 +602,7 @@ class GoodguaTools(Toolkit):
         """列出当前作品章节目录概览，按章节顺序排列。默认最多返回 20 条，仅返回 id/volume_id/order_index/title/summary，不包含正文（content）。需查看正文内容时使用 get_chapter。"""
         limit = _normalize_list_limit(limit)
         await _ensure_default_volume(self.db, self.work_id)
-        result = await self.db.execute(
-            select(Chapter)
-            .where(Chapter.work_id == self.work_id)
-            .order_by(Chapter.volume_id, Chapter.order_index)
-            .limit(limit)
-        )
+        result = await self.db.execute(ordered_chapters_statement(self.work_id).limit(limit))
         items = [
             _serialize_lite(c, ["id", "volume_id", "order_index", "title", "summary"]) for c in result.scalars()
         ]

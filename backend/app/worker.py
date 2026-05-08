@@ -8,8 +8,8 @@ import asyncio
 import logging
 import sys
 
-from app.core.database import SessionLocal, init_database
 from app.api.routes import seed_defaults
+from app.core.database import SessionLocal, init_database
 from app.services.scheduler_service import start_scheduler
 
 logger = logging.getLogger("worker")

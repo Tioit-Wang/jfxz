@@ -8,9 +8,8 @@ from rich.table import Table
 from sqlalchemy import select
 
 from app.core.database import SessionLocal, init_database
-from app.models import now
 from app.core.security import hash_password
-from app.models import PointAccount, User
+from app.models import PointAccount, User, now
 
 app = typer.Typer(no_args_is_help=True, rich_markup_mode="rich")
 EMAIL_ADAPTER = TypeAdapter(EmailStr)

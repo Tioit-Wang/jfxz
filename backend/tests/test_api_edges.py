@@ -12,40 +12,14 @@ from unittest.mock import MagicMock
 
 import pytest
 import pytest_asyncio
+from agno.run.agent import RunEvent
+from conftest import _create_mock_agent
 from fastapi import HTTPException, Response
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import app.api.routes as routes_module
-_TOOL_ACTION_MAP = {
-    "create_or_update_character": "save_character",
-    "create_or_update_setting": "save_setting",
-    "delete_character": "delete_character",
-    "delete_setting": "delete_setting",
-    "get_character": "get_character",
-    "list_characters": "list_characters",
-    "get_setting": "get_setting",
-    "list_settings": "list_settings",
-    "list_volumes": "list_volumes",
-    "create_volume": "create_volume",
-    "update_volume": "update_volume",
-    "get_chapter": "get_chapter",
-    "list_chapters": "list_chapters",
-    "update_chapter_summary": "update_chapter_summary",
-    "get_work_info": "get_work_info",
-    "update_work_info": "update_work_info",
-}
-
-
-def _tool_action(name: str) -> dict | None:
-    action_type = _TOOL_ACTION_MAP.get(name)
-    if action_type is None:
-        return None
-    display = routes_module._TOOL_DISPLAY_NAMES.get(name, name)
-    return {"type": action_type, "label": display}
-
-
 from app.api.routes import (
     AdminLogin,
     AiModelIn,
@@ -62,8 +36,8 @@ from app.api.routes import (
     RegisterIn,
     UserPatch,
     VolumeIn,
-    WritingGoalIn,
     WorkIn,
+    WritingGoalIn,
     active_ai_models,
     admin_configs,
     admin_create_model,
@@ -108,8 +82,8 @@ from app.api.routes import (
     ensure_point_account,
     get_me,
     get_order,
-    get_writing_goal,
     get_work,
+    get_writing_goal,
     grant_order,
     list_by_work,
     list_chapters,
@@ -136,12 +110,77 @@ from app.api.routes import (
     update_inspiration_note,
     update_setting,
     update_volume,
-    update_writing_goal,
     update_work,
+    update_writing_goal,
     workspace_bootstrap,
 )
-from conftest import _create_mock_agent
-from app.models import AiModel
+from app.core.config import Settings, get_settings
+from app.core.database import get_session, init_database
+from app.core.security import (
+    hash_legacy_sha256,
+    hash_password,
+    issue_token,
+    password_needs_rehash,
+    read_token,
+    verify_password,
+)
+from app.main import create_app
+from app.models import (
+    AgentRunStore,
+    AiModel,
+    Base,
+    BillingOrder,
+    Chapter,
+    Character,
+    ChatSession,
+    CreditPack,
+    GlobalConfig,
+    PaymentRecord,
+    Plan,
+    PointTransaction,
+    SettingItem,
+    User,
+    UserSubscription,
+    Volume,
+    Work,
+)
+from app.scripts.create_admin import (
+    AdminEmailExistsError,
+    async_main,
+    create_admin_account,
+    generate_admin_password,
+)
+from app.scripts.create_admin import (
+    main as create_admin_main,
+)
+
+_TOOL_ACTION_MAP = {
+    "create_or_update_character": "save_character",
+    "create_or_update_setting": "save_setting",
+    "delete_character": "delete_character",
+    "delete_setting": "delete_setting",
+    "get_character": "get_character",
+    "list_characters": "list_characters",
+    "get_setting": "get_setting",
+    "list_settings": "list_settings",
+    "list_volumes": "list_volumes",
+    "create_volume": "create_volume",
+    "update_volume": "update_volume",
+    "get_chapter": "get_chapter",
+    "list_chapters": "list_chapters",
+    "update_chapter_summary": "update_chapter_summary",
+    "get_work_info": "get_work_info",
+    "update_work_info": "update_work_info",
+}
+
+
+def _tool_action(name: str) -> dict | None:
+    action_type = _TOOL_ACTION_MAP.get(name)
+    if action_type is None:
+        return None
+    display = routes_module._TOOL_DISPLAY_NAMES.get(name, name)
+    return {"type": action_type, "label": display}
+
 
 # Save real function reference before autouse fixture replaces it
 _real_resolve_editor_model = routes_module._resolve_editor_model
@@ -165,52 +204,11 @@ def _make_fake_editor_model() -> AiModel:
 async def _mock_resolve_editor_model(*args, **kwargs) -> AiModel:
     return _make_fake_editor_model()
 
-from agno.run.agent import RunEvent
-from app.core.config import Settings, get_settings
-import app.core.database as database_module
-from app.core.database import _drop_agent_sessions_if_invalid, get_session, init_database
-from app.core.security import (
-    hash_legacy_sha256,
-    hash_password,
-    issue_token,
-    password_needs_rehash,
-    read_token,
-    verify_password,
-)
-from app.main import create_app
-from app.models import (
-    AgentRunStore,
-    AiModel,
-    Base,
-    BillingOrder,
-    Chapter,
-    Character,
-    ChatSession,
-    GlobalConfig,
-    PaymentRecord,
-    Plan,
-    PointTransaction,
-    SettingItem,
-    CreditPack,
-    User,
-    UserSubscription,
-    Work,
-)
-from app.scripts.create_admin import (
-    AdminEmailExistsError,
-    async_main,
-    create_admin_account,
-    generate_admin_password,
-)
-from app.scripts.create_admin import (
-    main as create_admin_main,
-)
-
 
 @pytest_asyncio.fixture(autouse=True)
 def _mock_agno_agent(monkeypatch: pytest.MonkeyPatch):
-    import app.services.agent_service as _agent_service
     import app.api.routes as _routes
+    import app.services.agent_service as _agent_service
 
     monkeypatch.setattr(_agent_service, "create_agent", _create_mock_agent)
     monkeypatch.setattr(_routes, "_resolve_editor_model", _mock_resolve_editor_model)
@@ -408,6 +406,47 @@ async def test_workspace_bootstrap_returns_initial_workspace_bundle(session: Asy
     assert bundle["sessions"][0]["id"] == bundle["active_session"]["id"]
     assert bundle["messages"] == {"messages": [], "has_more": False, "next_before": None}
     assert bundle["profile"]["user"]["id"] == user.id
+
+
+async def test_workspace_bootstrap_and_list_chapters_follow_volume_order(session: AsyncSession) -> None:
+    user = await create_user_account(session, "volume-order@example.com", "user12345", "VolumeOrder")
+    work = Work(user_id=user.id, title="分卷作品")
+    session.add(work)
+    await session.flush()
+    session.add_all(
+        [
+            Volume(id="z-volume", work_id=work.id, order_index=1, title="第一卷"),
+            Volume(id="a-volume", work_id=work.id, order_index=2, title="第二卷"),
+        ]
+    )
+    session.add_all(
+        [
+            Chapter(
+                work_id=work.id,
+                volume_id="a-volume",
+                order_index=1,
+                title="第二卷第一章",
+                content="",
+                summary="",
+            ),
+            Chapter(
+                work_id=work.id,
+                volume_id="z-volume",
+                order_index=1,
+                title="第一卷第一章",
+                content="",
+                summary="",
+            ),
+        ]
+    )
+    await session.commit()
+
+    bundle = await workspace_bootstrap(work.id, user, session)
+    chapters = await list_chapters(work.id, user, session)
+
+    assert [item["title"] for item in bundle["volumes"]] == ["第一卷", "第二卷"]
+    assert [item["title"] for item in bundle["chapters"]] == ["第一卷第一章", "第二卷第一章"]
+    assert [item["title"] for item in chapters] == ["第一卷第一章", "第二卷第一章"]
 
 
 async def test_inspiration_goal_routes_and_daily_progress(session: AsyncSession) -> None:
@@ -1257,6 +1296,20 @@ async def test_direct_user_routes_cover_core_documented_workflows(session: Async
     assert (
         await update_volume(work_id, new_volume["id"], VolumeIn(title="第二卷终"), user, session)
     )["order_index"] == 4
+    moved_volume = await update_volume(
+        work_id,
+        new_volume["id"],
+        VolumeIn(title="第二卷终", order_index=1),
+        user,
+        session,
+    )
+    volumes_after_move = await list_volumes(work_id, user, session)
+    assert moved_volume["order_index"] == 1
+    assert [(item["title"], item["order_index"]) for item in volumes_after_move] == [
+        ("第二卷终", 1),
+        ("默认卷", 2),
+        ("第 5 卷", 5),
+    ]
 
     chapter = await create_chapter(
         work_id,
@@ -1861,28 +1914,6 @@ async def test_legacy_workspace_helpers_create_default_volume(session: AsyncSess
     assert refreshed_chapter.volume_id == volumes[0]["id"]
 
 
-async def test_ensure_workspace_schema_handles_missing_and_legacy_chapters(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    empty_engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    monkeypatch.setattr(database_module, "engine", empty_engine)
-    await database_module._ensure_workspace_schema()
-    await empty_engine.dispose()
-
-    legacy_engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with legacy_engine.begin() as conn:
-        await conn.execute(text("CREATE TABLE chapters (id VARCHAR(36) PRIMARY KEY)"))
-    monkeypatch.setattr(database_module, "engine", legacy_engine)
-
-    await database_module._ensure_workspace_schema()
-
-    async with legacy_engine.connect() as conn:
-        result = await conn.execute(text("PRAGMA table_info(chapters)"))
-        columns = {row[1] for row in result}
-    await legacy_engine.dispose()
-    assert "volume_id" in columns
-
-
 def test_create_admin_module_entrypoint_runs_real_cli(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.setattr(sys, "argv", ["create_admin.py", "runpy-admin@example.com"])
 
@@ -2178,79 +2209,3 @@ def test_cors_headers_returns_empty_when_no_origin_header() -> None:
     assert routes_module._cors_headers(req) == {}
 
 
-# ── _drop_agent_sessions_if_invalid ──
-
-
-async def test_drop_agent_sessions_table_not_exists_is_noop() -> None:
-    """No-op when agent_sessions table does not exist."""
-    from sqlalchemy.ext.asyncio import create_async_engine
-
-    test_engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    try:
-        monkeypatch = pytest.MonkeyPatch()
-        monkeypatch.setattr("app.core.database.engine", test_engine)
-        await _drop_agent_sessions_if_invalid()
-    finally:
-        await test_engine.dispose()
-
-
-async def test_drop_agent_sessions_drops_old_schema() -> None:
-    """Drops agent_sessions table when it has old schema (no session_type column)."""
-    from sqlalchemy.ext.asyncio import create_async_engine
-    from sqlalchemy import Column, MetaData, String, Table, inspect, text
-    from sqlalchemy import JSON
-
-    test_engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    try:
-        # Create old-schema table with only 3 columns
-        async with test_engine.begin() as conn:
-            await conn.execute(
-                text("CREATE TABLE agent_sessions (session_id VARCHAR(100) PRIMARY KEY, user_id VARCHAR(36), runs JSON)")
-            )
-
-        monkeypatch = pytest.MonkeyPatch()
-        monkeypatch.setattr("app.core.database.engine", test_engine)
-        await _drop_agent_sessions_if_invalid()
-
-        # Verify table was dropped
-        async with test_engine.connect() as conn:
-            exists = await conn.run_sync(
-                lambda sync_conn: inspect(sync_conn).has_table("agent_sessions")
-            )
-        assert not exists
-    finally:
-        await test_engine.dispose()
-
-
-async def test_drop_agent_sessions_keeps_new_schema() -> None:
-    """Keeps agent_sessions table when it has new schema (session_type column present)."""
-    from sqlalchemy.ext.asyncio import create_async_engine
-    from sqlalchemy import inspect, text
-
-    test_engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    try:
-        # Create new-schema table with session_type column
-        async with test_engine.begin() as conn:
-            await conn.execute(
-                text(
-                    "CREATE TABLE agent_sessions ("
-                    "session_id VARCHAR(100) PRIMARY KEY, "
-                    "user_id VARCHAR(36), "
-                    "session_type VARCHAR(50), "
-                    "runs JSON"
-                    ")"
-                )
-            )
-
-        monkeypatch = pytest.MonkeyPatch()
-        monkeypatch.setattr("app.core.database.engine", test_engine)
-        await _drop_agent_sessions_if_invalid()
-
-        # Verify table still exists
-        async with test_engine.connect() as conn:
-            exists = await conn.run_sync(
-                lambda sync_conn: inspect(sync_conn).has_table("agent_sessions")
-            )
-        assert exists
-    finally:
-        await test_engine.dispose()

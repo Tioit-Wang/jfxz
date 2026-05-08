@@ -9,6 +9,7 @@ os.environ["GOODGUA_AI_PROVIDER_API_KEY"] = ""
 from decimal import Decimal
 
 import pytest_asyncio
+from conftest import _create_mock_agent
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -18,7 +19,6 @@ from app.core.database import get_session
 from app.core.security import hash_password, issue_token, read_token, verify_password
 from app.main import create_app
 from app.models import AiModel, Base
-from conftest import _create_mock_agent
 
 
 def _make_fake_editor_model() -> AiModel:
@@ -55,8 +55,8 @@ async def client() -> AsyncIterator[AsyncClient]:
         async with maker() as session:
             yield session
 
-    import app.services.agent_service as _agent_service
     import app.api.routes as _routes
+    import app.services.agent_service as _agent_service
 
     original_create_agent = _agent_service.create_agent
     original_resolve_editor = _routes._resolve_editor_model

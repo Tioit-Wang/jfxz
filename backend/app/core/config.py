@@ -62,6 +62,7 @@ class Settings(BaseSettings):
         if self.is_production:
             if not self.database_url.startswith("mysql+asyncmy://"):
                 raise ValueError("GOODGUA_DATABASE_URL must use mysql+asyncmy in production")
+            self.auto_create_tables = False
         elif not self.database_url.startswith("sqlite+aiosqlite://"):
             raise ValueError("GOODGUA_DATABASE_URL must use sqlite+aiosqlite in development/test")
         return self

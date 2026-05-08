@@ -8,28 +8,29 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.api.routes import create_user_account, seed_defaults
 from app.api.routes import _resolve_editor_model as _real_resolve_editor_model
+from app.api.routes import create_user_account, seed_defaults
 from app.models import (
     AiModel,
     Base,
-    Character,
     Chapter,
+    Character,
     DailyWordProgress,
     PointAccount,
     PointTransaction,
     SettingItem,
+    Volume,
     Work,
 )
 from app.services.agent_service import GoodguaTools, _serialize, build_system_prompt
 from app.services.billing_service import (
+    MIN_COST,
     _calculate_cost,
     _cost_to_deduct,
     _ensure_point_account,
     deduct_by_usage,
     get_points_per_cny,
     pre_check_balance,
-    MIN_COST,
 )
 
 
@@ -94,15 +95,17 @@ async def _ensure_account(session: AsyncSession, user_id: str, monthly: Decimal 
 class TestAgentServiceHelpers:
     def test_create_agent_db_routes_sqlite(self) -> None:
         """Verify _create_agent_db returns AsyncSqliteDb for sqlite URLs."""
-        from app.services.agent_service import _create_agent_db
         from agno.db.sqlite.async_sqlite import AsyncSqliteDb
+
+        from app.services.agent_service import _create_agent_db
         db = _create_agent_db("sqlite+aiosqlite:///./test.db")
         assert isinstance(db, AsyncSqliteDb)
 
     def test_create_agent_db_routes_mysql(self) -> None:
         """Verify _create_agent_db returns AsyncMySQLDb for mysql URLs."""
-        from app.services.agent_service import _create_agent_db
         import agno.db.mysql.async_mysql as mysql_module
+
+        from app.services.agent_service import _create_agent_db
 
         original = mysql_module.AsyncMySQLDb
         mock_cls = MagicMock()
@@ -111,14 +114,33 @@ class TestAgentServiceHelpers:
             _create_agent_db("mysql+asyncmy://user:pass@host/db")
             mock_cls.assert_called_once_with(
                 db_url="mysql+asyncmy://user:pass@host/db",
+                db_schema="db",
                 session_table="agent_sessions",
+                create_schema=False,
             )
         finally:
             mysql_module.AsyncMySQLDb = original
 
+    @pytest.mark.asyncio
+    async def test_mysql_agent_db_manual_migration_guards(self) -> None:
+        from app.services.agent_service import (
+            _disable_mysql_agent_db_auto_create,
+            _mysql_database_name,
+        )
+
+        assert _mysql_database_name("mysql+asyncmy://user:pass@host/goodgua") == "goodgua"
+        with pytest.raises(ValueError, match="database name"):
+            _mysql_database_name("mysql+asyncmy://user:pass@host")
+
+        db = MagicMock()
+        _disable_mysql_agent_db_auto_create(db)
+        with pytest.raises(RuntimeError, match="manual SQL migrations"):
+            await db._create_table(table_name="agent_sessions", table_type="sessions")
+
     def test_create_agent_db_routes_postgres(self) -> None:
         """Verify _create_agent_db passes correct URL to PostgresDb."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock
+
         from agno.db.postgres import postgres as pg_module
         original = pg_module.PostgresDb
         mock_cls = MagicMock()
@@ -186,6 +208,7 @@ class TestAgentServiceHelpers:
 
     def test_create_agent_builds_agent(self) -> None:
         from unittest.mock import MagicMock, patch
+
         import app.services.agent_service as _mod
         from app.services.agent_service import create_agent
         _mod._db = None
@@ -209,6 +232,7 @@ class TestAgentServiceHelpers:
 
     def test_create_agent_enables_reasoning_for_higher_thinking_intensity(self) -> None:
         from unittest.mock import patch
+
         import app.services.agent_service as _mod
         from app.services.agent_service import create_agent
 
@@ -222,7 +246,7 @@ class TestAgentServiceHelpers:
 
         with patch("app.services.agent_service.get_settings") as mock_gs, patch(
             "app.services.agent_service.Agent"
-        ) as mock_agent_cls, patch("app.services.agent_service.DeepSeek") as mock_deepseek:
+        ), patch("app.services.agent_service.DeepSeek") as mock_deepseek:
             mock_gs.return_value = MagicMock(
                 ai_provider_base_url="https://test.api",
                 ai_provider_api_key="test-key",
@@ -368,6 +392,50 @@ class TestGoodguaTools:
         missing = json.loads(await tools.create_chapter("失落章", volume_id="missing"))
         assert "error" in missing
         assert "error" in json.loads(await tools.update_volume("missing", "无"))
+
+    async def test_volume_tools_reorder_existing_slot_and_list_chapters_by_volume_order(
+        self, tools: GoodguaTools, session: AsyncSession
+    ) -> None:
+        work = await session.get(Work, tools.work_id)
+        assert work is not None
+        session.add_all(
+            [
+                Volume(id="z-volume", work_id=work.id, order_index=1, title="第一卷"),
+                Volume(id="a-volume", work_id=work.id, order_index=2, title="第二卷"),
+            ]
+        )
+        session.add_all(
+            [
+                Chapter(
+                    work_id=work.id,
+                    volume_id="a-volume",
+                    order_index=1,
+                    title="第二卷第一章",
+                    content="",
+                    summary="",
+                ),
+                Chapter(
+                    work_id=work.id,
+                    volume_id="z-volume",
+                    order_index=1,
+                    title="第一卷第一章",
+                    content="",
+                    summary="",
+                ),
+            ]
+        )
+        await session.commit()
+
+        listed = json.loads(await tools.list_chapters())
+        moved = json.loads(await tools.update_volume("a-volume", "第二卷", order_index=1))
+        volumes = json.loads(await tools.list_volumes())
+
+        assert [item["title"] for item in listed] == ["第一卷第一章", "第二卷第一章"]
+        assert moved["order_index"] == 1
+        assert [(item["title"], item["order_index"]) for item in volumes] == [
+            ("第二卷", 1),
+            ("第一卷", 2),
+        ]
 
     async def test_volume_tools_roll_back_on_commit_error(
         self, tools: GoodguaTools, monkeypatch: pytest.MonkeyPatch

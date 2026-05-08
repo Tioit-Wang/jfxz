@@ -5,9 +5,9 @@ import logging
 import runpy
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
-from decimal import Decimal
 
 import pytest
 import pytest_asyncio
@@ -76,9 +76,11 @@ def test_settings_validation_and_caches(monkeypatch: pytest.MonkeyPatch) -> None
         jwt_secret="x" * 32,
         cors_origins="https://goodgua.net",
         enable_payment_simulator=True,
+        auto_create_tables=True,
         _env_file=None,
     )
     assert production.enable_payment_simulator is False
+    assert production.auto_create_tables is False
 
     monkeypatch.setenv("GOODGUA_DATABASE_URL", "sqlite+aiosqlite:///:memory:")
     monkeypatch.setenv("GOODGUA_ENV", "test")
@@ -150,16 +152,13 @@ async def test_init_database_and_get_session(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(
         db_module,
         "get_settings",
-        lambda: SimpleNamespace(auto_create_tables=True),
+        lambda: SimpleNamespace(auto_create_tables=True, is_production=False),
     )
-    drop_mock = AsyncMock()
-    monkeypatch.setattr(db_module, "_drop_agent_sessions_if_invalid", drop_mock)
 
     await db_module.init_database()
     async with engine.connect() as conn:
         exists = await conn.run_sync(lambda sync_conn: inspect(sync_conn).has_table("users"))
     assert exists is True
-    drop_mock.assert_awaited_once()
 
     seen_session = None
     async for session in db_module.get_session():
@@ -174,18 +173,30 @@ async def test_init_database_and_get_session(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(
         db_module,
         "get_settings",
-        lambda: SimpleNamespace(auto_create_tables=False),
+        lambda: SimpleNamespace(auto_create_tables=False, is_production=False),
     )
-    drop_mock = AsyncMock()
-    monkeypatch.setattr(db_module, "_drop_agent_sessions_if_invalid", drop_mock)
     await db_module.init_database()
     async with false_engine.connect() as conn:
         exists = await conn.run_sync(lambda sync_conn: inspect(sync_conn).has_table("users"))
     assert exists is False
-    drop_mock.assert_not_awaited()
+
+    prod_engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    prod_maker = async_sessionmaker(prod_engine, expire_on_commit=False)
+    monkeypatch.setattr(db_module, "engine", prod_engine)
+    monkeypatch.setattr(db_module, "SessionLocal", prod_maker)
+    monkeypatch.setattr(
+        db_module,
+        "get_settings",
+        lambda: SimpleNamespace(auto_create_tables=True, is_production=True),
+    )
+    await db_module.init_database()
+    async with prod_engine.connect() as conn:
+        exists = await conn.run_sync(lambda sync_conn: inspect(sync_conn).has_table("users"))
+    assert exists is False
 
     await engine.dispose()
     await false_engine.dispose()
+    await prod_engine.dispose()
 
 
 @pytest.mark.asyncio
@@ -500,7 +511,7 @@ async def test_worker_main_and_entrypoint(monkeypatch: pytest.MonkeyPatch) -> No
         coro.close()
 
     monkeypatch.setattr(asyncio, "run", fake_run)
-    runpy.run_module("app.worker", run_name="__main__")
+    runpy.run_path(worker_module.__file__, run_name="__main__")
     assert captured
 
 
@@ -571,7 +582,12 @@ def test_cli_entrypoints_and_db_commands(monkeypatch: pytest.MonkeyPatch, capsys
         def scalar(self) -> str:
             return "goodgua-test"
 
+    class DummyBind:
+        dialect = SimpleNamespace(name="mysql")
+
     class DummySession:
+        bind = DummyBind()
+
         async def execute(self, _statement):
             return DummyResult()
 
@@ -581,15 +597,65 @@ def test_cli_entrypoints_and_db_commands(monkeypatch: pytest.MonkeyPatch, capsys
 
     monkeypatch.setattr(db_cli, "init_database", fake_init_database)
     monkeypatch.setattr(db_cli, "SessionLocal", dummy_session_local)
+    monkeypatch.setattr(db_cli, "get_settings", lambda: SimpleNamespace(is_production=False))
     db_cli.db_init()
     db_cli.db_check()
     output = capsys.readouterr().out
     assert "Database tables created" in output
     assert "Connected to database: goodgua-test" in output
 
+    class SqliteResult:
+        def scalar_one(self) -> int:
+            return 1
+
+        def first(self) -> tuple[int, str, str]:
+            return (0, "main", "")
+
+    class SqliteSession:
+        bind = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
+
+        async def execute(self, _statement):
+            return SqliteResult()
+
+    @asynccontextmanager
+    async def sqlite_session_local():
+        yield SqliteSession()
+
+    monkeypatch.setattr(db_cli, "SessionLocal", sqlite_session_local)
+    db_cli.db_check()
+    output = capsys.readouterr().out
+    assert "Connected to database: :memory:" in output
+
+    class OtherResult:
+        def scalar_one(self) -> int:
+            return 1
+
+        def scalar(self) -> str:
+            return "postgres-test"
+
+    class OtherSession:
+        bind = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+
+        async def execute(self, _statement):
+            return OtherResult()
+
+    @asynccontextmanager
+    async def other_session_local():
+        yield OtherSession()
+
+    monkeypatch.setattr(db_cli, "SessionLocal", other_session_local)
+    db_cli.db_check()
+    output = capsys.readouterr().out
+    assert "Connected to database: postgres-test" in output
+
+    monkeypatch.setattr(db_cli, "get_settings", lambda: SimpleNamespace(is_production=True))
+    with pytest.raises(typer.Exit):
+        db_cli.db_init()
+
     async def failing_init_database() -> None:
         raise RuntimeError("db down")
 
+    monkeypatch.setattr(db_cli, "get_settings", lambda: SimpleNamespace(is_production=False))
     monkeypatch.setattr(db_cli, "init_database", failing_init_database)
     with pytest.raises(typer.Exit):
         db_cli.db_init()

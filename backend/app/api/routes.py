@@ -50,10 +50,11 @@ from app.models import (
     User,
     UserSubscription,
     Volume,
-    WritingGoal,
     Work,
+    WritingGoal,
     now,
 )
+from app.services.workspace_structure import move_volume_to_order, ordered_chapters_statement
 
 logger = logging.getLogger(__name__)
 
@@ -258,9 +259,7 @@ def public(model: Any) -> dict[str, Any]:
     data: dict[str, Any] = {}
     for column in model.__table__.columns:
         value = getattr(model, column.name)
-        if isinstance(value, _DateTime):
-            value = value.isoformat()
-        elif isinstance(value, _Date):
+        if isinstance(value, (_DateTime, _Date)):
             value = value.isoformat()
         elif isinstance(value, _Decimal):
             value = float(value)
@@ -983,9 +982,7 @@ async def workspace_bootstrap(
     volumes_result = await session.execute(
         select(Volume).where(Volume.work_id == work_id).order_by(Volume.order_index)
     )
-    chapters_result = await session.execute(
-        select(Chapter).where(Chapter.work_id == work_id).order_by(Chapter.volume_id, Chapter.order_index)
-    )
+    chapters_result = await session.execute(ordered_chapters_statement(work_id))
     characters_result = await session.execute(
         select(Character).where(Character.work_id == work_id).order_by(Character.updated_at.desc())
     )
@@ -1188,7 +1185,7 @@ async def update_volume(
     volume = await must_get_in_work(session, Volume, volume_id, work_id)
     volume.title = payload.title.strip() or volume.title
     if payload.order_index is not None:
-        volume.order_index = payload.order_index
+        await move_volume_to_order(session, work_id, volume, payload.order_index)
     await session.commit()
     return public(volume)
 
@@ -1409,9 +1406,7 @@ async def list_chapters(
 ) -> list[dict[str, Any]]:
     await owned_work(session, user.id, work_id)
     await ensure_default_volume(session, work_id)
-    result = await session.execute(
-        select(Chapter).where(Chapter.work_id == work_id).order_by(Chapter.volume_id, Chapter.order_index)
-    )
+    result = await session.execute(ordered_chapters_statement(work_id))
     await session.commit()
     return [public(item) for item in result.scalars()]
 

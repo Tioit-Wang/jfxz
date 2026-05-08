@@ -2,7 +2,6 @@
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -12,10 +11,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.api.routes import (
-    admin_credit_transactions,
     admin_credit_transaction_detail,
+    admin_credit_transactions,
     create_user_account,
-    public,
     seed_defaults,
 )
 from app.core.config import get_settings

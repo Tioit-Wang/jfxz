@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 export type ChatMentionInputHandle = {
   clear: () => void;
   focus: () => void;
+  insertMention: (reference: Pick<ChatReference, "id" | "name" | "summary"> & { type: "chapter" | "character" }) => void;
   setText: (value: string) => void;
 };
 
@@ -76,6 +77,22 @@ function textDoc(value: string) {
       content: line ? [{ type: "text", text: line }] : undefined
     }))
   };
+}
+
+function mentionContent(reference: Pick<ChatReference, "id" | "name" | "summary" | "type">) {
+  return [
+    {
+      type: "mention",
+      attrs: {
+        id: reference.id,
+        label: reference.name,
+        name: reference.name,
+        type: reference.type,
+        summary: reference.summary ?? ""
+      }
+    },
+    { type: "text", text: " " }
+  ];
 }
 
 function extractMentionText(editor: Editor): { text: string; mentions: ChatMention[] } {
@@ -289,19 +306,7 @@ export const ChatMentionInput = forwardRef<ChatMentionInputHandle, ChatMentionIn
         .chain()
         .focus()
         .deleteRange(currentMention.range)
-        .insertContent([
-          {
-            type: "mention",
-            attrs: {
-              id: reference.id,
-              label: reference.name,
-              name: reference.name,
-              type: reference.type,
-              summary: reference.summary ?? ""
-            }
-          },
-          { type: "text", text: " " }
-        ])
+        .insertContent(mentionContent(reference))
         .run();
       setMention({ open: false, query: "", range: null, activeIndex: 0 });
       onSelectReference(reference);
@@ -334,6 +339,14 @@ export const ChatMentionInput = forwardRef<ChatMentionInputHandle, ChatMentionIn
         },
         focus() {
           editor?.commands.focus("end");
+        },
+        insertMention(reference) {
+          editor
+            ?.chain()
+            .focus("end")
+            .insertContent(mentionContent(reference))
+            .run();
+          setMention({ open: false, query: "", range: null, activeIndex: 0 });
         },
         setText(value: string) {
           editor?.commands.setContent(value ? textDoc(value) : emptyDoc(), { emitUpdate: false });

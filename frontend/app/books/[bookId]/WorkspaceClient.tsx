@@ -3,34 +3,15 @@
 import { diffLines, type Change } from "diff";
 import {
   AlertCircle,
-  BookOpen,
-  Brain,
   Check,
   ChevronDown,
-  ChevronLeft,
   Clock3,
   Cloud,
   CloudOff,
-  Copy,
-  Crown,
-  Database,
-  Edit3,
-  History,
   Loader2,
-  MessageSquare,
-  MoreVertical,
-  Plus,
   Save,
-  Search,
-  Settings,
-  Sparkles,
-  Trash2,
-  Users,
-  Wand2,
-  X,
-  Zap
+  type LucideIcon,
 } from "lucide-react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useGroupRef, usePanelRef, type Layout } from "react-resizable-panels";
@@ -53,9 +34,7 @@ import {
   type UserProfile,
 } from "@/api";
 import { userLoginPath } from "@/auth";
-import { ChapterPlainTextEditor } from "@/components/ChapterPlainTextEditor";
-import { ChatMentionInput, type ChatMentionInputHandle } from "@/components/ChatMentionInput";
-import { ModelPicker } from "@/components/ModelPicker";
+import { type ChatMentionInputHandle } from "@/components/ChatMentionInput";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -66,22 +45,22 @@ import {
   AlertDialogHeader,
   AlertDialogTitle
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { BillingDialog } from "@/components/billing/BillingDialog";
 import { PaymentDialog } from "@/components/billing/PaymentDialog";
 import { cn } from "@/lib/utils";
 import { formatToken } from "@/lib/format";
 import { applySuggestion, type Chapter, type Work, wordCount } from "@/domain";
+import { type WorkspaceMentionReference } from "./workspace/dnd";
+import { WorkspaceChatPanel } from "./workspace/WorkspaceChatPanel";
+import { WorkspaceEditorPanel } from "./workspace/WorkspaceEditorPanel";
+import { WorkspaceSidebarPanel } from "./workspace/WorkspaceSidebarPanel";
 
 type WorkspaceClientProps = {
   bookId: string;
@@ -133,7 +112,7 @@ const DEFAULT_EDITOR_SETTINGS = {
   paragraphSpacing: 4,
 };
 
-function formatStatus(status: SaveStatus): { label: string; tone: "success" | "muted" | "warning"; icon: typeof Check } {
+function formatStatus(status: SaveStatus): { label: string; tone: "success" | "muted" | "warning"; icon: LucideIcon } {
   if (status === "saving") return { label: "正在保存...", tone: "muted", icon: Loader2 };
   if (status === "dirty") return { label: "编辑中", tone: "warning", icon: Clock3 };
   if (status === "loading") return { label: "加载中", tone: "muted", icon: Loader2 };
@@ -870,10 +849,32 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     setNextBefore(page.nextBefore);
   }
 
+  async function retryModels() {
+    setModelStatus("loading");
+    try {
+      const models = await client.listAiModels();
+      const nextModelId = models[0]?.id ?? "";
+      setAiModels(models);
+      setSelectedModelId(nextModelId);
+      if (nextModelId) {
+        window.localStorage.setItem(chatModelKey(bookId), nextModelId);
+      }
+      setModelStatus(nextModelId ? "ready" : "error");
+    } catch {
+      setModelStatus("error");
+    }
+  }
+
   function selectChatModel(modelId: string) {
     if (modelId === "__none") return;
     setSelectedModelId(modelId);
     window.localStorage.setItem(chatModelKey(bookId), modelId);
+  }
+
+  function insertDroppedMention(reference: WorkspaceMentionReference) {
+    if (modelStatus !== "ready" || !selectedModelId) return;
+    rememberReferences([reference]);
+    chatInputRef.current?.insertMention(reference);
   }
 
   async function sendMessage() {
@@ -1778,22 +1779,9 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
           panelRef={workspaceSidebarRef}
           className="min-h-0 min-w-0"
         >
-      <aside data-testid="workspace-sidebar-panel" className="z-10 flex h-full min-h-0 min-w-0 flex-col border-r border-border bg-card shadow-[2px_0_8px_rgba(0,0,0,0.02)]">
-        <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border bg-background px-4">
-          <div className="flex min-w-0 items-center gap-3">
-            <Button asChild variant="ghost" size="icon" className="size-8" aria-label="返回作品列表">
-              <Link href="/books">
-                <ChevronLeft size={20} />
-              </Link>
-            </Button>
-            <div className="min-w-0">
-              <span className="block truncate text-sm font-semibold text-foreground">{work?.title ?? "作品加载中"}</span>
-              <span className="mt-0.5 block truncate text-xs text-muted-foreground">{work?.shortIntro || "作品总纲已定"}</span>
-            </div>
-          </div>
-          <button
-            className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-            onClick={() => {
+          <WorkspaceSidebarPanel
+            work={work}
+            onOpenWorkEdit={() => {
               if (work) {
                 setWorkDraft({
                   title: work.title,
@@ -1807,402 +1795,57 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
               }
               setWorkEditOpen(true);
             }}
-            aria-label="编辑作品信息"
-          >
-            <MoreVertical size={16} />
-          </button>
-        </div>
-
-        <div className="flex gap-1 border-b border-border bg-muted/40 p-2">
-          {[
-            { key: "chapters" as const, label: "章节", icon: BookOpen },
-            { key: "characters" as const, label: "角色", icon: Users },
-            { key: "settings" as const, label: "设定", icon: Database }
-          ].map((item) => {
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.key}
-                onClick={() => setActiveTab(item.key)}
-                className={cn(
-                  "flex flex-1 items-center justify-center rounded py-1.5 text-xs font-medium transition-colors",
-                  activeTab === item.key ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                )}
-              >
-                <Icon size={14} className="mr-1.5" />
-                {item.label}
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="flex items-center justify-between p-4 pb-2">
-          <div>
-            <h2 className="text-sm font-semibold text-foreground">{moduleMeta.title}</h2>
-            <p className="mt-0.5 text-[11px] text-muted-foreground">{moduleMeta.count}</p>
-          </div>
-          {activeTab === "chapters" ? (
-            <button className="rounded bg-primary p-1.5 text-primary-foreground transition-colors hover:bg-primary/90" onClick={() => void createChapter()} aria-label="新建章节">
-              <Plus size={16} />
-            </button>
-          ) : null}
-          {activeTab === "characters" ? (
-            <button className="rounded bg-primary p-1.5 text-primary-foreground transition-colors hover:bg-primary/90" onClick={startCreateCharacter} aria-label="新建角色">
-              <Plus size={16} />
-            </button>
-          ) : null}
-          {activeTab === "settings" ? (
-            <button className="rounded bg-primary p-1.5 text-primary-foreground transition-colors hover:bg-primary/90" onClick={startCreateSetting} aria-label="新建设定">
-              <Plus size={16} />
-            </button>
-          ) : null}
-        </div>
-
-        <div className="flex-1 overflow-y-auto px-2 pb-4">
-          {activeTab === "chapters" ? (
-            <div className="space-y-1">
-              {chapters.map((chapter) => {
-                const selected = chapter.id === activeChapterId;
-                return (
-                  <button
-                    key={chapter.id}
-                    className={cn(
-                      "group relative w-full overflow-hidden rounded-lg border p-3 text-left transition-colors",
-                      selected
-                        ? "border-border bg-card shadow-sm"
-                        : "border-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                    )}
-                    onClick={() => void selectChapter(chapter.id)}
-                  >
-                    {selected ? <span className="absolute bottom-0 left-0 top-0 w-1 bg-primary" /> : null}
-                    <span className="flex items-start justify-between gap-2 pl-1">
-                      <span className={cn("truncate text-sm", selected ? "font-bold text-foreground" : "font-medium")}>
-                        {chapter.order}. {chapter.title}
-                      </span>
-                      <span className={cn("shrink-0 text-[11px]", selected ? "text-muted-foreground" : "text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100")}>
-                        {wordCount(chapter.content)}字
-                      </span>
-                    </span>
-                    <span className="mt-1 block truncate pl-1 text-xs text-muted-foreground">
-                      {chapter.summary || "暂无章节提要"}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
-
-          {activeTab === "characters" ? (
-            <div className="space-y-3">
-              <div className="relative px-1">
-                <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                <Input
-                  aria-label="搜索角色"
-                  value={characterSearch}
-                  onChange={(event) => setCharacterSearch(event.target.value)}
-                  className="h-9 rounded-lg border-border bg-background pl-9 text-xs"
-                  placeholder="搜索名称或简介"
-                />
-              </div>
-
-              {copyNotice ? <p className="mx-1 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-xs text-gray-500">{copyNotice}</p> : null}
-
-              <div className="space-y-1">
-                {status === "loading" ? <p className="px-3 py-4 text-sm text-gray-400">角色加载中...</p> : null}
-                {status !== "loading" && !characters.length ? (
-                  <p className="mx-1 rounded-lg border border-dashed border-gray-200 bg-white p-4 text-xs leading-5 text-gray-400">
-                    还没有角色，点击右上角创建。
-                  </p>
-                ) : null}
-                {status !== "loading" && characters.length > 0 && !filteredCharacters.length ? (
-                  <p className="mx-1 rounded-lg border border-gray-200 bg-white p-4 text-xs text-gray-400">没有匹配的角色</p>
-                ) : null}
-                {filteredCharacters.map((item) => {
-                  const selected = item.id === activeCharacter?.id && characterMode === "detail";
-                  return (
-                    <div
-                      key={item.id}
-                      className={cn(
-                        "group relative w-full rounded-lg border p-3 text-left transition-colors cursor-pointer",
-                        selected ? "border-border bg-card shadow-sm" : "border-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                      )}
-                      onClick={() => selectCharacter(item)}
-                    >
-                      <span className="block truncate text-sm font-medium text-foreground">{item.name}</span>
-                      <span className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{item.summary || "暂无简介"}</span>
-                      <span className="mt-2 flex items-center text-[10px] text-muted-foreground">
-                        <Clock3 size={11} className="mr-1" />
-                        {formatUpdatedAt(item.updatedAt)}
-                      </span>
-                      <div className="absolute right-2 top-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                        <button
-                          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                          onClick={(e) => { e.stopPropagation(); selectCharacter(item); startEditCharacter(); }}
-                          aria-label="编辑角色"
-                        >
-                          <Edit3 size={13} />
-                        </button>
-                        <button
-                          className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600"
-                          onClick={(e) => { e.stopPropagation(); selectCharacter(item); setCharacterDeleteConfirm(true); }}
-                          aria-label="删除角色"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {activeCharacter && characterMode === "detail" ? (
-                <div className="mx-1 rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
-                  <div className="min-w-0">
-                    <h3 className="truncate text-sm font-semibold text-gray-900">{activeCharacter.name}</h3>
-                    <p className="mt-1 text-xs leading-5 text-gray-500">{activeCharacter.summary}</p>
-                  </div>
-                  <p className="mt-3 max-h-24 overflow-y-auto whitespace-pre-wrap rounded-lg bg-muted p-2 text-xs leading-5 text-muted-foreground">
-                    {activeCharacter.detail || "暂无详情"}
-                  </p>
-                  <div className="mt-3">
-                    <button className="w-full rounded-lg border border-border py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground" onClick={() => void copyCharacterText("详情", activeCharacter.detail || activeCharacter.summary)}>
-                      <Copy size={12} className="mr-1 inline" />
-                      复制
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-
-          {activeTab === "settings" ? (
-            <div className="space-y-3">
-              <div className="space-y-2 px-1">
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    aria-label="搜索设定"
-                    value={settingSearch}
-                    onChange={(event) => setSettingSearch(event.target.value)}
-                    className="h-9 pl-9 text-xs"
-                    placeholder="搜索名称、简介或详情"
-                  />
-                </div>
-                <Select value={settingType} onValueChange={setSettingType}>
-                  <SelectTrigger className="w-full" aria-label="筛选设定类型">
-                    <SelectValue placeholder="筛选设定类型" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      {settingTypes.map((item) => (
-                        <SelectItem key={item.value} value={item.value}>
-                          {item.label}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {copyNotice ? <p className="mx-1 rounded-lg border bg-muted px-3 py-2 text-xs text-muted-foreground">{copyNotice}</p> : null}
-
-              <div className="space-y-1">
-                {status !== "loading" && !settings.length ? (
-                  <Empty className="mx-1 rounded-lg border border-dashed">
-                    <EmptyHeader>
-                      <EmptyTitle>还没有设定</EmptyTitle>
-                      <EmptyDescription>点击右上角新建设定，也可以从 AI 对话保存设定草稿。</EmptyDescription>
-                    </EmptyHeader>
-                    <EmptyContent>
-                      <Button size="sm" onClick={startCreateSetting}>
-                        <Plus data-icon="inline-start" />
-                        新建设定
-                      </Button>
-                    </EmptyContent>
-                  </Empty>
-                ) : null}
-                {settings.length > 0 && !filteredSettings.length ? (
-                  <p className="mx-1 rounded-lg border bg-card p-4 text-xs text-muted-foreground">没有匹配的设定</p>
-                ) : null}
-                {filteredSettings.map((item) => {
-                  const selected = item.id === activeSetting?.id && settingMode === "detail";
-                  return (
-                    <div
-                      key={item.id}
-                      className={cn(
-                        "group relative w-full rounded-lg border p-3 text-left transition-colors cursor-pointer",
-                        selected ? "border-border bg-card shadow-sm" : "border-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                      )}
-                      onClick={() => selectSetting(item)}
-                    >
-                      <span className="flex items-center justify-between gap-2">
-                        <span className="truncate text-sm font-medium text-foreground">{item.name}</span>
-                        <Badge variant="secondary">{item.type || "other"}</Badge>
-                      </span>
-                      <span className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{item.summary || "暂无简介"}</span>
-                      <span className="mt-2 flex items-center text-[10px] text-muted-foreground">
-                        <Clock3 size={11} className="mr-1" />
-                        {formatUpdatedAt(item.updatedAt)}
-                      </span>
-                      <div className="absolute right-2 top-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                        <button
-                          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                          onClick={(e) => { e.stopPropagation(); selectSetting(item); startEditSetting(); }}
-                          aria-label="编辑设定"
-                        >
-                          <Edit3 size={13} />
-                        </button>
-                        <button
-                          className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600"
-                          onClick={(e) => { e.stopPropagation(); selectSetting(item); setSettingDeleteConfirm(true); }}
-                          aria-label="删除设定"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {activeSetting && settingMode === "detail" ? (
-                <div className="mx-1 rounded-lg border bg-card p-3 shadow-sm">
-                  <div className="min-w-0">
-                    <Badge variant="outline">{activeSetting.type || "other"}</Badge>
-                    <h3 className="mt-2 truncate text-sm font-semibold">{activeSetting.name}</h3>
-                    <p className="mt-1 text-xs leading-5 text-muted-foreground">{activeSetting.summary}</p>
-                  </div>
-                  <p className="mt-3 max-h-28 overflow-y-auto whitespace-pre-wrap rounded-lg bg-muted p-2 text-xs leading-5 text-muted-foreground">
-                    {activeSetting.detail || "暂无详情"}
-                  </p>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-
-        {/* VIP 会员卡 */}
-        <div className="border-t border-border/60 bg-muted/20 p-4">
-          <div
-            className={cn(
-              "group relative cursor-pointer overflow-hidden rounded-2xl border p-4 transition-all duration-300",
-              profile?.subscription
-                ? "border-amber-200/50 bg-gradient-to-br from-amber-50/50 via-background to-orange-50/30 hover:border-amber-300/60 hover:shadow-[0_4px_20px_-8px_rgba(245,158,11,0.2)]"
-                : "border-border bg-card hover:border-primary/30 hover:shadow-md"
-            )}
-            onClick={() => setShowPointsDetail((v) => !v)}
-          >
-            {/* 装饰性背景光效 */}
-            {profile?.subscription && (
-              <div className="absolute -right-6 -top-6 h-24 w-24 rounded-full bg-gradient-to-br from-amber-400/20 to-orange-500/20 blur-2xl transition-all group-hover:scale-110" />
-            )}
-            
-            {/* 用户信息 + 余量文字/开通按钮 */}
-            <div className="relative flex items-center justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-3">
-                <div className={cn(
-                  "relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white shadow-sm ring-2 ring-background",
-                  profile?.subscription 
-                    ? "bg-gradient-to-br from-amber-400 to-orange-500 shadow-amber-500/20"
-                    : "bg-gradient-to-br from-slate-400 to-slate-500"
-                )}>
-                  {(profile?.user.nickname || profile?.user.email || "U").slice(0, 1).toUpperCase()}
-                  {profile?.subscription && (
-                    <div className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-white shadow-sm">
-                      <Crown size={10} className="text-amber-500" />
-                    </div>
-                  )}
-                </div>
-                <div className="min-w-0">
-                  <span className="block truncate text-sm font-bold text-foreground">
-                    {profile?.user.nickname || "账户中心"}
-                  </span>
-                  <span className={cn(
-                    "block text-[11px] font-medium",
-                    profile?.subscription ? "text-amber-600" : "text-muted-foreground"
-                  )}>
-                    {profile?.subscription ? "尊享 VIP 创作中" : "免费版体验中"}
-                  </span>
-                </div>
-              </div>
-              {showPointsDetail ? (
-                <button
-                  className={cn(
-                    "inline-flex shrink-0 items-center gap-1 rounded-full px-3 py-1.5 text-[11px] font-bold shadow-sm transition-all active:scale-[0.97]",
-                    profile?.subscription
-                      ? "bg-gradient-to-r from-amber-500 to-orange-500 text-white hover:from-amber-600 hover:to-orange-600 hover:shadow-amber-500/25"
-                      : "bg-primary text-primary-foreground hover:bg-primary/90"
-                  )}
-                  onClick={(e) => { e.stopPropagation(); void openBilling(); }}
-                >
-                  <Sparkles size={12} className={profile?.subscription ? "text-amber-100" : ""} />
-                  {profile?.subscription ? "续费套餐" : "升级解锁"}
-                </button>
-              ) : (
-                <div className="shrink-0 text-right text-[11px] tabular-nums leading-relaxed text-muted-foreground">
-                  <div className="font-medium text-foreground">
-                    <Zap size={10} className="mb-0.5 mr-0.5 inline text-amber-500" />
-                    {(profile?.points.vipDailyPoints ?? 0) + (profile?.points.creditPackPoints ?? 0)}
-                  </div>
-                  <div className="text-[10px] opacity-70">可用积分</div>
-                </div>
-              )}
-            </div>
-
-            {/* 积分进度条（展开时显示） */}
-            <div
-              className={cn(
-                "relative overflow-hidden transition-all duration-500 ease-in-out",
-                showPointsDetail ? "mt-5 max-h-48 opacity-100" : "max-h-0 opacity-0"
-              )}
-            >
-              <div className="space-y-4">
-                {/* VIP 积分 */}
-                <div>
-                  <div className="mb-1.5 flex items-center justify-between text-xs">
-                    <span className="flex items-center gap-1.5 font-medium text-foreground">
-                      <div className="flex rounded bg-amber-100 p-0.5 text-amber-600">
-                        <Crown size={12} />
-                      </div>
-                      每日畅写积分
-                    </span>
-                    <span className="tabular-nums font-semibold text-foreground">
-                      {(profile?.points.vipDailyPoints ?? 0).toFixed(1)} <span className="text-[10px] text-muted-foreground font-normal">/日</span>
-                    </span>
-                  </div>
-                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted/60 shadow-inner">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-amber-400 to-orange-400 transition-all duration-1000 ease-out"
-                      style={{ width: `${Math.min(100, ((profile?.points.vipDailyPoints ?? 0) / 2000) * 100)}%` }}
-                    />
-                  </div>
-                </div>
-
-                {/* 加油包积分 */}
-                <div>
-                  <div className="mb-1.5 flex items-center justify-between text-xs">
-                    <span className="flex items-center gap-1.5 font-medium text-foreground">
-                      <div className="flex rounded bg-blue-100 p-0.5 text-blue-600">
-                        <Zap size={12} />
-                      </div>
-                      永久灵感加油包
-                    </span>
-                    <span className="tabular-nums font-semibold text-foreground">
-                      {(profile?.points.creditPackPoints ?? 0).toFixed(1)} <span className="text-[10px] text-muted-foreground font-normal">点</span>
-                    </span>
-                  </div>
-                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted/60 shadow-inner">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-blue-400 to-cyan-400 transition-all duration-1000 ease-out"
-                      style={{ width: `${Math.min(100, ((profile?.points.creditPackPoints ?? 0) / 2000) * 100)}%` }}
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </aside>
+            activeTab={activeTab}
+            onActiveTabChange={setActiveTab}
+            moduleMeta={moduleMeta}
+            chapters={chapters}
+            activeChapterId={activeChapterId}
+            onSelectChapter={(chapterId) => void selectChapter(chapterId)}
+            onCreateChapter={() => void createChapter()}
+            isWorkspaceLoading={status === "loading"}
+            characterSearch={characterSearch}
+            onCharacterSearchChange={setCharacterSearch}
+            copyNotice={copyNotice}
+            characters={characters}
+            filteredCharacters={filteredCharacters}
+            activeCharacter={activeCharacter}
+            isCharacterDetail={characterMode === "detail"}
+            onSelectCharacter={selectCharacter}
+            onStartCreateCharacter={startCreateCharacter}
+            onStartEditCharacter={(item) => {
+              selectCharacter(item);
+              startEditCharacter();
+            }}
+            onDeleteCharacter={(item) => {
+              selectCharacter(item);
+              setCharacterDeleteConfirm(true);
+            }}
+            onCopyCharacterText={(label, value) => void copyCharacterText(label, value)}
+            settingSearch={settingSearch}
+            onSettingSearchChange={setSettingSearch}
+            settingType={settingType}
+            onSettingTypeChange={setSettingType}
+            settingTypes={settingTypes}
+            settings={settings}
+            filteredSettings={filteredSettings}
+            activeSetting={activeSetting}
+            isSettingDetail={settingMode === "detail"}
+            onSelectSetting={selectSetting}
+            onStartCreateSetting={startCreateSetting}
+            onStartEditSetting={(item) => {
+              selectSetting(item);
+              startEditSetting();
+            }}
+            onDeleteSetting={(item) => {
+              selectSetting(item);
+              setSettingDeleteConfirm(true);
+            }}
+            profile={profile}
+            showPointsDetail={showPointsDetail}
+            onTogglePointsDetail={() => setShowPointsDetail((value) => !value)}
+            onOpenBilling={() => void openBilling()}
+            formatUpdatedAt={formatUpdatedAt}
+          />
         </ResizablePanel>
 
         <ResizableHandle withHandle aria-label="调整目录与正文宽度" className="z-30" />
@@ -2214,108 +1857,38 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
           panelRef={workspaceEditorRef}
           className="min-h-0 min-w-0"
         >
-      <main data-testid="workspace-editor-panel" className="relative z-0 flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background">
-        <div className="z-10 flex h-14 shrink-0 items-center justify-between border-b border-border bg-background px-6">
-          <div className="flex items-center gap-4">
-            <div className="flex select-none items-center gap-1.5 text-xs text-gray-400">
-              <StatusIcon
-                size={14}
-                className={cn(
-                  statusMeta.tone === "success" ? "text-green-500" : "text-gray-400",
-                  status === "saving" || status === "loading" || status === "analyzing" ? "animate-spin" : ""
-                )}
-              />
-              <span>{statusMeta.label}</span>
-            </div>
-            <button className="rounded p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600" onClick={() => setChapterDeleteOpen(true)} aria-label="删除当前章节">
-              <Trash2 size={16} />
-            </button>
-            <button className="rounded p-1.5 text-gray-400 transition-colors hover:bg-accent hover:text-accent-foreground" onClick={() => setEditorSettingsOpen(true)} aria-label="编辑器设置">
-              <Settings size={16} />
-            </button>
-          </div>
-          <button
-            className="flex items-center gap-1.5 rounded-full bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-60"
-            onClick={() => void analyze()}
-            disabled={status === "analyzing"}
-          >
-            {status === "analyzing" ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
-            <span>AI 分析本章</span>
-          </button>
-        </div>
-
-        <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto">
-          <div className="flex min-h-full w-full max-w-3xl min-w-0 flex-col px-4 py-12 md:px-10">
-            {activeChapter ? (
-              <>
-                <input
-                  aria-label="章节标题"
-                  type="text"
-                  value={title}
-                  onChange={(event) => setTitle(event.target.value)}
-                  className="mb-6 border-none bg-transparent text-3xl font-bold text-foreground outline-none placeholder:text-muted-foreground"
-                  placeholder="无标题章节"
-                />
-
-                <div className="group relative mb-10">
-                  <div className="absolute -left-4 top-3 bottom-3 w-1 rounded-full bg-gray-200 transition-colors group-hover:bg-gray-300" />
-                  <div className="relative min-h-[60px] rounded-xl border border-transparent bg-muted p-4 text-sm text-muted-foreground transition-all group-hover:border-border">
-                    <div className="whitespace-pre-wrap pr-10 leading-relaxed line-clamp-3 break-words">
-                      {summary || <span className="text-gray-400">尚未填写章节提要，点击右侧编辑...</span>}
-                    </div>
-                    <button
-                      onClick={openSummaryModal}
-                      className="absolute right-3 top-3 rounded-lg border border-gray-200 bg-white p-1.5 text-gray-400 opacity-0 shadow-sm transition-all duration-200 hover:bg-gray-100 hover:text-gray-900 group-hover:opacity-100"
-                      title="编辑章节提要"
-                      aria-label="编辑章节提要"
-                    >
-                      <Edit3 size={14} />
-                    </button>
-                  </div>
-                </div>
-
-                {analysisNotice ? (
-                  <div className="mb-5 rounded-lg border border-border bg-muted px-4 py-3 text-sm leading-6 text-foreground">
-                    <span className="flex items-center font-medium">
-                      <AlertCircle size={15} className="mr-1.5" />
-                      {analysisNotice}
-                    </span>
-                  </div>
-                ) : null}
-
-                <ChapterPlainTextEditor
-                  value={content}
-                  suggestions={suggestions}
-                  activeSuggestionIndex={activeSuggestionIndex}
-                  disabled={status === "loading"}
-                  onChange={updateContent}
-                  onActivateSuggestion={(index) => {
-                    setActiveSuggestionIndex(index);
-                    setOverlay(true);
-                  }}
-                  styleSettings={{
-                    fontStack: editorFontStack,
-                    fontSize: editorSettings.fontSize,
-                    lineHeight: editorSettings.lineHeight,
-                    letterSpacing: editorSettings.letterSpacing,
-                    paragraphSpacing: editorSettings.paragraphSpacing,
-                  }}
-                />
-              </>
-            ) : (
-              <div className="grid flex-1 place-items-center text-sm text-gray-400">暂无章节</div>
-            )}
-          </div>
-        </div>
-
-        <div className="flex h-10 shrink-0 items-center justify-between border-t border-border bg-muted/40 px-6 text-[12px] font-medium text-muted-foreground">
-          <div className="flex items-center">
-            <span className="mr-2 h-1.5 w-1.5 rounded-full bg-green-500" />
-            本章字数: {count}
-          </div>
-          <div>今日字数: {todayCount}</div>
-        </div>
-      </main>
+          <WorkspaceEditorPanel
+            activeChapter={activeChapter}
+            title={title}
+            summary={summary}
+            content={content}
+            status={status}
+            statusLabel={statusMeta.label}
+            statusTone={statusMeta.tone}
+            StatusIcon={StatusIcon}
+            count={count}
+            todayCount={todayCount}
+            analysisNotice={analysisNotice}
+            suggestions={suggestions}
+            activeSuggestionIndex={activeSuggestionIndex}
+            styleSettings={{
+              fontStack: editorFontStack,
+              fontSize: editorSettings.fontSize,
+              lineHeight: editorSettings.lineHeight,
+              letterSpacing: editorSettings.letterSpacing,
+              paragraphSpacing: editorSettings.paragraphSpacing,
+            }}
+            onTitleChange={setTitle}
+            onOpenSummaryModal={openSummaryModal}
+            onDeleteChapter={() => setChapterDeleteOpen(true)}
+            onOpenEditorSettings={() => setEditorSettingsOpen(true)}
+            onAnalyze={() => void analyze()}
+            onContentChange={updateContent}
+            onActivateSuggestion={(index) => {
+              setActiveSuggestionIndex(index);
+              setOverlay(true);
+            }}
+          />
         </ResizablePanel>
 
         <ResizableHandle withHandle aria-label="调整正文与对话宽度" className="z-30" />
@@ -2328,273 +1901,58 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
           panelRef={workspaceChatRef}
           className="min-h-0 min-w-0"
         >
-      <aside data-testid="workspace-chat-panel" className="relative z-20 flex h-full min-h-0 min-w-0 flex-col border-l border-border bg-card shadow-[-2px_0_12px_rgba(0,0,0,0.03)]">
-        <div className="flex h-14 items-center justify-between border-b border-border p-4">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className={cn(
-              "h-2.5 w-2.5 shrink-0 rounded-full shadow-[0_0_10px_rgba(52,211,153,0.6)]",
-              chatStatus === "streaming" ? "animate-pulse bg-emerald-400" : "bg-muted-foreground/40"
-            )} />
-            <div className="min-w-0">
-              <h2 className="truncate text-sm font-semibold text-foreground">{activeSession?.title || "新的对话"}</h2>
-              <p className="truncate text-xs text-muted-foreground">
-                {chatStatus === "streaming" ? "AI 回复中" : "当前会话 · 已读取作品上下文"}
-              </p>
-            </div>
-          </div>
-          <div className="flex gap-1">
-            <DropdownMenu open={showHistory} onOpenChange={setShowHistory}>
-              <DropdownMenuTrigger asChild>
-                <button className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground" title="历史会话" aria-label="历史会话">
-                  <Clock3 size={16} />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-80 p-2">
-                <div className="space-y-2">
-                  <div className="px-1 py-1 text-xs font-medium text-muted-foreground">最近会话</div>
-                  <div className="max-h-64 space-y-2 overflow-y-auto">
-                    {sessions.length ? (
-                      sessions.map((session) => (
-                        <button
-                          key={session.id}
-                          className={cn(
-                            "w-full rounded-lg border px-3 py-2 text-left text-xs transition-colors",
-                            session.id === activeSessionId
-                              ? "border-primary bg-card text-foreground"
-                              : "border-transparent bg-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                          )}
-                          onClick={() => void switchSession(session.id)}
-                        >
-                          <span className="block truncate font-medium">{session.title}</span>
-                          <span className="mt-1 block truncate text-muted-foreground">{session.lastMessagePreview || "暂无消息"}</span>
-                        </button>
-                      ))
-                    ) : (
-                      <p className="px-2 py-3 text-xs text-muted-foreground">暂无历史会话</p>
-                    )}
-                  </div>
-                </div>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <button className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground" onClick={() => void createSession()} title="新建会话" aria-label="新建会话">
-              <MessageSquare size={16} />
-            </button>
-          </div>
-        </div>
-
-        {!overlay ? (
-          <div className="flex flex-1 flex-col overflow-hidden">
-            <div className="chat-scroll flex-1 space-y-5 overflow-y-auto p-4">
-              <div className="flex justify-center">
-                <span className="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">当前会话 · 已读取作品上下文</span>
-              </div>
-              {hasMoreMessages ? (
-                <Button variant="secondary" size="sm" className="w-full rounded-full" onClick={() => void loadOlderMessages()}>
-                  <History size={14} />
-                  加载更早消息
-                </Button>
-              ) : null}
-              {chatStatus === "loading" ? <p className="text-sm text-muted-foreground">消息加载中...</p> : null}
-
-              {messages.map((message) => (
-                <div key={message.id} className={cn("animate-pop flex w-full gap-3", message.role === "user" ? "justify-end" : "justify-start")}>
-                  {message.role === "assistant" && (
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted text-xs font-bold text-primary">AI</div>
-                  )}
-                  <div className="max-w-[85%]">
-                    <div
-                      className={cn(
-                        "rounded-2xl border px-4 py-3 text-sm leading-relaxed shadow-sm",
-                        message.role === "user"
-                          ? "rounded-br-sm border-primary bg-primary text-primary-foreground"
-                          : "rounded-tl-sm border-border bg-background text-card-foreground"
-                      )}
-                    >
-                      {renderMessageContent(message)}
-                      {message.role === "assistant" && message.billing_failed ? (
-                        <div className="mt-2 flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-700">
-                          <AlertCircle size={12} className="shrink-0" />
-                          计费异常，请联系管理员
-                        </div>
-                      ) : null}
-                      {message.role === "assistant" && message.error ? (
-                        <div className={cn(
-                          "mt-2 flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs",
-                          message.error.includes("积分") || message.error.includes("402")
-                            ? "border-amber-200 bg-amber-50 text-amber-700"
-                            : "border-destructive/20 bg-destructive/5 text-destructive"
-                        )}>
-                          <AlertCircle size={12} className="shrink-0" />
-                          {message.error}
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                  {message.role === "user" && (
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">U</div>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            <div className="mx-4 mb-4 rounded-2xl border border-border bg-background shadow-sm">
-              {/* Model selector bar */}
-              <div className="flex items-center justify-between pl-3 pr-4 py-2">
-                <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-                  {modelStatus === "loading" ? (
-                    <span className="text-muted-foreground/50">模型加载中...</span>
-                  ) : modelStatus === "error" ? (
-                    <>
-                      <span className="text-destructive">模型列表加载失败</span>
-                      <button
-                        type="button"
-                        className="ml-1 underline hover:no-underline"
-                        onClick={() => {
-                          setModelStatus("loading");
-                          client.listAiModels()
-                            .then((models) => {
-                              const nextModelId = models[0]?.id ?? "";
-                              setAiModels(models);
-                              setSelectedModelId(nextModelId);
-                              if (nextModelId) window.localStorage.setItem(chatModelKey(bookId), nextModelId);
-                              setModelStatus(nextModelId ? "ready" : "error");
-                            })
-                            .catch(() => setModelStatus("error"));
-                        }}
-                      >
-                        重试
-                      </button>
-                    </>
-                  ) : !selectedModel ? (
-                    <span className="text-muted-foreground/50">暂无可用模型</span>
-                  ) : (
-                    <ModelPicker
-                      models={aiModels}
-                      selectedId={selectedModelId}
-                      onSelect={selectChatModel}
-                    />
-                  )}
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <Brain size={12} className="text-muted-foreground/60" />
-                    <span>思考</span>
-                    <Switch
-                      checked={thinkingEnabled}
-                      onCheckedChange={setThinkingEnabled}
-                      aria-label="开启思考"
-                    />
-                  </div>
-                  {thinkingEnabled && (
-                    <input
-                      type="range"
-                      min={0}
-                      max={100}
-                      value={Math.round(thinkingIntensity * 100)}
-                      onChange={(e) => setThinkingIntensity(Number(e.target.value) / 100)}
-                      className="h-1 w-16 cursor-pointer accent-primary"
-                      aria-label="思考强度"
-                    />
-                  )}
-                </div>
-              </div>
-
-              {/* Input area */}
-              <ChatMentionInput
-                ref={chatInputRef}
-                valueText={chatInput}
-                mentions={chatMentions}
-                items={allReferenceItems}
-                recentItems={recentReferences}
-                pendingReferences={pendingReferences}
-                disabled={modelStatus !== "ready" || !selectedModelId}
-                isStreaming={chatStatus === "streaming"}
-                onStop={() => {
-                  abortRef.current?.abort();
-                  setChatStatus("idle");
-                }}
-                onChange={(text, mentions) => {
-                  setChatInput(text);
-                  setChatMentions(mentions);
-                }}
-                onSelectReference={(reference) => rememberReferences([reference])}
-                onRemoveReference={(reference) =>
-                  setPendingReferences((items) => items.filter((item) => referenceKey(item) !== referenceKey(reference)))
-                }
-                onSubmit={() => void sendMessage()}
-              />
-            </div>
-          </div>
-        ) : (
-          <div className="absolute inset-0 z-30 flex flex-col bg-background/95 backdrop-blur">
-            <div className="flex h-14 items-center justify-between border-b border-border bg-background p-4">
-              <div className="flex items-center gap-2">
-                <Wand2 size={16} className="text-foreground" />
-                <span className="text-sm font-semibold text-foreground">AI 写作建议</span>
-              </div>
-              <button className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground" onClick={() => setOverlay(false)} aria-label="关闭写作建议">
-                <X size={18} />
-              </button>
-            </div>
-            <div className="flex-1 space-y-3 overflow-y-auto p-4">
-              {suggestions.map((suggestion, index) => {
-                const selected = index === activeSuggestionIndex;
-                return (
-                  <div
-                    key={`${suggestion.quote}-${index}`}
-                    className={cn(
-                      "flex flex-col overflow-hidden rounded-xl border bg-card shadow-sm",
-                      selected ? "border-primary" : "border-border"
-                    )}
-                  >
-                    <button
-                      className="border-b border-border bg-muted p-4 text-left"
-                      onClick={() => setActiveSuggestionIndex(index)}
-                    >
-                      <span className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                        原文引用
-                      </span>
-                      <p className="line-clamp-3 text-sm text-muted-foreground">{suggestion.quote}</p>
-                    </button>
-                    <div className="border-b border-border p-4">
-                      <div className="flex items-start text-sm">
-                        <AlertCircle size={16} className="mr-2 mt-0.5 shrink-0 text-foreground" />
-                        <span className="text-foreground">{suggestion.issue}</span>
-                      </div>
-                    </div>
-                    <div className="bg-background p-4">
-                      <span className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                        推荐修改方案
-                      </span>
-                      <p className="mb-5 text-sm text-foreground">{suggestion.options[0]}</p>
-                      <div className="flex gap-3">
-                        <button
-                          className="flex-1 rounded-lg bg-primary py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-                          onClick={() => {
-                            setActiveSuggestionIndex(index);
-                            void acceptSuggestion(index);
-                          }}
-                        >
-                          采纳替换
-                        </button>
-                        <button
-                          className="flex-1 rounded-lg border border-border bg-background py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
-                          onClick={() => {
-                            setActiveSuggestionIndex(index);
-                            sendSuggestionToChat(index);
-                          }}
-                        >
-                          发送至对话
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </aside>
+          <WorkspaceChatPanel
+            overlay={overlay}
+            suggestions={suggestions}
+            activeSuggestionIndex={activeSuggestionIndex}
+            onSelectSuggestion={setActiveSuggestionIndex}
+            onAcceptSuggestion={(index) => void acceptSuggestion(index)}
+            onSendSuggestionToChat={sendSuggestionToChat}
+            onCloseOverlay={() => setOverlay(false)}
+            chatStatus={chatStatus}
+            activeSession={activeSession}
+            showHistory={showHistory}
+            onHistoryOpenChange={setShowHistory}
+            sessions={sessions}
+            activeSessionId={activeSessionId}
+            onSwitchSession={(sessionId) => void switchSession(sessionId)}
+            onCreateSession={() => void createSession()}
+            hasMoreMessages={hasMoreMessages}
+            onLoadOlderMessages={() => void loadOlderMessages()}
+            messages={messages}
+            renderMessageContent={renderMessageContent}
+            modelStatus={modelStatus}
+            selectedModel={selectedModel}
+            aiModels={aiModels}
+            selectedModelId={selectedModelId}
+            onRetryModels={() => void retryModels()}
+            onSelectChatModel={selectChatModel}
+            thinkingEnabled={thinkingEnabled}
+            onThinkingEnabledChange={setThinkingEnabled}
+            thinkingIntensity={thinkingIntensity}
+            onThinkingIntensityChange={setThinkingIntensity}
+            chatInputRef={chatInputRef}
+            chatInput={chatInput}
+            chatMentions={chatMentions}
+            allReferenceItems={allReferenceItems}
+            recentReferences={recentReferences}
+            pendingReferences={pendingReferences}
+            chatInputDisabled={modelStatus !== "ready" || !selectedModelId}
+            onStop={() => {
+              abortRef.current?.abort();
+              setChatStatus("idle");
+            }}
+            onInputChange={(text, mentions) => {
+              setChatInput(text);
+              setChatMentions(mentions);
+            }}
+            onSelectReference={(reference) => rememberReferences([reference])}
+            onRemoveReference={(reference) =>
+              setPendingReferences((items) => items.filter((item) => referenceKey(item) !== referenceKey(reference)))
+            }
+            onSubmit={() => void sendMessage()}
+            onMentionDrop={insertDroppedMention}
+          />
         </ResizablePanel>
       </ResizablePanelGroup>
       ) : null}

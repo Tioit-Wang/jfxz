@@ -6,6 +6,7 @@ import type { ApiClient, ChatReference } from "../src/api";
 import { AuthModal } from "../src/components/AuthModal";
 import { ChatMentionInput, type ChatMentionInputHandle } from "../src/components/ChatMentionInput";
 import { useIsMobile } from "../src/hooks/use-mobile";
+import { parseWorkspaceMentionDragPayload, serializeWorkspaceMentionDragPayload } from "../app/books/[bookId]/workspace/dnd";
 
 function authClient(loginWithEmail: ApiClient["loginWithEmail"]): ApiClient {
   return { loginWithEmail } as ApiClient;
@@ -105,6 +106,38 @@ describe("ChatMentionInput", () => {
     expect(onChange).toHaveBeenLastCalledWith("", []);
   });
 
+  it("appends an imperative mention at the input end", async () => {
+    const ref = createRef<ChatMentionInputHandle>();
+    const onChange = vi.fn();
+    render(
+      <ChatMentionInput
+        ref={ref}
+        valueText=""
+        mentions={[]}
+        items={[chapter, character]}
+        recentItems={[]}
+        onChange={onChange}
+        onSelectReference={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    act(() =>
+      ref.current?.insertMention({
+        type: "character",
+        id: "p1",
+        name: "苏白",
+        summary: "线人"
+      })
+    );
+
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith("@苏白 ", [
+        { type: "character", id: "p1", label: "苏白", start: 0, end: 3 }
+      ])
+    );
+  });
+
   it("selects mention references from the official suggestion list", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
@@ -202,6 +235,35 @@ describe("ChatMentionInput", () => {
     );
 
     expect(screen.getByRole("button", { name: "发送消息" })).toBeDisabled();
+  });
+});
+
+describe("workspace mention drag payload", () => {
+  it("round-trips a sidebar mention reference", () => {
+    const payload = serializeWorkspaceMentionDragPayload({
+      type: "chapter",
+      id: "c1",
+      name: "第一章",
+      summary: "开场"
+    });
+
+    expect(parseWorkspaceMentionDragPayload(payload)).toEqual({
+      type: "chapter",
+      id: "c1",
+      name: "第一章",
+      summary: "开场"
+    });
+  });
+
+  it("rejects unsupported drag payloads", () => {
+    expect(
+      parseWorkspaceMentionDragPayload(
+        JSON.stringify({
+          source: "workspace-sidebar",
+          reference: { type: "setting", id: "s1", name: "祖训" }
+        })
+      )
+    ).toBeNull();
   });
 });
 

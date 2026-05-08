@@ -46,7 +46,6 @@ export function parseWorkspaceMentionDragPayload(value: string): WorkspaceMentio
 export function writeWorkspaceMentionDragData(dataTransfer: DataTransfer, reference: WorkspaceMentionReference) {
   const payload = serializeWorkspaceMentionDragPayload(reference);
   dataTransfer.setData(WORKSPACE_MENTION_MIME, payload);
-  dataTransfer.setData("text/plain", `@${reference.name}`);
   dataTransfer.effectAllowed = "copy";
 }
 

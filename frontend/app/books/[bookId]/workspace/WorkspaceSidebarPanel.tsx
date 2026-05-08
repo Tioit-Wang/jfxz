@@ -321,26 +321,6 @@ export function WorkspaceSidebarPanel({
               })}
             </div>
 
-            {activeCharacter && isCharacterDetail ? (
-              <div className="mx-1 rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
-                <div className="min-w-0">
-                  <h3 className="truncate text-sm font-semibold text-gray-900">{activeCharacter.name}</h3>
-                  <p className="mt-1 text-xs leading-5 text-gray-500">{activeCharacter.summary}</p>
-                </div>
-                <p className="mt-3 max-h-24 overflow-y-auto whitespace-pre-wrap rounded-lg bg-muted p-2 text-xs leading-5 text-muted-foreground">
-                  {activeCharacter.detail || "暂无详情"}
-                </p>
-                <div className="mt-3">
-                  <button
-                    className="w-full rounded-lg border border-border py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                    onClick={() => onCopyCharacterText("详情", activeCharacter.detail || activeCharacter.summary)}
-                  >
-                    <Copy size={12} className="mr-1 inline" />
-                    复制
-                  </button>
-                </div>
-              </div>
-            ) : null}
           </div>
         ) : null}
 
@@ -406,7 +386,7 @@ export function WorkspaceSidebarPanel({
                   >
                     <span className="flex items-center justify-between gap-2">
                       <span className="truncate text-sm font-medium text-foreground">{item.name}</span>
-                      <Badge variant="secondary">{item.type || "other"}</Badge>
+                      <Badge variant="secondary" className="group-hover:opacity-0 transition-opacity">{item.type || "other"}</Badge>
                     </span>
                     <span className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{item.summary || "暂无简介"}</span>
                     <span className="mt-2 flex items-center text-[10px] text-muted-foreground">
@@ -440,18 +420,6 @@ export function WorkspaceSidebarPanel({
               })}
             </div>
 
-            {activeSetting && isSettingDetail ? (
-              <div className="mx-1 rounded-lg border bg-card p-3 shadow-sm">
-                <div className="min-w-0">
-                  <Badge variant="outline">{activeSetting.type || "other"}</Badge>
-                  <h3 className="mt-2 truncate text-sm font-semibold">{activeSetting.name}</h3>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">{activeSetting.summary}</p>
-                </div>
-                <p className="mt-3 max-h-28 overflow-y-auto whitespace-pre-wrap rounded-lg bg-muted p-2 text-xs leading-5 text-muted-foreground">
-                  {activeSetting.detail || "暂无详情"}
-                </p>
-              </div>
-            ) : null}
           </div>
         ) : null}
       </div>

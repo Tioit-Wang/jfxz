@@ -87,6 +87,7 @@ async def _create_transaction(
     work_id: str | None = None,
     model_id: str | None = None,
     model_name_snapshot: str | None = None,
+    balance_after: Decimal | None = None,
     created_at: datetime | None = None,
 ) -> PointTransaction:
     tx = PointTransaction(
@@ -99,6 +100,7 @@ async def _create_transaction(
         work_id=work_id,
         model_id=model_id,
         model_name_snapshot=model_name_snapshot,
+        balance_after=balance_after,
         created_at=created_at or datetime.now(UTC),
     )
     session.add(tx)
@@ -379,13 +381,31 @@ class TestListEndpoint:
         assert "points_delta" not in item
 
     async def test_points_after_accumulation(self, session: AsyncSession) -> None:
-        """points_after is a running sum per user in chronological order."""
+        """List endpoint surfaces the stored balance_after snapshot as points_after."""
         admin = await _admin(session)
         u = await create_user_account(session, "pa@example.com", "p1")
         now = datetime.now(UTC)
-        await _create_transaction(session, u.id, points_delta=Decimal("100"), created_at=now - timedelta(hours=2))
-        await _create_transaction(session, u.id, points_delta=Decimal("50"), created_at=now - timedelta(hours=1))
-        await _create_transaction(session, u.id, points_delta=Decimal("-30"), created_at=now)
+        await _create_transaction(
+            session,
+            u.id,
+            points_delta=Decimal("100"),
+            balance_after=Decimal("100"),
+            created_at=now - timedelta(hours=2),
+        )
+        await _create_transaction(
+            session,
+            u.id,
+            points_delta=Decimal("50"),
+            balance_after=Decimal("150"),
+            created_at=now - timedelta(hours=1),
+        )
+        await _create_transaction(
+            session,
+            u.id,
+            points_delta=Decimal("-30"),
+            balance_after=Decimal("120"),
+            created_at=now,
+        )
         await session.commit()
 
         result = await admin_credit_transactions(_admin=admin, session=session)

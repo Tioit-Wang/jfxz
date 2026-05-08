@@ -1,5 +1,6 @@
 import json
 from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
@@ -100,10 +101,19 @@ class TestAgentServiceHelpers:
     def test_create_agent_db_routes_mysql(self) -> None:
         """Verify _create_agent_db returns AsyncMySQLDb for mysql URLs."""
         from app.services.agent_service import _create_agent_db
-        from agno.db.mysql.async_mysql import AsyncMySQLDb
+        import agno.db.mysql.async_mysql as mysql_module
 
-        db = _create_agent_db("mysql+asyncmy://user:pass@host/db")
-        assert isinstance(db, AsyncMySQLDb)
+        original = mysql_module.AsyncMySQLDb
+        mock_cls = MagicMock()
+        mysql_module.AsyncMySQLDb = mock_cls
+        try:
+            _create_agent_db("mysql+asyncmy://user:pass@host/db")
+            mock_cls.assert_called_once_with(
+                db_url="mysql+asyncmy://user:pass@host/db",
+                session_table="agent_sessions",
+            )
+        finally:
+            mysql_module.AsyncMySQLDb = original
 
     def test_create_agent_db_routes_postgres(self) -> None:
         """Verify _create_agent_db passes correct URL to PostgresDb."""
@@ -148,6 +158,15 @@ class TestAgentServiceHelpers:
         assert isinstance(data["temperature"], float)
         assert isinstance(data["cache_hit_input_cost_per_million"], float)
 
+    async def test_serialize_lite_and_limit_normalization(self, session: AsyncSession) -> None:
+        from app.services.agent_service import _normalize_list_limit, _serialize_lite
+
+        model = await _make_model(session)
+        lite = _serialize_lite(model, ["temperature", "display_name"])
+        assert lite["temperature"] == float(model.temperature)
+        assert lite["display_name"] == "TestModel"
+        assert _normalize_list_limit("bad") == 20
+
     def test_build_system_prompt_refs_without_summary_or_detail(self) -> None:
         work = Work(title="作品")
         refs = [{"type": "character", "name": "苏白"}]
@@ -184,6 +203,42 @@ class TestAgentServiceHelpers:
             result = create_agent(model, work, [], mock_db, "w1", "s1")
             mock_agent_cls.assert_called_once()
             assert result is mock_agent_cls.return_value
+        _mod._db = None
+
+    def test_create_agent_enables_reasoning_for_higher_thinking_intensity(self) -> None:
+        from unittest.mock import patch
+        import app.services.agent_service as _mod
+        from app.services.agent_service import create_agent
+
+        _mod._db = None
+        model = MagicMock()
+        model.provider_model_id = "deepseek-v4-pro"
+        model.temperature = Decimal("0.70")
+        model.max_output_tokens = 2048
+        work = Work(title="测试", short_intro="s", genre_tags=[])
+        mock_db = MagicMock()
+
+        with patch("app.services.agent_service.get_settings") as mock_gs, patch(
+            "app.services.agent_service.Agent"
+        ) as mock_agent_cls, patch("app.services.agent_service.DeepSeek") as mock_deepseek:
+            mock_gs.return_value = MagicMock(
+                ai_provider_base_url="https://test.api",
+                ai_provider_api_key="test-key",
+                database_url="sqlite+aiosqlite:///:memory:",
+            )
+            create_agent(
+                model,
+                work,
+                [],
+                mock_db,
+                "w1",
+                "s1",
+                thinking_intensity=0.9,
+            )
+            kwargs = mock_deepseek.call_args.kwargs
+            assert kwargs["reasoning_effort"] == "max"
+            assert kwargs["extra_body"] == {"thinking": {"type": "enabled"}}
+
         _mod._db = None
 
 
@@ -249,6 +304,10 @@ class TestGoodguaTools:
         fetched = json.loads(await tools.get_setting(setting_id))
         assert fetched["name"] == "魔法体系"
 
+        deleted = json.loads(await tools.delete_setting(setting_id))
+        assert deleted["success"] is True
+        assert json.loads(await tools.delete_setting(setting_id))["error"].startswith("未找到设定")
+
     async def test_chapter_operations(self, tools: GoodguaTools, session: AsyncSession) -> None:
         chapter = Chapter(work_id=tools.work_id, order_index=1, title="第一章", content="正文内容", summary="原始摘要")
         session.add(chapter)
@@ -272,6 +331,10 @@ class TestGoodguaTools:
 
         not_found = json.loads(await tools.get_chapter("nonexistent"))
         assert "error" in not_found
+
+        created = json.loads(await tools.create_chapter("第二章", "摘要"))
+        assert created["order_index"] == 2
+        assert created["summary"] == "摘要"
 
     async def test_work_info(self, tools: GoodguaTools, session: AsyncSession) -> None:
         info = json.loads(await tools.get_work_info())
@@ -298,6 +361,8 @@ class TestGoodguaTools:
     async def test_update_chapter_not_found(self, tools: GoodguaTools) -> None:
         result = json.loads(await tools.update_chapter_summary("nonexistent", "摘要"))
         assert "error" in result
+        content_result = json.loads(await tools.update_chapter_content("nonexistent", "正文"))
+        assert "error" in content_result
 
     async def test_work_scoping(self, session: AsyncSession) -> None:
         other_work = await _make_work(session, "u-other")
@@ -321,6 +386,13 @@ class TestGoodguaTools:
         assert updated["name"] == "更新"
         assert updated["type"] == "combat"
 
+    async def test_delete_character_returns_success_and_not_found(self, tools: GoodguaTools) -> None:
+        created = json.loads(await tools.create_or_update_character("苏白", "主角", "详情"))
+        deleted = json.loads(await tools.delete_character(created["id"]))
+        assert deleted["success"] is True
+        assert deleted["name"] == "苏白"
+        assert json.loads(await tools.delete_character(created["id"]))["error"].startswith("未找到角色")
+
     async def test_get_work_info_not_found(self, session: AsyncSession) -> None:
         tools = GoodguaTools(db=session, work_id="nonexistent-work")
         result = json.loads(await tools.get_work_info())
@@ -331,6 +403,10 @@ class TestGoodguaTools:
         result = json.loads(await tools.update_work_info("short_intro", "x"))
         assert "error" in result
 
+    async def test_update_work_info_rejects_invalid_field(self, tools: GoodguaTools) -> None:
+        result = json.loads(await tools.update_work_info("unknown_field", "x"))
+        assert "error" in result
+
     async def test_update_work_info_all_fields(self, tools: GoodguaTools) -> None:
         focus = json.loads(await tools.update_work_info("focus_requirements", "全重点"))
         forbidden = json.loads(await tools.update_work_info("forbidden_requirements", "全禁忌"))
@@ -339,6 +415,38 @@ class TestGoodguaTools:
         refreshed = json.loads(await tools.get_work_info())
         assert refreshed["focus_requirements"] == "全重点"
         assert refreshed["forbidden_requirements"] == "全禁忌"
+
+    async def test_tool_rollbacks_on_commit_failures(
+        self, tools: GoodguaTools, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        chapter = Chapter(work_id=tools.work_id, order_index=1, title="第一章", content="正文")
+        setting = SettingItem(work_id=tools.work_id, type="other", name="设定", summary="摘要", detail="详情")
+        character = Character(work_id=tools.work_id, name="角色", summary="摘要", detail="详情")
+        tools.db.add_all([chapter, setting, character])
+        await tools.db.flush()
+
+        rollback = AsyncMock()
+        monkeypatch.setattr(tools.db, "rollback", rollback)
+        monkeypatch.setattr(tools.db, "commit", AsyncMock(side_effect=RuntimeError("boom")))
+
+        with pytest.raises(RuntimeError):
+            await tools.create_or_update_character("角色", "摘要", "详情")
+        with pytest.raises(RuntimeError):
+            await tools.create_or_update_setting("设定", "摘要", "详情", "other")
+        with pytest.raises(RuntimeError):
+            await tools.create_chapter("新章节")
+        with pytest.raises(RuntimeError):
+            await tools.delete_setting(setting.id)
+        with pytest.raises(RuntimeError):
+            await tools.delete_character(character.id)
+        with pytest.raises(RuntimeError):
+            await tools.update_chapter_summary(chapter.id, "新摘要")
+        with pytest.raises(RuntimeError):
+            await tools.update_chapter_content(chapter.id, "新正文")
+        with pytest.raises(RuntimeError):
+            await tools.update_work_info("short_intro", "新简介")
+
+        assert rollback.await_count == 8
 
 
 # ---- billing_service tests ----
@@ -426,6 +534,12 @@ class TestPreCheckBalance:
         await pre_check_balance(session, "u-new", model, estimated_input_tokens=0)
         account = (await session.execute(select(PointAccount).where(PointAccount.user_id == "u-new"))).scalar_one()
         assert account.vip_daily_points_balance == Decimal("100")
+
+    async def test_lock_point_account_creates_missing_account(self, session: AsyncSession) -> None:
+        from app.services.billing_service import _lock_point_account
+
+        account = await _lock_point_account(session, "u-locked")
+        assert account.user_id == "u-locked"
 
 
 class TestDeductByUsage:
@@ -629,6 +743,88 @@ class TestGetPointsPerCny:
         await session.flush()
         result = await get_points_per_cny(session)
         assert result == Decimal("5000")
+
+
+class TestPointGrantExpireAndAdminAdjust:
+    async def test_expire_vip_daily_points_handles_zero_and_partial_remaining(self, session: AsyncSession) -> None:
+        from app.services.billing_service import expire_vip_daily_points
+
+        user = await create_user_account(session, "expire@example.com", "user12345")
+        account = await _ensure_account(session, user.id, monthly=Decimal("5"))
+
+        await expire_vip_daily_points(session, user.id, Decimal("0"))
+        assert account.vip_daily_points_balance == Decimal("5")
+
+        await expire_vip_daily_points(session, user.id, Decimal("3"), source_id="sub-1")
+        await session.flush()
+        assert account.vip_daily_points_balance == Decimal("2")
+
+        account.vip_daily_points_balance = Decimal("0")
+        await expire_vip_daily_points(session, user.id, Decimal("2"), source_id="sub-2")
+        await session.flush()
+        assert account.vip_daily_points_balance == Decimal("0")
+
+        tx = (
+            await session.execute(
+                select(PointTransaction)
+                .where(PointTransaction.user_id == user.id)
+                .order_by(PointTransaction.created_at.desc())
+            )
+        ).scalars().first()
+        assert tx.change_type == "expire"
+        assert tx.points_delta == Decimal("-3")
+        assert tx.source_id == "sub-1"
+
+    async def test_admin_adjust_points_direct_branches(self, session: AsyncSession) -> None:
+        from app.services.billing_service import admin_adjust_points
+
+        user = await create_user_account(session, "adjust@example.com", "user12345")
+        await _ensure_account(session, user.id, monthly=Decimal("4"), topup=Decimal("2"))
+
+        granted = await admin_adjust_points(
+            session,
+            user.id,
+            "credit_pack",
+            "grant",
+            Decimal("5"),
+            "补点",
+        )
+        await session.flush()
+        assert granted.points_delta == Decimal("5")
+        assert granted.description == "补点"
+
+        vip_grant = await admin_adjust_points(
+            session,
+            user.id,
+            "vip_daily",
+            "grant",
+            Decimal("2"),
+            "加日额",
+        )
+        await session.flush()
+        assert vip_grant.points_delta == Decimal("2")
+
+        deducted = await admin_adjust_points(
+            session,
+            user.id,
+            "vip_daily",
+            "deduct",
+            Decimal("1"),
+            "扣点",
+        )
+        await session.flush()
+        assert deducted.points_delta == Decimal("-1")
+
+        with pytest.raises(HTTPException) as error:
+            await admin_adjust_points(
+                session,
+                user.id,
+                "vip_daily",
+                "deduct",
+                Decimal("999"),
+                "超扣",
+            )
+        assert error.value.status_code == 422
 
 
 class TestResolveEditorModel:

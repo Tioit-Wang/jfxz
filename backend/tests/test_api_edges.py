@@ -887,7 +887,11 @@ async def test_payment_confirmation_guards_and_prod_simulation_gate(
     monkeypatch.setattr(
         routes_module,
         "get_settings",
-        lambda: Settings(env="production", jwt_secret="x" * 32, enable_payment_simulator=True),
+        lambda: type(
+            "ProdSettingsStub",
+            (),
+            {"is_production": True, "enable_payment_simulator": True},
+        )(),
     )
     with pytest.raises(HTTPException) as prod_error:
         await simulate_paid(order["id"], user, session)

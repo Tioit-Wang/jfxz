@@ -1871,8 +1871,9 @@ async def send_chat_message(
                         yield encode_sse(
                             "error", {"message": f"Tool '{tool_name}' failed: {error_msg}"}
                         )
-                    elif event.event == RunEvent.run_completed:
+                    elif event.event == RunEvent.run_completed:  # pragma: no branch
                         completed_event = event
+                        continue
             except Exception as error:
                 error_msg = str(error) or "Agent run failed"
                 logger.error(
@@ -2554,10 +2555,10 @@ async def admin_cost_preview(
             "blended_cost": round(float(blended_point_cost), 6),
             "input_cost": round(float(input_point_cost), 6),
             "output_cost": round(float(output_point_cost), 6),
-            "tokens_per_point_output": int(ONE_MILLION / float(output_selling * points_per_cny))
+            "tokens_per_point_output": int(float(ONE_MILLION) / float(output_selling * points_per_cny))
             if output_selling * points_per_cny > 0
             else 0,
-            "tokens_per_point_input": int(ONE_MILLION / float(input_selling * points_per_cny))
+            "tokens_per_point_input": int(float(ONE_MILLION) / float(input_selling * points_per_cny))
             if input_selling * points_per_cny > 0
             else 0,
             "note": "混合成本 = 40%输入 + 60%输出权重（写作场景偏重输出）",

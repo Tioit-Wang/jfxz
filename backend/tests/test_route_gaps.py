@@ -483,7 +483,7 @@ async def test_send_chat_message_skips_empty_assistant_persistence(
         session,
     )
     body = b"".join([chunk async for chunk in stream.body_iterator]).decode()
-    assert body == ""
+    assert "event: done" in body
 
     chat_model = await session.get(routes_module.ChatSession, chat["id"])
     agent = await session.get(AgentRunStore, chat_model.agno_session_id)

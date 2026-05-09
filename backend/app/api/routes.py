@@ -251,6 +251,16 @@ def _agent_run_lock(session_id: str) -> asyncio.Lock:
     return lock
 
 
+def _remove_agent_run_locks(session_ids: list[str]) -> None:
+    """Remove cached lock entries for the given agent session ids to prevent unbounded dict growth."""
+    try:
+        loop_id = id(asyncio.get_running_loop())
+    except RuntimeError:
+        loop_id = 0
+    for sid in session_ids:
+        _agent_run_locks.pop((loop_id, sid), None)
+
+
 def public(model: Any) -> dict[str, Any]:
     from datetime import date as _Date
     from datetime import datetime as _DateTime
@@ -1065,6 +1075,26 @@ async def update_work(
 async def delete_work(
     work_id: str, user: User = Depends(current_user), session: AsyncSession = Depends(get_session)
 ) -> dict[str, bool]:
+    # Clean up Agno runtime sessions before cascading works→chat_sessions→agent_run_store
+    from app.models import ChatSession as ChatSessionModel
+    from sqlalchemy import text as sa_text
+
+    result = await session.execute(
+        select(ChatSessionModel.agno_session_id).where(ChatSessionModel.work_id == work_id)
+    )
+    agno_ids = [row[0] for row in result]
+    if agno_ids:
+        _remove_agent_run_locks(agno_ids)
+        # Cross-DB compatible parameterized IN clause
+        try:
+            placeholders = ", ".join(f":id_{i}" for i in range(len(agno_ids)))
+            params = {f"id_{i}": sid for i, sid in enumerate(agno_ids)}
+            await session.execute(
+                sa_text(f"DELETE FROM agent_sessions WHERE session_id IN ({placeholders})"),
+                params,
+            )
+        except Exception:
+            logger.debug("cleanup of agent_sessions failed—table may not exist", exc_info=True)
     await session.delete(await owned_work(session, user.id, work_id))
     await session.commit()
     return {"ok": True}
@@ -1661,6 +1691,18 @@ async def create_chat_session(
 
 
 def normalized_run(run: dict[str, Any], index: int) -> dict[str, Any]:
+    if not isinstance(run, dict):
+        logger.warning("non-dict run at index %d, type=%s", index, type(run).__name__)
+        return {
+            "id": f"corrupted-{index}",
+            "role": "assistant",
+            "content": "[数据损坏]",
+            "mentions": [],
+            "references": [],
+            "actions": [],
+            "created_at": now().isoformat(),
+            "billing_failed": False,
+        }
     message_id = str(run.get("id") or f"legacy-{index}")
     created_at = str(run.get("created_at") or f"legacy-{index:06d}")
     role = str(run.get("role") or "user")
@@ -2030,6 +2072,16 @@ async def send_chat_message(
             await session.refresh(agent)
 
         current_runs = agent.runs or []
+        if isinstance(current_runs, str):
+            logger.error(
+                "agent_run_store.runs is string for session %s, attempting recovery", chat.agno_session_id
+            )
+            try:
+                current_runs = json.loads(current_runs)
+            except (json.JSONDecodeError, TypeError):
+                current_runs = []
+        if not isinstance(current_runs, list):
+            current_runs = []
         if not current_runs and chat.title == "新的对话":
             chat.title = payload.message[:24] or "新的对话"
 
@@ -2051,6 +2103,7 @@ async def send_chat_message(
         nonlocal billing_failed
         completed_event = None
         error_messages: list[str] = []
+        stream_error: BaseException | None = None
 
         async def persist_assistant_message() -> dict[str, Any] | None:
             full_content = "".join(full_content_parts)
@@ -2080,14 +2133,18 @@ async def send_chat_message(
                 "error": message_error,
                 "created_at": now().isoformat(),
             }
-            async with run_lock:
-                fresh_agent = await session.get(AgentRunStore, chat.agno_session_id)
-                if fresh_agent is not None:
-                    await session.refresh(fresh_agent)
-                    fresh_agent.runs = [*(fresh_agent.runs or []), assistant_message]
-                chat.last_message_preview = full_content[:120]
-                chat.last_active_at = now()
-                await session.commit()
+            try:
+                async with run_lock:
+                    fresh_agent = await session.get(AgentRunStore, chat.agno_session_id)
+                    if fresh_agent is not None:
+                        await session.refresh(fresh_agent)
+                        fresh_agent.runs = [*(fresh_agent.runs or []), assistant_message]
+                    chat.last_message_preview = full_content[:120]
+                    chat.last_active_at = now()
+                    await session.commit()
+            except Exception as db_error:
+                logger.error("failed to persist assistant message for chat %s: %s", chat.id, db_error, exc_info=True)
+                return None
             return assistant_message
 
         async with SessionLocal() as tool_session:
@@ -2163,11 +2220,16 @@ async def send_chat_message(
                     elif event.event == RunEvent.run_completed:  # pragma: no branch
                         completed_event = event
                         continue
-            except Exception as error:
-                error_msg = str(error) or "Agent run failed"
-                logger.error(
-                    "chat stream crashed for chat %s: %s", chat.id, error_msg, exc_info=True
-                )
+            except BaseException as error:
+                stream_error = error
+                if isinstance(error, Exception):
+                    error_msg = str(error) or "Agent run failed"
+                    logger.error(
+                        "chat stream crashed for chat %s: %s", chat.id, error_msg, exc_info=True
+                    )
+                else:
+                    error_msg = "stream interrupted"
+                    logger.warning("chat stream cancelled for chat %s", chat.id)
                 error_messages.append(error_msg)
                 yield encode_sse("error", {"message": error_msg})
 
@@ -2180,34 +2242,50 @@ async def send_chat_message(
 
                 from app.services.billing_service import deduct_by_usage
 
-                try:
-                    if hasattr(completed_event, "metrics") and completed_event.metrics:
-                        metrics = completed_event.metrics
-                        usage = {
-                            "prompt_tokens": getattr(metrics, "input_tokens", 0) or 0,
-                            "completion_tokens": getattr(metrics, "output_tokens", 0) or 0,
-                            "cached_tokens": getattr(metrics, "cache_read_tokens", 0) or 0,
-                        }
-                        await deduct_by_usage(
-                            session,
-                            user.id,
-                            model,
-                            usage,
-                            work_id=chat.work_id,
-                            source_id=chat.id,
-                            source_type="ai_chat",
-                        )
-                    else:
-                        logger.warning(
-                            "no metrics from agent run, billing skipped for chat %s", chat.id
-                        )
-                except Exception:
-                    billing_failed = True
-                    logger.warning("billing deduction failed after agent stream", exc_info=True)
+                if hasattr(completed_event, "metrics") and completed_event.metrics:
+                    metrics = completed_event.metrics
+                    usage = {
+                        "prompt_tokens": getattr(metrics, "input_tokens", 0) or 0,
+                        "completion_tokens": getattr(metrics, "output_tokens", 0) or 0,
+                        "cached_tokens": getattr(metrics, "cache_read_tokens", 0) or 0,
+                    }
+                    # Retry billing once on transient failures
+                    for attempt in range(2):
+                        try:
+                            await deduct_by_usage(
+                                session,
+                                user.id,
+                                model,
+                                usage,
+                                work_id=chat.work_id,
+                                source_id=chat.id,
+                                source_type="ai_chat",
+                            )
+                            break
+                        except Exception:
+                            if attempt == 0:
+                                logger.warning(
+                                    "billing deduction failed for chat %s, retrying (1/1)", chat.id
+                                )
+                            else:
+                                billing_failed = True
+                                logger.warning(
+                                    "billing deduction failed after retry for chat %s", chat.id, exc_info=True
+                                )
+                else:
+                    logger.warning(
+                        "no metrics from agent run, billing skipped for chat %s", chat.id
+                    )
 
             assistant_message = await persist_assistant_message()
             if assistant_message is not None:
                 yield encode_sse("done", assistant_message)
+            elif stream_error is None:
+                yield encode_sse("done", {})
+
+            # Re-raise non-Exception errors so the framework can handle cancellation
+            if stream_error is not None and not isinstance(stream_error, Exception):
+                raise stream_error
 
     return StreamingResponse(stream_reply(), media_type="text/event-stream")
 

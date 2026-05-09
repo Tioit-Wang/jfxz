@@ -172,11 +172,13 @@ class ChatSession(Base, TimestampMixin):
     )
 
 
-class AgentRunStore(Base):
+class AgentRunStore(Base, TimestampMixin):
     __tablename__ = "agent_run_store"
 
-    session_id: Mapped[str] = mapped_column(String(100), primary_key=True)
-    user_id: Mapped[str] = mapped_column(String(36))
+    session_id: Mapped[str] = mapped_column(
+        String(100), ForeignKey("chat_sessions.agno_session_id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[str] = mapped_column(String(36), index=True)
     runs: Mapped[list[dict]] = mapped_column(JSON, default=list)
 
 

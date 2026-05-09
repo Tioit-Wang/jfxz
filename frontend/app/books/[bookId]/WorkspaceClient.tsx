@@ -936,6 +936,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     }
     const controller = new AbortController();
     abortRef.current = controller;
+    const currentController = controller;
     let sessionId = activeSessionId;
     if (!sessionId) {
       const session = await client.createChatSession(bookId);
@@ -1229,8 +1230,12 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
         // Ignore balance refresh failures so chat completion is not blocked.
       }
     } catch (error) {
+      if (abortRef.current !== currentController) {
+        return;
+      }
       setStreamingMessageId(null);
       if (error instanceof DOMException && error.name === "AbortError") {
+        setMessages((items) => items.filter((item) => item.id !== assistantId));
         setChatStatus("idle");
         return;
       }
@@ -1863,6 +1868,8 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
             onStop={() => {
               abortRef.current?.abort();
               setChatStatus("idle");
+              setStreamingMessageId(null);
+              setMessages((items) => items.filter((item) => item.role === "assistant" && !item.content && !item.blocks));
             }}
             onInputChange={(text, mentions) => {
               setChatInput(text);

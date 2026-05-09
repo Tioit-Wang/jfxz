@@ -1471,24 +1471,56 @@ export class ApiClient {
     let buffer = "";
     let finalMessage: ChatMessage | null = null;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-      buffer += decoder.decode(value, { stream: true });
-      const events = buffer.split("\n\n");
-      buffer = events.pop() as string;
-      for (const eventText of events) {
-        const event = parseSseEvent(eventText);
-        if (!event.data) {
-          continue;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
         }
-        if (event.event === "done") {
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() as string;
+        for (const eventText of events) {
+          const event = parseSseEvent(eventText);
+          if (!event.data) {
+            continue;
+          }
+          if (event.event === "done") {
+            finalMessage = mapChatMessage(JSON.parse(event.data));
+          } else if (event.event === "error") {
+            try {
+              const errorData = JSON.parse(event.data);
+              if (onError && errorData.message) {
+                onError(errorData.message);
+              }
+            } catch {
+              // Ignore malformed error events
+            }
+          } else if (event.event === "tool_call" || event.event === "tool_result") {
+            try {
+              const toolData = JSON.parse(event.data);
+              if (onToolCall && toolData.tool) {
+                onToolCall(toolData.tool, toolData.status, event.event === "tool_result" ? { display: toolData.display, result: toolData.result } : undefined);
+              }
+            } catch {
+              // Ignore malformed tool events
+            }
+          } else if (event.event === "text" || event.event === null) {
+            const text = parseSseText(event.data);
+            if (text !== null) {
+              onChunk(text);
+            }
+          }
+        }
+      }
+
+      if (buffer.trim()) {
+        const event = parseSseEvent(buffer);
+        if (event.event === "done" && event.data) {
           finalMessage = mapChatMessage(JSON.parse(event.data));
         } else if (event.event === "error") {
           try {
-            const errorData = JSON.parse(event.data);
+            const errorData = JSON.parse(event.data!);
             if (onError && errorData.message) {
               onError(errorData.message);
             }
@@ -1497,56 +1529,31 @@ export class ApiClient {
           }
         } else if (event.event === "tool_call" || event.event === "tool_result") {
           try {
-            const toolData = JSON.parse(event.data);
+            const toolData = JSON.parse(event.data!);
             if (onToolCall && toolData.tool) {
               onToolCall(toolData.tool, toolData.status, event.event === "tool_result" ? { display: toolData.display, result: toolData.result } : undefined);
             }
           } catch {
             // Ignore malformed tool events
           }
-        } else if (event.event === "text" || event.event === null) {
+        } else if ((event.event === "text" || event.event === null) && event.data) {
           const text = parseSseText(event.data);
           if (text !== null) {
             onChunk(text);
           }
         }
       }
-    }
 
-    if (buffer.trim()) {
-      const event = parseSseEvent(buffer);
-      if (event.event === "done" && event.data) {
-        finalMessage = mapChatMessage(JSON.parse(event.data));
-      } else if (event.event === "error") {
-        try {
-          const errorData = JSON.parse(event.data!);
-          if (onError && errorData.message) {
-            onError(errorData.message);
-          }
-        } catch {
-          // Ignore malformed error events
+      if (!finalMessage) {
+        if (signal?.aborted) {
+          throw new DOMException("aborted", "AbortError");
         }
-      } else if (event.event === "tool_call" || event.event === "tool_result") {
-        try {
-          const toolData = JSON.parse(event.data!);
-          if (onToolCall && toolData.tool) {
-            onToolCall(toolData.tool, toolData.status, event.event === "tool_result" ? { display: toolData.display, result: toolData.result } : undefined);
-          }
-        } catch {
-          // Ignore malformed tool events
-        }
-      } else if ((event.event === "text" || event.event === null) && event.data) {
-        const text = parseSseText(event.data);
-        if (text !== null) {
-          onChunk(text);
-        }
+        throw new ApiError("missing final assistant message", response.status);
       }
+      return finalMessage;
+    } finally {
+      try { reader.releaseLock(); } catch { /* best-effort */ }
     }
-
-    if (!finalMessage) {
-      throw new ApiError("missing final assistant message", response.status);
-    }
-    return finalMessage;
   }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {

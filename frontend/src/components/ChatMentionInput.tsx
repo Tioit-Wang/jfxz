@@ -176,6 +176,7 @@ export const ChatMentionInput = forwardRef<ChatMentionInputHandle, ChatMentionIn
     const mentionOptionsRef = useRef<ChatReference[]>([]);
     const onSubmitRef = useRef(onSubmit);
     const selectReferenceRef = useRef<(reference: ChatReference) => void>(() => undefined);
+    const isInternalUpdateRef = useRef(false);
 
     const mentionOptions = useMemo(() => {
       const query = mention.query.trim().toLowerCase();
@@ -302,6 +303,7 @@ export const ChatMentionInput = forwardRef<ChatMentionInputHandle, ChatMentionIn
       const currentEditor = editorRef.current;
       const currentMention = mentionRef.current;
       if (!currentEditor || !currentMention.range) return;
+      isInternalUpdateRef.current = true;
       currentEditor
         .chain()
         .focus()
@@ -316,6 +318,10 @@ export const ChatMentionInput = forwardRef<ChatMentionInputHandle, ChatMentionIn
 
     useEffect(() => {
       if (!editor) return;
+      if (isInternalUpdateRef.current) {
+        isInternalUpdateRef.current = false;
+        return;
+      }
       if (editor.isFocused) return;
       const current = editor.getText({ blockSeparator: "\n" });
       if (current === valueText) return;
@@ -333,6 +339,7 @@ export const ChatMentionInput = forwardRef<ChatMentionInputHandle, ChatMentionIn
       ref,
       () => ({
         clear() {
+          isInternalUpdateRef.current = true;
           editor?.commands.setContent(emptyDoc(), { emitUpdate: false });
           setMention({ open: false, query: "", range: null, activeIndex: 0 });
           onChange("", []);
@@ -341,14 +348,18 @@ export const ChatMentionInput = forwardRef<ChatMentionInputHandle, ChatMentionIn
           editor?.commands.focus("end");
         },
         insertMention(reference) {
+          if (!editor) return;
+          isInternalUpdateRef.current = true;
+          const endPos = editor.state.doc.content.size - 1;
           editor
-            ?.chain()
+            .chain()
+            .insertContentAt(endPos, mentionContent(reference))
             .focus("end")
-            .insertContent(mentionContent(reference))
             .run();
           setMention({ open: false, query: "", range: null, activeIndex: 0 });
         },
         setText(value: string) {
+          isInternalUpdateRef.current = true;
           editor?.commands.setContent(value ? textDoc(value) : emptyDoc(), { emitUpdate: false });
           setMention({ open: false, query: "", range: null, activeIndex: 0 });
           onChange(value, []);

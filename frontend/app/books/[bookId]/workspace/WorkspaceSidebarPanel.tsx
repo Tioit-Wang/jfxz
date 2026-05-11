@@ -76,6 +76,11 @@ type WorkspaceSidebarPanelProps = {
   onDeleteNote: (item: InspirationNote) => void;
   onOpenGoalEdit: () => void;
   formatUpdatedAt: (value: string) => string;
+  collapsedVolumes: Set<string>;
+  onToggleCollapse: (volumeId: string) => void;
+  onEditVolume: (volume: Volume) => void;
+  onDeleteVolume: (volume: Volume) => void;
+  onReorderChapter: (chapterId: string, targetVolumeId: string, targetOrder: number) => void;
 };
 
 const characterAccents = [
@@ -139,8 +144,15 @@ export function WorkspaceSidebarPanel({
   onDeleteNote,
   onOpenGoalEdit,
   formatUpdatedAt,
+  collapsedVolumes,
+  onToggleCollapse,
+  onEditVolume,
+  onDeleteVolume,
+  onReorderChapter,
 }: WorkspaceSidebarPanelProps) {
   const [notesCollapsed, setNotesCollapsed] = useState(false);
+  const [activeDropZone, setActiveDropZone] = useState<string | null>(null);
+  const [autoExpandTimer, setAutoExpandTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
   const percent = progressPercent(dailyWordProgress, writingGoal);
   const firstVolumeId = volumes[0]?.id;
 
@@ -237,55 +249,150 @@ export function WorkspaceSidebarPanel({
                 {(volumes.length ? volumes : [{ id: "", title: "默认卷", order: 1, updatedAt: "" }]).map((volume) => {
                   const volumeChapters = chapters.filter((chapter) => (chapter.volumeId || "") === volume.id);
                   const volumeWords = volumeChapters.reduce((sum, chapter) => sum + wordCount(chapter.content), 0);
+                  const isCollapsed = collapsedVolumes.has(volume.id);
+                  const volumeKey = volume.id || "default";
+
+                  function handleDragOverChapterZone(e: React.DragEvent, zoneId: string) {
+                    if (!e.dataTransfer.types.includes("application/x-goodgua-workspace-reorder")) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    setActiveDropZone(zoneId);
+                  }
+
+                  function handleVolumeTitleDragOver(e: React.DragEvent) {
+                    if (!e.dataTransfer.types.includes("application/x-goodgua-workspace-reorder")) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    if (isCollapsed && !autoExpandTimer) {
+                      const timer = setTimeout(() => onToggleCollapse(volume.id), 600);
+                      setAutoExpandTimer(timer);
+                    }
+                  }
+
+                  function handleVolumeTitleDrop(e: React.DragEvent) {
+                    e.preventDefault();
+                    if (autoExpandTimer) { clearTimeout(autoExpandTimer); setAutoExpandTimer(null); }
+                    const chapterId = e.dataTransfer.getData("application/x-goodgua-workspace-reorder");
+                    if (!chapterId) return;
+                    setActiveDropZone(null);
+                    onReorderChapter(chapterId, volume.id, volumeChapters.length);
+                  }
+
+                  function handleChapterDrop(e: React.DragEvent, targetIndex: number) {
+                    e.preventDefault();
+                    const chapterId = e.dataTransfer.getData("application/x-goodgua-workspace-reorder");
+                    if (!chapterId) return;
+                    setActiveDropZone(null);
+                    onReorderChapter(chapterId, volume.id, targetIndex);
+                  }
+
                   return (
-                    <div key={volume.id || "default"} className="space-y-1.5">
-                      <div className="flex items-center justify-between rounded-lg px-1 py-1 text-xs font-bold text-neutral-700">
-                        <span className="inline-flex min-w-0 items-center gap-1.5">
-                          <ChevronDown size={14} />
-                          <span className="truncate">{volume.title}</span>
-                        </span>
-                        <span className="shrink-0 text-neutral-400">{volumeWords}字</span>
-                      </div>
-                      <div className="space-y-1 border-l border-neutral-200 pl-3">
-                        {volumeChapters.map((chapter) => {
-                          const selected = chapter.id === activeChapterId;
-                          return (
-                            <button
-                              key={chapter.id}
-                              draggable
-                              className={cn(
-                                "group relative w-full cursor-grab rounded-xl px-3 py-2.5 text-left transition-colors active:cursor-grabbing",
-                                selected ? "bg-neutral-950 text-white" : "text-neutral-600 hover:bg-neutral-100"
-                              )}
-                              onClick={() => onSelectChapter(chapter.id)}
-                              onDragStart={(event) =>
-                                writeWorkspaceMentionDragData(event.dataTransfer, {
-                                  type: "chapter",
-                                  id: chapter.id,
-                                  name: chapter.title,
-                                  summary: chapter.summary || `第 ${chapter.order} 章`,
-                                })
-                              }
-                            >
-                              <span className="flex items-start justify-between gap-2">
-                                <span className="truncate text-sm font-semibold">{chapterTitle(chapter)}</span>
-                                <span className={cn("shrink-0 text-[11px]", selected ? "text-white/60" : "text-neutral-400")}>
-                                  {wordCount(chapter.content)}字
-                                </span>
-                              </span>
-                              <span className={cn("mt-1 block truncate text-xs", selected ? "text-white/60" : "text-neutral-400")}>
-                                {chapter.summary || "暂无章节提要"}
-                              </span>
-                            </button>
-                          );
-                        })}
+                    <div key={volumeKey} className="space-y-1.5">
+                      <div
+                        className="group flex items-center justify-between rounded-lg px-1 py-1 text-xs font-bold text-neutral-700"
+                        onDragOver={handleVolumeTitleDragOver}
+                        onDragLeave={() => { if (autoExpandTimer) { clearTimeout(autoExpandTimer); setAutoExpandTimer(null); } }}
+                        onDrop={handleVolumeTitleDrop}
+                      >
                         <button
-                          className="w-full rounded-xl border border-dashed border-neutral-200 py-2 text-xs text-neutral-500 hover:border-neutral-400 hover:text-neutral-900"
-                          onClick={() => onCreateChapter(volume.id || firstVolumeId)}
+                          className="inline-flex min-w-0 cursor-pointer items-center gap-1.5"
+                          onClick={() => onToggleCollapse(volume.id)}
+                          aria-label={isCollapsed ? "展开卷" : "折叠卷"}
                         >
-                          + 在本卷新建章节
+                          {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                          <span className="truncate">{volume.title}</span>
                         </button>
+                        <span className="flex shrink-0 items-center gap-1">
+                          <span className="text-neutral-400">{volumeWords}字</span>
+                          <span className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                            <button
+                              className="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-900"
+                              onClick={() => onEditVolume(volume)}
+                              aria-label="编辑卷"
+                            >
+                              <Edit3 size={12} />
+                            </button>
+                            {volumeChapters.length === 0 ? (
+                              <button
+                                className="rounded p-1 text-neutral-400 hover:bg-red-50 hover:text-red-600"
+                                onClick={() => onDeleteVolume(volume)}
+                                aria-label="删除卷"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            ) : null}
+                          </span>
+                        </span>
                       </div>
+                      {!isCollapsed ? (
+                        <div className="space-y-1 border-l border-neutral-200 pl-3">
+                          {volumeChapters.map((chapter, chIndex) => {
+                            const dropZoneId = `${volumeKey}-${chIndex}`;
+                            const isDropActive = activeDropZone === dropZoneId;
+                            return (
+                              <div key={chapter.id}>
+                                {/* Drop zone before each chapter */}
+                                <div
+                                  className={cn(
+                                    "transition-all",
+                                    isDropActive ? "h-1.5 rounded-full bg-blue-500" : "h-0.5"
+                                  )}
+                                  onDragOver={(e) => handleDragOverChapterZone(e, dropZoneId)}
+                                  onDragLeave={() => setActiveDropZone(null)}
+                                  onDrop={(e) => handleChapterDrop(e, chIndex)}
+                                />
+                                <button
+                                  draggable
+                                  className={cn(
+                                    "group relative w-full cursor-grab rounded-xl px-3 py-2.5 text-left transition-colors active:cursor-grabbing",
+                                    chapter.id === activeChapterId
+                                      ? "bg-neutral-950 text-white"
+                                      : "text-neutral-600 hover:bg-neutral-100"
+                                  )}
+                                  onClick={() => onSelectChapter(chapter.id)}
+                                  onDragStart={(event) => {
+                                    writeWorkspaceMentionDragData(event.dataTransfer, {
+                                      type: "chapter",
+                                      id: chapter.id,
+                                      name: chapter.title,
+                                      summary: chapter.summary || `第 ${chapter.order} 章`,
+                                    });
+                                    event.dataTransfer.setData("application/x-goodgua-workspace-reorder", chapter.id);
+                                    event.dataTransfer.effectAllowed = "move";
+                                  }}
+                                  onDragEnd={() => setActiveDropZone(null)}
+                                >
+                                  <span className="flex items-start justify-between gap-2">
+                                    <span className="truncate text-sm font-semibold">{chapterTitle(chapter)}</span>
+                                    <span className={cn("shrink-0 text-[11px]", chapter.id === activeChapterId ? "text-white/60" : "text-neutral-400")}>
+                                      {wordCount(chapter.content)}字
+                                    </span>
+                                  </span>
+                                  <span className={cn("mt-1 block truncate text-xs", chapter.id === activeChapterId ? "text-white/60" : "text-neutral-400")}>
+                                    {chapter.summary || "暂无章节提要"}
+                                  </span>
+                                </button>
+                              </div>
+                            );
+                          })}
+                          {/* Drop zone at the end of the volume */}
+                          <div
+                            className={cn(
+                              "transition-all",
+                              activeDropZone === `${volumeKey}-end` ? "h-1.5 rounded-full bg-blue-500" : "h-0.5"
+                            )}
+                            onDragOver={(e) => handleDragOverChapterZone(e, `${volumeKey}-end`)}
+                            onDragLeave={() => setActiveDropZone(null)}
+                            onDrop={(e) => handleChapterDrop(e, volumeChapters.length)}
+                          />
+                          <button
+                            className="w-full rounded-xl border border-dashed border-neutral-200 py-2 text-xs text-neutral-500 hover:border-neutral-400 hover:text-neutral-900"
+                            onClick={() => onCreateChapter(volume.id || firstVolumeId)}
+                          >
+                            + 在本卷新建章节
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })}

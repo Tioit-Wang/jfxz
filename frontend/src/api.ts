@@ -982,6 +982,27 @@ export class ApiClient {
     return mapVolume(data);
   }
 
+  async updateVolume(workId: string, volumeId: string, title: string): Promise<Volume> {
+    const data = await this.request<ApiVolume>(`/works/${workId}/volumes/${volumeId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title })
+    });
+    return mapVolume(data);
+  }
+
+  async deleteVolume(workId: string, volumeId: string): Promise<void> {
+    await this.request<{ ok: boolean }>(`/works/${workId}/volumes/${volumeId}`, {
+      method: "DELETE"
+    });
+  }
+
+  async reorderChapters(workId: string, chapters: { id: string; volumeId: string }[]): Promise<void> {
+    await this.request<{ ok: boolean }>(`/works/${workId}/chapters/reorder`, {
+      method: "POST",
+      body: JSON.stringify({ chapters: chapters.map((c) => ({ id: c.id, volume_id: c.volumeId })) })
+    });
+  }
+
   async deleteChapter(workId: string, chapterId: string): Promise<void> {
     await this.request<{ ok: boolean }>(`/works/${workId}/chapters/${chapterId}`, {
       method: "DELETE"

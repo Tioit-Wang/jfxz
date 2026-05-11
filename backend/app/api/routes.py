@@ -118,6 +118,14 @@ class VolumeIn(BaseModel):
     order_index: int | None = None
 
 
+class ChapterReorderItem(BaseModel):
+    id: str = Field(min_length=1, max_length=36)
+    volume_id: str = Field(min_length=1, max_length=36)
+
+class ChapterReorderIn(BaseModel):
+    chapters: list[ChapterReorderItem]
+
+
 class InspirationNoteIn(BaseModel):
     title: str = Field(min_length=1, max_length=100)
     content: str = Field(default="", max_length=10000)
@@ -1512,6 +1520,72 @@ async def delete_chapter(
 ) -> dict[str, bool]:
     await owned_work(session, user.id, work_id)
     await session.delete(await must_get_in_work(session, Chapter, chapter_id, work_id))
+    await session.commit()
+    return {"ok": True}
+
+
+@router.post("/works/{work_id}/chapters/reorder")
+async def reorder_chapters(
+    work_id: str,
+    payload: ChapterReorderIn,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, bool]:
+    await owned_work(session, user.id, work_id)
+
+    chapter_ids = {item.id for item in payload.chapters}
+    existing_chapters = await session.execute(
+        select(Chapter).where(Chapter.work_id == work_id, Chapter.id.in_(chapter_ids))
+    )
+    existing_map = {ch.id: ch for ch in existing_chapters.scalars()}
+    if len(existing_map) != len(chapter_ids):
+        missing = chapter_ids - set(existing_map)
+        raise HTTPException(status_code=400, detail=f"Chapters not found: {', '.join(missing)}")
+
+    volume_ids = {item.volume_id for item in payload.chapters}
+    existing_volumes = await session.execute(
+        select(Volume).where(Volume.work_id == work_id, Volume.id.in_(volume_ids))
+    )
+    existing_volumes_set = {v.id for v in existing_volumes.scalars()}
+    if volume_ids - existing_volumes_set:
+        missing_vols = volume_ids - existing_volumes_set
+        raise HTTPException(status_code=400, detail=f"Volumes not found: {', '.join(missing_vols)}")
+
+    volume_order_counter: dict[str, int] = {}
+    for item in payload.chapters:
+        chapter = existing_map[item.id]
+        chapter.volume_id = item.volume_id
+        counter = volume_order_counter.setdefault(item.volume_id, 0)
+        chapter.order_index = counter
+        volume_order_counter[item.volume_id] = counter + 1
+
+    await session.commit()
+    return {"ok": True}
+
+
+@router.delete("/works/{work_id}/volumes/{volume_id}")
+async def delete_volume(
+    work_id: str,
+    volume_id: str,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, bool]:
+    await owned_work(session, user.id, work_id)
+    volume = await must_get_in_work(session, Volume, volume_id, work_id)
+
+    chapter_count = await one(
+        session,
+        select(func.count(Chapter.id)).where(
+            Chapter.work_id == work_id, Chapter.volume_id == volume_id
+        ),
+    )
+    if chapter_count > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete non-empty volume '{volume.title}' ({chapter_count} chapters)",
+        )
+
+    await session.delete(volume)
     await session.commit()
     return {"ok": True}
 

@@ -318,6 +318,29 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const [volumeCreateOpen, setVolumeCreateOpen] = useState(false);
   const [volumeDraft, setVolumeDraft] = useState("");
   const [volumeStatus, setVolumeStatus] = useState<"ready" | "saving" | "error">("ready");
+  const [volumeEditOpen, setVolumeEditOpen] = useState(false);
+  const [editingVolumeId, setEditingVolumeId] = useState("");
+  const [volumeEditDraft, setVolumeEditDraft] = useState("");
+  const [volumeDeleteConfirm, setVolumeDeleteConfirm] = useState<Volume | null>(null);
+
+  const COLLAPSED_KEY = `sidebar-collapsed-${bookId}`;
+  const [collapsedVolumes, setCollapsedVolumes] = useState<Set<string>>(() => {
+    try {
+      const stored = localStorage.getItem(COLLAPSED_KEY);
+      return stored ? new Set(JSON.parse(stored)) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
+  const toggleCollapse = useCallback((volumeId: string) => {
+    setCollapsedVolumes((prev) => {
+      const next = new Set(prev);
+      if (next.has(volumeId)) next.delete(volumeId);
+      else next.add(volumeId);
+      try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next])); } catch { /* noop */ }
+      return next;
+    });
+  }, [COLLAPSED_KEY]);
 
   const [settingSearch, setSettingSearch] = useState("");
   const [settingType, setSettingType] = useState("all");
@@ -1538,6 +1561,84 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     }
   }
 
+  function openEditVolume(volume: Volume) {
+    setEditingVolumeId(volume.id);
+    setVolumeEditDraft(volume.title);
+    setVolumeEditOpen(true);
+  }
+
+  async function saveVolumeEdit() {
+    if (!editingVolumeId) return;
+    const title = volumeEditDraft.trim();
+    if (!title) return;
+    setStatus("saving");
+    try {
+      const updated = await client.updateVolume(bookId, editingVolumeId, title);
+      setVolumes((items) => items.map((v) => (v.id === editingVolumeId ? updated : v)));
+      setVolumeEditOpen(false);
+      setEditingVolumeId("");
+      setStatus("saved");
+    } catch {
+      setStatus("error");
+      setAnalysisNotice("重命名卷失败，请稍后重试");
+    }
+  }
+
+  function openDeleteVolume(volume: Volume) {
+    setVolumeDeleteConfirm(volume);
+  }
+
+  async function confirmDeleteVolume() {
+    const volume = volumeDeleteConfirm;
+    if (!volume) return;
+    setStatus("saving");
+    try {
+      await client.deleteVolume(bookId, volume.id);
+      setVolumes((items) => items.filter((v) => v.id !== volume.id));
+      setVolumeDeleteConfirm(null);
+      setStatus("saved");
+    } catch {
+      setStatus("error");
+      setAnalysisNotice("删除卷失败，请稍后重试");
+    }
+  }
+
+  async function handleReorderChapter(chapterId: string, targetVolumeId: string, targetOrder: number) {
+    const sourceChapter = chapters.find((c) => c.id === chapterId);
+    if (!sourceChapter) return;
+
+    const remaining = chapters.filter((c) => c.id !== chapterId);
+    const newChapters = [...remaining];
+
+    const beforeIndex = newChapters.findIndex((c) => {
+      const cVolId = c.volumeId || "";
+      if (cVolId !== targetVolumeId) return false;
+      const targetChapters = chapters.filter((ch) => (ch.volumeId || "") === targetVolumeId);
+      const targetChIndex = targetChapters.findIndex((tc) => tc.id === c.id);
+      return targetChIndex >= targetOrder;
+    });
+
+    const inserted = { ...sourceChapter, volumeId: targetVolumeId };
+    if (beforeIndex === -1) {
+      newChapters.push(inserted);
+    } else {
+      newChapters.splice(beforeIndex, 0, inserted);
+    }
+
+    const prevChapters = chapters;
+    setChapters(newChapters);
+
+    try {
+      await client.reorderChapters(
+        bookId,
+        newChapters.map((c) => ({ id: c.id, volumeId: c.volumeId || "" }))
+      );
+    } catch {
+      setChapters(prevChapters);
+      setAnalysisNotice("章节排序保存失败，已还原");
+    }
+  }
+
   function startCreateNote() {
     setNoteDraft({ title: "", content: "", category: "灵感" });
     setActiveNoteId("");
@@ -1857,6 +1958,11 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
             onDeleteNote={(item) => void deleteNote(item)}
             onOpenGoalEdit={openGoalEdit}
             formatUpdatedAt={formatUpdatedAt}
+            collapsedVolumes={collapsedVolumes}
+            onToggleCollapse={toggleCollapse}
+            onEditVolume={openEditVolume}
+            onDeleteVolume={openDeleteVolume}
+            onReorderChapter={handleReorderChapter}
           />
         </ResizablePanel>
 
@@ -2201,6 +2307,50 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={volumeEditOpen} onOpenChange={setVolumeEditOpen}>
+        <DialogContent className="overflow-hidden p-0 sm:max-w-md [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:bg-white">
+          <DialogHeader className="border-b border-neutral-200 bg-white px-6 py-5">
+            <DialogTitle className="text-2xl font-black tracking-tight">重命名卷</DialogTitle>
+            <DialogDescription className="text-xs text-neutral-500">修改当前卷的名称。</DialogDescription>
+          </DialogHeader>
+          <FieldGroup className="p-6">
+            <Field>
+              <FieldLabel>卷名</FieldLabel>
+              <Input
+                aria-label="卷名"
+                value={volumeEditDraft}
+                onChange={(event) => setVolumeEditDraft(event.target.value)}
+                className="h-11 rounded-xl border-neutral-300 bg-white font-semibold"
+              />
+            </Field>
+          </FieldGroup>
+          <DialogFooter className="h-[72px] border-t border-neutral-200 bg-white p-0 sm:justify-center">
+            <Button variant="outline" className="rounded-xl border-neutral-300 bg-white" onClick={() => setVolumeEditOpen(false)}>取消</Button>
+            <Button className="rounded-xl bg-neutral-950 text-white hover:bg-neutral-800" onClick={() => void saveVolumeEdit()}>
+              保存
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog
+        open={volumeDeleteConfirm !== null}
+        onOpenChange={(open) => { if (!open) setVolumeDeleteConfirm(null); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除卷</AlertDialogTitle>
+            <AlertDialogDescription>
+              确认删除卷「{volumeDeleteConfirm?.title}」？此操作不可撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void confirmDeleteVolume()}>删除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog
         open={noteMode === "create" || noteMode === "edit"}

@@ -109,6 +109,9 @@ function renderPlain(resultStr: string) {
   );
 }
 
+const DIFF_MAX_LINES = 200;
+const DIFF_CONTEXT_LINES = 50;
+
 function renderDiffResult(resultStr: string) {
   const parsed = asRecord(parseJson(resultStr));
   const oldContent = stringValue(parsed.old_content_preview ?? parsed.old_content);
@@ -116,17 +119,31 @@ function renderDiffResult(resultStr: string) {
   if (!oldContent && !newContent) return renderPlain(resultStr);
 
   const changes: Change[] = diffLines(oldContent, newContent);
+  const allLines: Array<{ change: Change; line: string; globalIndex: number }> = [];
+  changes.forEach((change) => {
+    const lines = change.value.split("\n").filter((line, idx, arr) => idx < arr.length - 1 || line !== "");
+    lines.forEach((line) => {
+      allLines.push({ change, line, globalIndex: allLines.length });
+    });
+  });
+
+  const truncated = allLines.length > DIFF_MAX_LINES;
+  const visibleLines = truncated
+    ? [...allLines.slice(0, DIFF_CONTEXT_LINES), ...allLines.slice(allLines.length - DIFF_CONTEXT_LINES)]
+    : allLines;
+  const omittedCount = truncated ? allLines.length - 2 * DIFF_CONTEXT_LINES : 0;
+
   return (
     <div className="max-h-64 overflow-auto rounded-xl border border-neutral-200 bg-white font-mono text-[11px] leading-relaxed">
-      {changes.map((change, i) => {
-        const lines = change.value.split("\n").filter((line, idx, arr) => idx < arr.length - 1 || line !== "");
-        return lines.map((line, j) => {
-          const key = `${i}-${j}`;
-          if (change.added) return <div key={key} className="bg-emerald-50 px-2 py-0.5 text-emerald-700">+ {line}</div>;
-          if (change.removed) return <div key={key} className="bg-rose-50 px-2 py-0.5 text-rose-700">- {line}</div>;
-          return <div key={key} className="px-2 py-0.5 text-neutral-500">  {line}</div>;
-        });
+      {visibleLines.map((item, i) => {
+        const key = `${item.globalIndex}`;
+        if (item.change.added) return <div key={key} className="bg-emerald-50 px-2 py-0.5 text-emerald-700">+ {item.line}</div>;
+        if (item.change.removed) return <div key={key} className="bg-rose-50 px-2 py-0.5 text-rose-700">- {item.line}</div>;
+        return <div key={key} className="px-2 py-0.5 text-neutral-500">  {item.line}</div>;
       })}
+      {truncated ? (
+        <div className="px-2 py-1.5 text-center text-[10px] text-neutral-400">&hellip; 省略 {omittedCount} 行 &hellip;</div>
+      ) : null}
     </div>
   );
 }

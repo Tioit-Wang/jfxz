@@ -243,6 +243,14 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const bootstrapStartedRef = useRef<string | null>(null);
   const draftContentRef = useRef("");
   const pendingAddedWordsRef = useRef(0);
+  const titleRef = useRef("");
+  const summaryRef = useRef("");
+  const contentRef = useRef("");
+  const savePromiseRef = useRef<Promise<Chapter | null>>(Promise.resolve(null));
+  const retryCountRef = useRef(0);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastEditTimeRef = useRef(0);
+  const pendingRemoteUpdateRef = useRef<{ title: string; summary: string; content: string } | null>(null);
   const [work, setWork] = useState<Work | null>(null);
   const [volumes, setVolumes] = useState<Volume[]>([]);
   const [chapters, setChapters] = useState<Chapter[]>([]);
@@ -269,6 +277,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState<number | null>(null);
   const [analysisNotice, setAnalysisNotice] = useState("");
   const [status, setStatus] = useState<SaveStatus>("loading");
+  const [remoteUpdateNotice, setRemoteUpdateNotice] = useState<string | null>(null);
 
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState("");
@@ -402,6 +411,10 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   useEffect(() => {
     activeSettingIdRef.current = activeSettingId;
   }, [activeSettingId]);
+
+  useEffect(() => { titleRef.current = title; }, [title]);
+  useEffect(() => { summaryRef.current = summary; }, [summary]);
+  useEffect(() => { contentRef.current = content; }, [content]);
 
   const allReferenceItems = useMemo<ChatReference[]>(() => {
     const chapterRefs = chapters
@@ -594,19 +607,27 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     void loadWorkspace();
   }, [bookId, client, router, syncDraft]);
 
-  const saveCurrentChapter = useCallback(
-    async (overrides: Partial<Pick<Chapter, "title" | "summary" | "content">> = {}) => {
-      if (!activeChapter) return null;
-      if (overrides.content !== undefined) {
-        recordContentDraft(overrides.content);
-      }
-      const nextChapter: Chapter = {
-        ...activeChapter,
-        title: (overrides.title ?? title).trim() || "未命名章节",
-        summary: overrides.summary ?? summary,
-        content: overrides.content ?? content
-      };
-      const addedWords = pendingAddedWordsRef.current;
+  async function saveCurrentChapter(overrides: Partial<Pick<Chapter, "title" | "summary" | "content">> = {}) {
+    const currentChapter = chapters.find((ch) => ch.id === activeChapterIdRef.current) ?? chapters[0];
+    if (!currentChapter) return null;
+
+    const effectiveTitle = (overrides.title ?? titleRef.current).trim() || "未命名章节";
+    const effectiveSummary = overrides.summary ?? summaryRef.current;
+    const effectiveContent = overrides.content ?? contentRef.current;
+
+    if (overrides.content !== undefined) {
+      recordContentDraft(overrides.content);
+    }
+
+    const nextChapter: Chapter = {
+      ...currentChapter,
+      title: effectiveTitle,
+      summary: effectiveSummary,
+      content: effectiveContent,
+    };
+    const addedWords = pendingAddedWordsRef.current;
+
+    const doSave = async (): Promise<Chapter | null> => {
       setStatus("saving");
       setChapters((items) => items.map((chapter) => (chapter.id === nextChapter.id ? nextChapter : chapter)));
       if (nextChapter.id.startsWith("local-")) {
@@ -616,7 +637,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
           content: nextChapter.content,
           order: nextChapter.order,
           volumeId: nextChapter.volumeId,
-          wordsAdded: addedWords
+          wordsAdded: addedWords,
         });
         setChapters((items) => items.map((chapter) => (chapter.id === nextChapter.id ? created : chapter)));
         setActiveChapterId(created.id);
@@ -626,6 +647,8 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
         }
         pendingAddedWordsRef.current = 0;
         draftContentRef.current = created.content;
+        retryCountRef.current = 0;
+        if (retryTimerRef.current) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null; }
         setStatus("saved");
         return created;
       }
@@ -638,15 +661,35 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
         }
         pendingAddedWordsRef.current = 0;
         draftContentRef.current = savedChapter.content;
+        retryCountRef.current = 0;
+        if (retryTimerRef.current) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null; }
         setStatus("saved");
         return savedChapter;
       } catch (error) {
         setStatus("error");
+        if (retryCountRef.current < 3) {
+          const delay = 5000 * Math.pow(2, retryCountRef.current);
+          retryCountRef.current += 1;
+          retryTimerRef.current = setTimeout(() => {
+            void saveCurrentChapter(overrides).catch(() => undefined);
+          }, delay);
+        }
         throw error;
       }
-    },
-    [activeChapter, bookId, client, content, recordContentDraft, summary, title]
-  );
+    };
+
+    const previousPromise = savePromiseRef.current;
+    let resolveChain: () => void;
+    const chainPromise = new Promise<void>((resolve) => { resolveChain = resolve; });
+    savePromiseRef.current = chainPromise.then(() => null);
+    await previousPromise;
+    try {
+      const result = await doSave();
+      return result;
+    } finally {
+      resolveChain!();
+    }
+  }
 
   useEffect(() => {
     if (!activeChapter) return;
@@ -660,7 +703,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     }, 700);
 
     return () => window.clearTimeout(timer);
-  }, [activeChapter, content, saveCurrentChapter, summary, title]);
+  }, [activeChapter, content, summary, title]);
 
   function persistRecentReferences(items: ChatReference[]) {
     const next = dedupeReferences(filterMentionReferences(items)).slice(0, 3);
@@ -697,11 +740,29 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   }
 
   function updateContent(value: string) {
+    lastEditTimeRef.current = Date.now();
     recordContentDraft(value);
     setContent(value);
     if (suggestions.length || overlay || analysisNotice) {
       clearAnalysis();
     }
+  }
+
+  function acceptRemoteUpdate() {
+    const pending = pendingRemoteUpdateRef.current;
+    if (!pending) return;
+    setTitle(pending.title);
+    setSummary(pending.summary);
+    setSummaryDraft(pending.summary);
+    setContent(pending.content);
+    titleRef.current = pending.title;
+    summaryRef.current = pending.summary;
+    contentRef.current = pending.content;
+    draftContentRef.current = pending.content;
+    pendingAddedWordsRef.current = 0;
+    pendingRemoteUpdateRef.current = null;
+    setRemoteUpdateNotice(null);
+    setStatus("saved");
   }
 
   async function selectChapter(chapterId: string) {
@@ -1040,9 +1101,13 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
 
           // Sync workspace data when tool execution completes
           if (status === "completed" && data?.result) {
+            let result: any;
             try {
-              const result = JSON.parse(data.result);
-
+              result = JSON.parse(data.result);
+            } catch {
+              return;
+            }
+            try {
               switch (tool) {
                 case "create_or_update_character": {
                   if (result.id && result.name) {
@@ -1063,11 +1128,11 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                   break;
                 }
                 case "delete_character": {
-                  if (result.success && result.character_id) {
-                    const deletedId = result.character_id as string;
+                  const characterDeletedId = (result.character_id ?? result.id) as string | undefined;
+                  if (characterDeletedId) {
                     setCharacters((prev) => {
-                      const remaining = prev.filter((c) => c.id !== deletedId);
-                      if (activeCharacterIdRef.current === deletedId) {
+                      const remaining = prev.filter((c) => c.id !== characterDeletedId);
+                      if (activeCharacterIdRef.current === characterDeletedId) {
                         setActiveCharacterId(remaining[0]?.id ?? "");
                       }
                       return remaining;
@@ -1094,11 +1159,11 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                   break;
                 }
                 case "delete_setting": {
-                  if (result.success && result.setting_id) {
-                    const deletedId = result.setting_id as string;
+                  const settingDeletedId = (result.setting_id ?? result.id) as string | undefined;
+                  if (settingDeletedId) {
                     setSettings((prev) => {
-                      const remaining = prev.filter((s) => s.id !== deletedId);
-                      if (activeSettingIdRef.current === deletedId) {
+                      const remaining = prev.filter((s) => s.id !== settingDeletedId);
+                      if (activeSettingIdRef.current === settingDeletedId) {
                         setActiveSettingId(remaining[0]?.id ?? "");
                       }
                       return remaining;
@@ -1108,27 +1173,34 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                 }
                 case "update_chapter_content": {
                   const chapterId = result.chapter_id as string;
-                  const newTitle = result.title as string;
                   if (chapterId) {
                     void client.listChapters(bookId).then((freshChapters) => {
                       setChapters(freshChapters);
                       const freshChapter = freshChapters.find((chapter) => chapter.id === chapterId);
-                      if (freshChapter && activeChapterIdRef.current === chapterId) {
-                        setTitle(freshChapter.title);
-                        setSummary(freshChapter.summary);
-                        setSummaryDraft(freshChapter.summary);
-                        setContent(freshChapter.content);
-                        setStatus("saved");
-                      }
-                    }).catch(() => {
-                      if (!newTitle) return;
-                      setChapters((prev) =>
-                        prev.map((ch) => (ch.id === chapterId ? { ...ch, title: newTitle } : ch))
-                      );
+                      if (!freshChapter) return;
                       if (activeChapterIdRef.current === chapterId) {
-                        setTitle(newTitle);
+                        const idleMs = Date.now() - lastEditTimeRef.current;
+                        if (idleMs >= 3000) {
+                          setTitle(freshChapter.title);
+                          setSummary(freshChapter.summary);
+                          setSummaryDraft(freshChapter.summary);
+                          setContent(freshChapter.content);
+                          titleRef.current = freshChapter.title;
+                          summaryRef.current = freshChapter.summary;
+                          contentRef.current = freshChapter.content;
+                          draftContentRef.current = freshChapter.content;
+                          pendingAddedWordsRef.current = 0;
+                          setStatus("saved");
+                        } else {
+                          pendingRemoteUpdateRef.current = {
+                            title: freshChapter.title,
+                            summary: freshChapter.summary,
+                            content: freshChapter.content,
+                          };
+                          setRemoteUpdateNotice(`AI 已修改「${freshChapter.title}」的内容`);
+                        }
                       }
-                    });
+                    }).catch(() => undefined);
                   }
                   break;
                 }
@@ -1142,6 +1214,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                     if (activeChapterIdRef.current === chapterId) {
                       setSummary(newSummary);
                       setSummaryDraft(newSummary);
+                      summaryRef.current = newSummary;
                     }
                   }
                   break;
@@ -1154,6 +1227,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                       title: result.title,
                       content: "",
                       summary: result.summary ?? "",
+                      volumeId: result.volume_id ?? "",
                     };
                     setChapters((prev) => {
                       const exists = prev.some((ch) => ch.id === newChapter.id);
@@ -1175,22 +1249,27 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                   setWork((prev) => {
                     if (!prev) return prev;
                     const updates: Partial<Work> = {};
-                    if (field === "short_intro") updates.shortIntro = value;
+                    if (field === "title") updates.title = value;
+                    else if (field === "short_intro") updates.shortIntro = value;
                     else if (field === "synopsis") updates.synopsis = value;
                     else if (field === "background_rules") updates.backgroundRules = value;
                     else if (field === "focus_requirements") updates.focusRequirements = value;
                     else if (field === "forbidden_requirements") updates.forbiddenRequirements = value;
+                    else if (field === "tags") updates.tags = value.split(",").map((t: string) => t.trim()).filter(Boolean);
                     return { ...prev, ...updates };
                   });
                   break;
                 }
               }
-            } catch {
-              // JSON parse failure — ignore silently
+            } catch (err) {
+              console.error("[workspace] tool sync error:", tool, err);
             }
           }
         },
         (errorMessage) => {
+          if (errorMessage.includes("interrupted") || errorMessage.includes("cancelled")) {
+            return;
+          }
           setMessages((items) =>
             items.map((item) => (item.id === assistantId ? { ...item, error: errorMessage } : item))
           );
@@ -1235,7 +1314,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       }
       setStreamingMessageId(null);
       if (error instanceof DOMException && error.name === "AbortError") {
-        setMessages((items) => items.filter((item) => item.id !== assistantId));
         setChatStatus("idle");
         return;
       }
@@ -1817,6 +1895,8 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
               setActiveSuggestionIndex(index);
               setOverlay(true);
             }}
+            remoteUpdateNotice={remoteUpdateNotice}
+            onAcceptRemoteUpdate={acceptRemoteUpdate}
           />
         </ResizablePanel>
 
@@ -1869,7 +1949,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
               abortRef.current?.abort();
               setChatStatus("idle");
               setStreamingMessageId(null);
-              setMessages((items) => items.filter((item) => item.role === "assistant" && !item.content && !item.blocks));
             }}
             onInputChange={(text, mentions) => {
               setChatInput(text);

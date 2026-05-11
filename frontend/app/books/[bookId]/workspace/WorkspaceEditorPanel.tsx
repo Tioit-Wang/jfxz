@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, Edit3, Loader2, Settings, Trash2, UserCircle, Wand2, type LucideIcon } from "lucide-react";
+import { AlertCircle, Edit3, Loader2, RefreshCw, Settings, Trash2, UserCircle, Wand2, type LucideIcon } from "lucide-react";
 import type { ApiSuggestion } from "@/api";
 import { ChapterPlainTextEditor } from "@/components/ChapterPlainTextEditor";
 import { cn } from "@/lib/utils";
@@ -39,6 +39,8 @@ type WorkspaceEditorPanelProps = {
   onAnalyze: () => void;
   onContentChange: (value: string) => void;
   onActivateSuggestion: (index: number) => void;
+  remoteUpdateNotice: string | null;
+  onAcceptRemoteUpdate: () => void;
 };
 
 export function WorkspaceEditorPanel({
@@ -66,6 +68,8 @@ export function WorkspaceEditorPanel({
   onAnalyze,
   onContentChange,
   onActivateSuggestion,
+  remoteUpdateNotice,
+  onAcceptRemoteUpdate,
 }: WorkspaceEditorPanelProps) {
   const readingMinutes = count > 0 ? Math.max(1, Math.ceil(count / 500)) : 0;
 
@@ -145,6 +149,20 @@ export function WorkspaceEditorPanel({
                     <AlertCircle size={15} className="mr-1.5" />
                     {analysisNotice}
                   </span>
+                </div>
+              ) : null}
+
+              {remoteUpdateNotice ? (
+                <div className="mb-5 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
+                  <AlertCircle size={15} className="shrink-0" />
+                  <span className="flex-1">{remoteUpdateNotice}</span>
+                  <button
+                    className="inline-flex shrink-0 items-center gap-1 rounded-md bg-amber-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-amber-700"
+                    onClick={onAcceptRemoteUpdate}
+                  >
+                    <RefreshCw size={12} />
+                    加载最新版本
+                  </button>
                 </div>
               ) : null}
 

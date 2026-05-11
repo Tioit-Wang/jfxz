@@ -267,7 +267,7 @@ export function WorkspaceSidebarPanel({
                     setActiveDropZone(zoneId);
                   }
 
-                  function handleDragLeaveChapterZone(e: React.DragEvent, zoneId: string) {
+                  function handleDragLeaveChapterZone(_e: React.DragEvent, zoneId: string) {
                     const count = (dropZoneDragRef.current.get(zoneId) || 1) - 1;
                     dropZoneDragRef.current.set(zoneId, count);
                     if (count === 0) setActiveDropZone((prev) => (prev === zoneId ? null : prev));

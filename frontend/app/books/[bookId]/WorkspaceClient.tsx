@@ -1607,6 +1607,11 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     const sourceChapter = chapters.find((c) => c.id === chapterId);
     if (!sourceChapter) return;
 
+    const sourceVolId = sourceChapter.volumeId || "";
+    const sourceVolChapters = chapters.filter((c) => (c.volumeId || "") === sourceVolId);
+    const currentIndex = sourceVolChapters.findIndex((c) => c.id === chapterId);
+    if (sourceVolId === targetVolumeId && currentIndex === targetOrder) return;
+
     const remaining = chapters.filter((c) => c.id !== chapterId);
     const newChapters = [...remaining];
 

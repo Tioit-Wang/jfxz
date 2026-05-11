@@ -17,7 +17,7 @@ import {
   Users,
 } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { DailyWordProgress, InspirationNote, NamedContent, Volume, WritingGoal } from "@/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -153,6 +153,8 @@ export function WorkspaceSidebarPanel({
   const [notesCollapsed, setNotesCollapsed] = useState(false);
   const [activeDropZone, setActiveDropZone] = useState<string | null>(null);
   const [autoExpandTimer, setAutoExpandTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
+  const dropZoneDragRef = useRef<Map<string, number>>(new Map());
+  const volumeDragRef = useRef<Map<string, number>>(new Map());
   const percent = progressPercent(dailyWordProgress, writingGoal);
   const firstVolumeId = volumes[0]?.id;
 
@@ -252,38 +254,69 @@ export function WorkspaceSidebarPanel({
                   const isCollapsed = collapsedVolumes.has(volume.id);
                   const volumeKey = volume.id || "default";
 
-                  function handleDragOverChapterZone(e: React.DragEvent, zoneId: string) {
+                  function handleDragOverChapterZone(e: React.DragEvent) {
                     if (!e.dataTransfer.types.includes("application/x-goodgua-workspace-reorder")) return;
                     e.preventDefault();
                     e.dataTransfer.dropEffect = "move";
+                  }
+
+                  function handleDragEnterChapterZone(e: React.DragEvent, zoneId: string) {
+                    if (!e.dataTransfer.types.includes("application/x-goodgua-workspace-reorder")) return;
+                    const count = (dropZoneDragRef.current.get(zoneId) || 0) + 1;
+                    dropZoneDragRef.current.set(zoneId, count);
                     setActiveDropZone(zoneId);
+                  }
+
+                  function handleDragLeaveChapterZone(e: React.DragEvent, zoneId: string) {
+                    const count = (dropZoneDragRef.current.get(zoneId) || 1) - 1;
+                    dropZoneDragRef.current.set(zoneId, count);
+                    if (count === 0) setActiveDropZone((prev) => (prev === zoneId ? null : prev));
+                  }
+
+                  function handleDropChapterZone(e: React.DragEvent, zoneId: string, targetIndex: number) {
+                    e.preventDefault();
+                    dropZoneDragRef.current.set(zoneId, 0);
+                    setActiveDropZone(null);
+                    const chapterId = e.dataTransfer.getData("application/x-goodgua-workspace-reorder");
+                    if (!chapterId) return;
+                    onReorderChapter(chapterId, volume.id, targetIndex);
                   }
 
                   function handleVolumeTitleDragOver(e: React.DragEvent) {
                     if (!e.dataTransfer.types.includes("application/x-goodgua-workspace-reorder")) return;
                     e.preventDefault();
                     e.dataTransfer.dropEffect = "move";
+                  }
+
+                  function handleVolumeTitleDragEnter(e: React.DragEvent) {
+                    if (!e.dataTransfer.types.includes("application/x-goodgua-workspace-reorder")) return;
+                    const key = volume.id || "default";
+                    const count = (volumeDragRef.current.get(key) || 0) + 1;
+                    volumeDragRef.current.set(key, count);
                     if (isCollapsed && !autoExpandTimer) {
                       const timer = setTimeout(() => onToggleCollapse(volume.id), 600);
                       setAutoExpandTimer(timer);
                     }
                   }
 
-                  function handleVolumeTitleDrop(e: React.DragEvent) {
-                    e.preventDefault();
-                    if (autoExpandTimer) { clearTimeout(autoExpandTimer); setAutoExpandTimer(null); }
-                    const chapterId = e.dataTransfer.getData("application/x-goodgua-workspace-reorder");
-                    if (!chapterId) return;
-                    setActiveDropZone(null);
-                    onReorderChapter(chapterId, volume.id, volumeChapters.length);
+                  function handleVolumeTitleDragLeave(e: React.DragEvent) {
+                    const key = volume.id || "default";
+                    const count = (volumeDragRef.current.get(key) || 1) - 1;
+                    volumeDragRef.current.set(key, count);
+                    if (count === 0 && autoExpandTimer) {
+                      clearTimeout(autoExpandTimer);
+                      setAutoExpandTimer(null);
+                    }
                   }
 
-                  function handleChapterDrop(e: React.DragEvent, targetIndex: number) {
+                  function handleVolumeTitleDrop(e: React.DragEvent) {
                     e.preventDefault();
+                    volumeDragRef.current.set(volume.id || "default", 0);
+                    if (autoExpandTimer) { clearTimeout(autoExpandTimer); setAutoExpandTimer(null); }
+                    setActiveDropZone(null);
                     const chapterId = e.dataTransfer.getData("application/x-goodgua-workspace-reorder");
                     if (!chapterId) return;
-                    setActiveDropZone(null);
-                    onReorderChapter(chapterId, volume.id, targetIndex);
+                    onReorderChapter(chapterId, volume.id, volumeChapters.length);
                   }
 
                   return (
@@ -291,7 +324,8 @@ export function WorkspaceSidebarPanel({
                       <div
                         className="group flex items-center justify-between rounded-lg px-1 py-1 text-xs font-bold text-neutral-700"
                         onDragOver={handleVolumeTitleDragOver}
-                        onDragLeave={() => { if (autoExpandTimer) { clearTimeout(autoExpandTimer); setAutoExpandTimer(null); } }}
+                        onDragEnter={handleVolumeTitleDragEnter}
+                        onDragLeave={handleVolumeTitleDragLeave}
                         onDrop={handleVolumeTitleDrop}
                       >
                         <button
@@ -337,9 +371,10 @@ export function WorkspaceSidebarPanel({
                                     "transition-all",
                                     isDropActive ? "h-1.5 rounded-full bg-blue-500" : "h-0.5"
                                   )}
-                                  onDragOver={(e) => handleDragOverChapterZone(e, dropZoneId)}
-                                  onDragLeave={() => setActiveDropZone(null)}
-                                  onDrop={(e) => handleChapterDrop(e, chIndex)}
+                                  onDragOver={(e) => handleDragOverChapterZone(e)}
+                                  onDragEnter={(e) => handleDragEnterChapterZone(e, dropZoneId)}
+                                  onDragLeave={(e) => handleDragLeaveChapterZone(e, dropZoneId)}
+                                  onDrop={(e) => handleDropChapterZone(e, dropZoneId, chIndex)}
                                 />
                                 <button
                                   draggable
@@ -381,9 +416,10 @@ export function WorkspaceSidebarPanel({
                               "transition-all",
                               activeDropZone === `${volumeKey}-end` ? "h-1.5 rounded-full bg-blue-500" : "h-0.5"
                             )}
-                            onDragOver={(e) => handleDragOverChapterZone(e, `${volumeKey}-end`)}
-                            onDragLeave={() => setActiveDropZone(null)}
-                            onDrop={(e) => handleChapterDrop(e, volumeChapters.length)}
+                            onDragOver={(e) => handleDragOverChapterZone(e)}
+                            onDragEnter={(e) => handleDragEnterChapterZone(e, `${volumeKey}-end`)}
+                            onDragLeave={(e) => handleDragLeaveChapterZone(e, `${volumeKey}-end`)}
+                            onDrop={(e) => handleDropChapterZone(e, `${volumeKey}-end`, volumeChapters.length)}
                           />
                           <button
                             className="w-full rounded-xl border border-dashed border-neutral-200 py-2 text-xs text-neutral-500 hover:border-neutral-400 hover:text-neutral-900"

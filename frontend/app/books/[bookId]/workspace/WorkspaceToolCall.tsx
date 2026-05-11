@@ -135,7 +135,7 @@ function renderDiffResult(resultStr: string) {
 
   return (
     <div className="max-h-64 overflow-auto rounded-xl border border-neutral-200 bg-white font-mono text-[11px] leading-relaxed">
-      {visibleLines.map((item, i) => {
+      {visibleLines.map((item) => {
         const key = `${item.globalIndex}`;
         if (item.change.added) return <div key={key} className="bg-emerald-50 px-2 py-0.5 text-emerald-700">+ {item.line}</div>;
         if (item.change.removed) return <div key={key} className="bg-rose-50 px-2 py-0.5 text-rose-700">- {item.line}</div>;

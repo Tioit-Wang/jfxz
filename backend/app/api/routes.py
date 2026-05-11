@@ -1031,9 +1031,10 @@ async def workspace_bootstrap(
             source_type="manual",
             last_active_at=now(),
         )
-        agent = AgentRunStore(session_id=agno_session_id, user_id=user.id, runs=[])
-        session.add_all([active_session, agent])
+        session.add(active_session)
         await session.flush()
+        agent = AgentRunStore(session_id=agno_session_id, user_id=user.id, runs=[])
+        session.add(agent)
         chat_sessions = [active_session]
     else:
         agent = await session.get(AgentRunStore, active_session.agno_session_id)
@@ -1685,7 +1686,9 @@ async def create_chat_session(
         source_type=payload.source_type,
         last_active_at=now(),
     )
-    session.add_all([chat, AgentRunStore(session_id=agno_session_id, user_id=user.id, runs=[])])
+    session.add(chat)
+    await session.flush()
+    session.add(AgentRunStore(session_id=agno_session_id, user_id=user.id, runs=[]))
     await session.commit()
     return public(chat)
 

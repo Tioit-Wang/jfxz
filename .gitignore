@@ -60,3 +60,4 @@ desktop.ini
 !.vscode/settings.json
 !.vscode/extensions.json
 logs/*
+.deepseek/

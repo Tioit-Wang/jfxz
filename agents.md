@@ -1,90 +1,110 @@
-# CLAUDE.md
+# 妙蛙写作 (GoodGua) — Project Knowledge Base
 
-Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
+**Generated:** 2026-05-11
+**Commit:** c9b7ce2
+**Branch:** master
+**Stack:** Next.js 15 + FastAPI + SQLAlchemy 2.0 Async + Agno + MySQL 8
 
-**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
+## OVERVIEW
 
-## 1. Think Before Coding
+妙蛙写作 is an AI-assisted long-form creative writing tool. Author-led, AI-assisted: the author makes creative decisions; the AI provides context-aware suggestions, analysis, and reference. Two personas: user-facing writing workspace (`/books/:bookId`) and admin panel (`/admin/*`).
 
-**Don't assume. Don't hide confusion. Surface tradeoffs.**
+## STRUCTURE
 
-Before implementing:
-- State your assumptions explicitly. If uncertain, ask.
-- If multiple interpretations exist, present them - don't pick silently.
-- If a simpler approach exists, say so. Push back when warranted.
-- If something is unclear, stop. Name what's confusing. Ask.
-
-## 2. Simplicity First
-
-**Minimum code that solves the problem. Nothing speculative.**
-
-- No features beyond what was asked.
-- No abstractions for single-use code.
-- No "flexibility" or "configurability" that wasn't requested.
-- No error handling for impossible scenarios.
-- If you write 200 lines and it could be 50, rewrite it.
-
-Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
-
-## 3. Surgical Changes
-
-**Touch only what you must. Clean up only your own mess.**
-
-When editing existing code:
-- Don't "improve" adjacent code, comments, or formatting.
-- Don't refactor things that aren't broken.
-- Match existing style, even if you'd do it differently.
-- If you notice unrelated dead code, mention it - don't delete it.
-
-When your changes create orphans:
-- Remove imports/variables/functions that YOUR changes made unused.
-- Don't remove pre-existing dead code unless asked.
-
-The test: Every changed line should trace directly to the user's request.
-
-## 4. Goal-Driven Execution
-
-**Define success criteria. Loop until verified.**
-
-Transform tasks into verifiable goals:
-- "Add validation" → "Write tests for invalid inputs, then make them pass"
-- "Fix the bug" → "Write a test that reproduces it, then make it pass"
-- "Refactor X" → "Ensure tests pass before and after"
-
-For multi-step tasks, state a brief plan:
 ```
-1. [Step] → verify: [check]
-2. [Step] → verify: [check]
-3. [Step] → verify: [check]
+jfxz/
+├── frontend/            # Next.js 15 (React 19, shadcn/ui, TipTap, Streamdown)
+│   ├── app/             # App router: landing, /books, /admin, /login
+│   └── src/             # Shared components, hooks, lib (api client, utils, domain)
+├── backend/             # FastAPI + Uvicorn, Python 3.13
+│   ├── app/
+│   │   ├── api/         # All routes in routes.py (~3000 lines)
+│   │   ├── core/        # config.py (Pydantic), database.py (SQLAlchemy async), security.py (JWT/argon2)
+│   │   ├── services/    # agent_service.py (Agno), billing_service.py, scheduler_service.py, workspace_structure.py
+│   │   ├── cli/         # Typer CLI: user & DB management
+│   │   └── scripts/     # create_admin bootstrap
+│   ├── migrations/      # Manual SQL migrations (MySQL dialect, immutable)
+│   └── tests/           # pytest + pytest-asyncio (100% branch coverage required)
+├── docs/                # Chinese-language requirements & design
+├── docker-compose.yml   # 4 services: nginx, frontend, backend, worker
+└── scripts/             # release_preflight.py
 ```
 
-Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+## WHERE TO LOOK
 
----
+| Task | Location | Notes |
+|------|----------|-------|
+| Add API endpoint | `backend/app/api/routes.py` | Single-file routes; split when >500 lines |
+| Add/modify database model | `backend/app/models.py` | All SQLAlchemy models in one file |
+| Database schema change | `backend/migrations/versions/` | MUST read `docs/db-migration-spec.md` first |
+| Change backend config | `backend/app/core/config.py` | `GOODGUA_` env prefix, Pydantic Settings |
+| Add frontend page | `frontend/app/` | Next.js App Router; user routes under `/books`, admin under `/admin` |
+| Shared UI component | `frontend/src/components/ui/` | shadcn/ui primitives |
+| Admin CRUD page | `frontend/app/admin/<module>/` | Each module: page.tsx + actions |
+| AI agent / tools | `backend/app/services/agent_service.py` | Agno Agent + GoodguaTools class + prompt template |
+| Billing / points | `backend/app/services/billing_service.py` | Pre-check balance, deduct, grant, expire |
+| Scheduled tasks | `backend/app/services/scheduler_service.py` | APScheduler: VIP daily points grant at 5:00 CST |
+| Deployment | `docs/部署文档.md` | Docker Compose + 1Panel + OpenResty |
 
-**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+## LANGUAGE
 
-## 5. Timezone Conventions
+- **文档与回复**：自然语言（需求文档、设计文档、AGENTS.md、AI 回复）统一使用简体中文。
+- **代码注释**：函数注释、类注释、模块级注释使用中文。简洁说明意图，不写冗余。
+- **代码标识符**：变量名、函数名、类名、文件名、数据库字段名、配置键名使用英文。
+- **迁移文件**：迁移 SQL 注释使用英文（遵循 `docs/db-migration-spec.md` 模板），但文件名描述部分使用英文。
+- **Git 提交信息**：使用中文，格式为 `类型: 简短描述`。
 
-**所有前端时间展示必须显式指定 `timeZone: "Asia/Shanghai"`。**
+## CONVENTIONS
 
-- 用户群体在中国，服务器部署在新加坡（同为 UTC+8），但浏览器环境可能不一致。
-- `Intl.DateTimeFormat` 和 `toLocaleString` 用于日期时间展示时，必须加 `timeZone: "Asia/Shanghai"`，确保在任何浏览器/系统时区下都显示北京时间。
-- 后端存储统一用 UTC（`datetime.now(UTC)`），前端负责在展示层转换为北京时间。
-- 已修改的文件：
-  - `frontend/app/admin/admin-utils.ts` — `formatDate()`
-  - `frontend/app/books/BooksClient.tsx` — `formatUpdatedAt()`
-  - `frontend/app/books/[bookId]/WorkspaceClient.tsx` — `formatUpdatedAt()`
-- 新增日期格式化函数时，务必遵循同一规范。
+- **Timezone**: 
+  - 前端：所有日期时间展示必须使用 `Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai" })`。涉及文件：`admin-utils.ts` 的 `formatDate()`、`BooksClient.tsx` 和 `WorkspaceClient.tsx` 的 `formatUpdatedAt()`。新增日期格式化函数时必须遵循同一规范。
+  - 后端：数据库存储和 JWT token 使用 `datetime.now(UTC)`（`models.py` 的 `now()`、`security.py` 的 `issue_token()`）。业务日期逻辑（今日字数统计）使用 `ZoneInfo("Asia/Shanghai")`（`routes.py` 的 `beijing_today()`、`agent_service.py` 的 `SHANGHAI_TZ`）。调度器使用 `timezone="Asia/Shanghai"`（`scheduler_service.py`）。Docker 环境变量统一设 `TZ=Asia/Shanghai`。
+- **Database migrations**: Any schema change → new SQL file in `backend/migrations/versions/`. Format: `YYYYMMDDHHMMSS__description.sql`. Historical files immutable. Production: manual execution only. Full spec: `docs/db-migration-spec.md`.
+- **Environment**: `GOODGUA_ENV` = `development` | `test` | `production`. Dev/test → SQLite. Production → MySQL (`mysql+asyncmy://`).
+- **Auth**: Single `users` table, `role` column (`user` | `admin`). Argon2 password hashing (legacy SHA-256 migration path). Custom HS256 JWT in `security.py` — no PyJWT dependency.
+- **API**: Single `routes.py` file. CSRF via `X-CSRF-Token` header on mutating requests. `X-Real-IP` / `X-Forwarded-For` trusted proxy handling.
+- **Frontend auth**: User-facing login/register via modal overlay (`AuthModal`), not separate page. Admin login: dedicated `/admin/login`.
 
-## 6. Database Migration Conventions
+## ANTI-PATTERNS (THIS PROJECT)
 
-**所有数据库结构变更必须先阅读 `docs/db-migration-spec.md`。**
+- **NEVER** modify or delete historical migration files
+- **NEVER** use `IF EXISTS` / `IF NOT EXISTS` defensively in migration SQL
+- **NEVER** depend on app startup to auto-create production tables (`GOODGUA_AUTO_CREATE_TABLES=false` in prod)
+- **NEVER** use `*` in `GOODGUA_CORS_ORIGINS` in production
+- **DO NOT** skip reading `docs/db-migration-spec.md` before touching models or schema
+- **DO NOT** create standalone login/register pages for user-facing routes — use `AuthModal`
+- **DO NOT** add features, abstractions, or refactors not requested
+- **DO NOT** edit adjacent code or formatting when making surgical changes
 
-- 只要任务涉及 SQLAlchemy 模型、表结构、列、索引、唯一约束、外键、默认值或需要手写 SQL，必须先阅读 `docs/db-migration-spec.md`，再开始改动。
-- 任何数据库结构变更都必须新增一个迁移 SQL 文件，路径为 `backend/migrations/versions/`。
-- 迁移文件名必须使用 `YYYYMMDDHHMMSS__short_description.sql` 格式，按时间顺序追加，不允许覆盖旧文件。
-- 历史迁移文件一旦提交，禁止修改、禁止重命名、禁止删除；如需进一步调整数据库，必须新增后续迁移文件。
-- 编写新迁移前，至少要阅读最新的相关迁移文件；如当前变更与更早的结构演进有关，还必须继续追溯相关历史迁移文件，并结合当前目标数据库结构一并判断。
-- 模型改动如果会影响数据库结构，模型变更与迁移文件必须在同一个任务或同一个 PR 中一起提交；缺少迁移文件视为任务未完成。
-- 正式环境数据库迁移只能由人工执行，禁止依赖应用启动流程自动修改正式数据库结构。
+## COMMANDS
+
+```bash
+# Backend (from backend/)
+uv run uvicorn app.main:app --reload          # dev server (:8000)
+uv run pytest -v                              # tests (100% branch coverage required)
+uv run ruff check .                           # lint
+
+# Frontend (from frontend/)
+npm run dev                                   # dev server (:3000)
+npm run build                                 # production build
+npm run test                                  # vitest
+npm run e2e                                   # playwright
+npm run lint                                  # eslint
+npm run typecheck                             # tsc --noEmit
+
+# Docker
+docker compose up -d --build                  # full stack
+docker compose logs -f backend                # tail backend logs
+
+# Release
+python scripts/release_preflight.py --env-file .env.production
+```
+
+## NOTES
+
+- Project codename: `goodgua` (internal), `妙蛙写作` (public)
+- Worker container runs `python -m app.worker` — DB init, seeding, APScheduler VIP daily grant
+- `agent_sessions` table managed by manual migrations, not Agno auto-create
+- Coverage threshold: 100% branch coverage on backend
+- `claude.md` contains behavioral coding guidelines (think before coding, simplicity first, surgical changes)
+- `agents1.md` contains the `/init-deep` workflow template

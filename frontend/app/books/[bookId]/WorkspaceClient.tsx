@@ -266,6 +266,13 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     () => chapters.find((chapter) => chapter.id === activeChapterId) ?? chapters[0],
     [activeChapterId, chapters]
   );
+  const currentChapterRef = useMemo(
+    () =>
+      activeChapter
+        ? { type: "chapter" as const, id: activeChapter.id, name: activeChapter.title, summary: activeChapter.summary }
+        : null,
+    [activeChapter]
+  );
 
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
@@ -1961,6 +1968,8 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
             }
             onSubmit={() => void sendMessage()}
             onMentionDrop={insertDroppedMention}
+            workTitle={work?.title || ""}
+            currentChapterRef={currentChapterRef}
           />
         </ResizablePanel>
       </ResizablePanelGroup>

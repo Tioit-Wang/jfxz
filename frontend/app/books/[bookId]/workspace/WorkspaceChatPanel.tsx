@@ -1,7 +1,7 @@
 "use client";
 
-import { AlertCircle, Brain, Clock3, History, MessageSquare, Wand2, X } from "lucide-react";
-import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
+import { AlertCircle, Brain, Clock3, History, MessageSquare, PenLine, Sparkles, Users, Wand2, X } from "lucide-react";
+import { type ReactNode, type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import type {
   AiModelOption,
   ApiSuggestion,
@@ -85,6 +85,8 @@ type WorkspaceChatPanelProps = {
   onRemoveReference: (reference: ChatReference) => void;
   onSubmit: () => void;
   onMentionDrop: (reference: WorkspaceMentionReference) => void;
+  workTitle: string;
+  currentChapterRef: (Pick<ChatReference, "id" | "name" | "summary"> & { type: "chapter" | "character" }) | null;
 };
 
 export function WorkspaceChatPanel({
@@ -128,11 +130,30 @@ export function WorkspaceChatPanel({
   onRemoveReference,
   onSubmit,
   onMentionDrop,
+  workTitle,
+  currentChapterRef,
 }: WorkspaceChatPanelProps) {
   const dragDepthRef = useRef(0);
   const [isDropActive, setIsDropActive] = useState(false);
   const [showThinkingPopup, setShowThinkingPopup] = useState(false);
   const thinkingPopupRef = useRef<HTMLDivElement>(null);
+
+  const PROMPT_SUGGESTIONS = [
+    { icon: PenLine, text: "帮我梳理这一章的情节走向", hint: "头脑风暴" },
+    { icon: Sparkles, text: "按照我的风格续写这一章", hint: "续写章节" },
+    { icon: Users, text: "为这一章中的角色深化人设", hint: "角色塑造" },
+  ];
+
+  const handlePromptClick = useCallback(
+    (promptText: string) => {
+      if (currentChapterRef && chatInputRef.current) {
+        chatInputRef.current.insertMentionWithText(currentChapterRef, promptText);
+      } else {
+        onInputChange(promptText, []);
+      }
+    },
+    [currentChapterRef, chatInputRef, onInputChange]
+  );
 
   useEffect(() => {
     if (!showThinkingPopup) return;
@@ -226,47 +247,78 @@ export function WorkspaceChatPanel({
             ) : null}
             {chatStatus === "loading" ? <p className="text-sm text-muted-foreground">消息加载中...</p> : null}
 
-            {messages.map((message) => (
-              <div key={message.id} className={cn("animate-pop flex w-full gap-3", message.role === "user" ? "justify-end" : "justify-start")}>
-                {message.role === "assistant" ? (
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted text-xs font-bold text-primary">AI</div>
-                ) : null}
-                <div className="max-w-[85%]">
-                  <div
-                    className={cn(
-                      "rounded-2xl border px-4 py-3 text-sm leading-relaxed shadow-sm",
-                      message.role === "user"
-                        ? "rounded-br-sm border-primary bg-primary text-primary-foreground"
-                        : "rounded-tl-sm border-border bg-background text-card-foreground"
-                    )}
-                  >
-                    {renderMessageContent(message)}
-                    {message.role === "assistant" && message.billing_failed ? (
-                      <div className="mt-2 flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-700">
-                        <AlertCircle size={12} className="shrink-0" />
-                        计费异常，请联系管理员
-                      </div>
-                    ) : null}
-                    {message.role === "assistant" && message.error ? (
-                      <div
-                        className={cn(
-                          "mt-2 flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs",
-                          message.error.includes("积分") || message.error.includes("402")
-                            ? "border-amber-200 bg-amber-50 text-amber-700"
-                            : "border-destructive/20 bg-destructive/5 text-destructive"
-                        )}
-                      >
-                        <AlertCircle size={12} className="shrink-0" />
-                        {message.error}
-                      </div>
-                    ) : null}
-                  </div>
+            {messages.length === 0 && chatStatus === "ready" ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/10 to-primary/5 ring-1 ring-primary/10">
+                  <MessageSquare size={28} className="text-primary/60" />
                 </div>
-                {message.role === "user" ? (
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">U</div>
-                ) : null}
+                <h3 className="mb-1 text-xl font-semibold tracking-tight text-foreground">
+                  {workTitle || "开始创作"}
+                </h3>
+                <p className="mb-8 max-w-xs text-sm text-muted-foreground">
+                  当前还没有消息，选择一个方向开始与 AI 协作写作
+                </p>
+                <div className="flex w-full max-w-sm flex-col gap-3">
+                  {PROMPT_SUGGESTIONS.map((prompt) => (
+                    <button
+                      key={prompt.text}
+                      onClick={() => handlePromptClick(prompt.text)}
+                      className="group flex items-center gap-4 rounded-xl border border-border bg-card px-5 py-4 text-left shadow-sm transition-all hover:border-primary/40 hover:bg-primary/[0.02] hover:shadow-md"
+                    >
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/5 text-primary/60 transition-colors group-hover:bg-primary/10 group-hover:text-primary">
+                        <prompt.icon size={18} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-foreground">{prompt.text}</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">{prompt.hint}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
               </div>
-            ))}
+            ) : (
+              messages.map((message) => (
+                <div key={message.id} className={cn("animate-pop flex w-full gap-3", message.role === "user" ? "justify-end" : "justify-start")}>
+                  {message.role === "assistant" ? (
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted text-xs font-bold text-primary">AI</div>
+                  ) : null}
+                  <div className="max-w-[85%]">
+                    <div
+                      className={cn(
+                        "rounded-2xl border px-4 py-3 text-sm leading-relaxed shadow-sm",
+                        message.role === "user"
+                          ? "rounded-br-sm border-primary bg-primary text-primary-foreground"
+                          : "rounded-tl-sm border-border bg-background text-card-foreground"
+                      )}
+                    >
+                      {renderMessageContent(message)}
+                      {message.role === "assistant" && message.billing_failed ? (
+                        <div className="mt-2 flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-700">
+                          <AlertCircle size={12} className="shrink-0" />
+                          计费异常，请联系管理员
+                        </div>
+                      ) : null}
+                      {message.role === "assistant" && message.error ? (
+                        <div
+                          className={cn(
+                            "mt-2 flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs",
+                            message.error.includes("积分") || message.error.includes("402")
+                              ? "border-amber-200 bg-amber-50 text-amber-700"
+                              : "border-destructive/20 bg-destructive/5 text-destructive"
+                          )}
+                        >
+                          <AlertCircle size={12} className="shrink-0" />
+                          {message.error}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                  {message.role === "user" ? (
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">U</div>
+                  ) : null}
+                </div>
+              ))
+            )}
           </div>
 
           <div

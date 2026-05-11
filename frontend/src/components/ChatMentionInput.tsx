@@ -12,6 +12,7 @@ export type ChatMentionInputHandle = {
   clear: () => void;
   focus: () => void;
   insertMention: (reference: Pick<ChatReference, "id" | "name" | "summary"> & { type: "chapter" | "character" }) => void;
+  insertMentionWithText: (reference: Pick<ChatReference, "id" | "name" | "summary"> & { type: "chapter" | "character" }, text: string) => void;
   setText: (value: string) => void;
 };
 
@@ -354,6 +355,17 @@ export const ChatMentionInput = forwardRef<ChatMentionInputHandle, ChatMentionIn
           editor
             .chain()
             .insertContentAt(endPos, mentionContent(reference))
+            .focus("end")
+            .run();
+          setMention({ open: false, query: "", range: null, activeIndex: 0 });
+        },
+        insertMentionWithText(reference, text) {
+          if (!editor) return;
+          isInternalUpdateRef.current = true;
+          const endPos = editor.state.doc.content.size - 1;
+          editor
+            .chain()
+            .insertContentAt(endPos, [...mentionContent(reference), { type: "text", text }])
             .focus("end")
             .run();
           setMention({ open: false, query: "", range: null, activeIndex: 0 });

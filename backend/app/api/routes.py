@@ -2308,8 +2308,19 @@ async def send_chat_message(
                     error_msg = "stream interrupted"
                     logger.warning("chat stream cancelled for chat %s", chat.id)
                 error_messages.append(error_msg)
-                yield encode_sse("error", {"message": error_msg})
 
+                # Persist partial content before yielding — the client may already be gone
+                _assistant_message = await persist_assistant_message()
+                if _assistant_message is not None:
+                    yield encode_sse("done", _assistant_message)
+
+                # Re-raise non-Exception errors so the framework can handle cancellation.
+                # The partial content has already been persisted above, so it won't be lost.
+                if not isinstance(error, Exception):
+                    raise error
+                return
+
+            # Normal completion path (no stream error)
             # Deduct by actual usage only for completed runs.
             if completed_event is not None:
                 completed_content = str(getattr(completed_event, "content", "") or "")
@@ -2357,12 +2368,8 @@ async def send_chat_message(
             assistant_message = await persist_assistant_message()
             if assistant_message is not None:
                 yield encode_sse("done", assistant_message)
-            elif stream_error is None:
+            else:
                 yield encode_sse("done", {})
-
-            # Re-raise non-Exception errors so the framework can handle cancellation
-            if stream_error is not None and not isinstance(stream_error, Exception):
-                raise stream_error
 
     return StreamingResponse(stream_reply(), media_type="text/event-stream")
 

@@ -346,25 +346,27 @@ class GoodguaTools(Toolkit):
 
     async def get_character(self, character_id: str) -> str:
         """获取指定角色的完整信息，包含名称、摘要、详细设定等所有字段。角色不存在时返回 error。与 list_characters 的区别：本工具返回完整 detail 字段，list_characters 只返回概览（仅 id/name/summary），浏览角色列表时优先使用 list_characters。"""
-        result = await self.db.execute(
-            select(Character).where(Character.id == character_id, Character.work_id == self.work_id)
-        )
-        character = result.scalar_one_or_none()
-        if character is None:
-            return json.dumps({"error": "character not found"}, ensure_ascii=False)
-        return json.dumps(_serialize(character), ensure_ascii=False)
+        async with self._db_lock:
+            result = await self.db.execute(
+                select(Character).where(Character.id == character_id, Character.work_id == self.work_id)
+            )
+            character = result.scalar_one_or_none()
+            if character is None:
+                return json.dumps({"error": "character not found"}, ensure_ascii=False)
+            return json.dumps(_serialize(character), ensure_ascii=False)
 
     async def list_characters(self, limit: int = 20) -> str:
         """列出当前作品角色概览，按更新时间倒序排列。默认最多返回 20 条，仅返回 id/name/summary 三个字段，不包含 detail。需查看角色详细设定时使用 get_character。"""
         limit = _normalize_list_limit(limit)
-        result = await self.db.execute(
-            select(Character)
-            .where(Character.work_id == self.work_id)
-            .order_by(Character.updated_at.desc())
-            .limit(limit)
-        )
-        items = [_serialize_lite(c, ["id", "name", "summary"]) for c in result.scalars()]
-        return json.dumps(items, ensure_ascii=False)
+        async with self._db_lock:
+            result = await self.db.execute(
+                select(Character)
+                .where(Character.work_id == self.work_id)
+                .order_by(Character.updated_at.desc())
+                .limit(limit)
+            )
+            items = [_serialize_lite(c, ["id", "name", "summary"]) for c in result.scalars()]
+            return json.dumps(items, ensure_ascii=False)
 
     async def create_or_update_character(
         self, name: str, summary: str, detail: str = "", character_id: str | None = None
@@ -430,26 +432,28 @@ class GoodguaTools(Toolkit):
 
     async def get_setting(self, setting_id: str) -> str:
         """获取指定设定的完整信息，包含名称、类型、摘要、详细设定等所有字段。设定不存在时返回 error。与 list_settings 的区别：本工具返回完整 detail 字段，list_settings 只返回概览（仅 id/type/name/summary），浏览设定列表时优先使用 list_settings。"""
-        result = await self.db.execute(
-            select(SettingItem).where(
-                SettingItem.id == setting_id, SettingItem.work_id == self.work_id
+        async with self._db_lock:
+            result = await self.db.execute(
+                select(SettingItem).where(
+                    SettingItem.id == setting_id, SettingItem.work_id == self.work_id
+                )
             )
-        )
-        setting = result.scalar_one_or_none()
-        if setting is None:
-            return json.dumps({"error": "setting not found"}, ensure_ascii=False)
-        return json.dumps(_serialize(setting), ensure_ascii=False)
+            setting = result.scalar_one_or_none()
+            if setting is None:
+                return json.dumps({"error": "setting not found"}, ensure_ascii=False)
+            return json.dumps(_serialize(setting), ensure_ascii=False)
 
     async def list_settings(self, setting_type: str | None = None, limit: int = 20) -> str:
         """列出当前作品设定概览，可选按 setting_type 过滤。默认最多返回 20 条，仅返回 id/type/name/summary 四个字段，不包含 detail。需查看详细设定时使用 get_setting。"""
         limit = _normalize_list_limit(limit)
-        statement = select(SettingItem).where(SettingItem.work_id == self.work_id)
-        if setting_type:
-            statement = statement.where(SettingItem.type == setting_type)
-        statement = statement.order_by(SettingItem.updated_at.desc()).limit(limit)
-        result = await self.db.execute(statement)
-        items = [_serialize_lite(s, ["id", "type", "name", "summary"]) for s in result.scalars()]
-        return json.dumps(items, ensure_ascii=False)
+        async with self._db_lock:
+            statement = select(SettingItem).where(SettingItem.work_id == self.work_id)
+            if setting_type:
+                statement = statement.where(SettingItem.type == setting_type)
+            statement = statement.order_by(SettingItem.updated_at.desc()).limit(limit)
+            result = await self.db.execute(statement)
+            items = [_serialize_lite(s, ["id", "type", "name", "summary"]) for s in result.scalars()]
+            return json.dumps(items, ensure_ascii=False)
 
     async def create_or_update_setting(
         self,
@@ -527,15 +531,16 @@ class GoodguaTools(Toolkit):
     async def list_volumes(self, limit: int = 20) -> str:
         """列出当前作品卷概览，按卷顺序排列。默认最多返回 20 条，返回 id/order_index/title。创建章节时如需指定所属卷，先用本工具确认 volume_id。"""
         limit = _normalize_list_limit(limit)
-        await _ensure_default_volume(self.db, self.work_id)
-        result = await self.db.execute(
-            select(Volume)
-            .where(Volume.work_id == self.work_id)
-            .order_by(Volume.order_index)
-            .limit(limit)
-        )
-        items = [_serialize_lite(v, ["id", "order_index", "title"]) for v in result.scalars()]
-        return json.dumps(items, ensure_ascii=False)
+        async with self._db_lock:
+            await _ensure_default_volume(self.db, self.work_id)
+            result = await self.db.execute(
+                select(Volume)
+                .where(Volume.work_id == self.work_id)
+                .order_by(Volume.order_index)
+                .limit(limit)
+            )
+            items = [_serialize_lite(v, ["id", "order_index", "title"]) for v in result.scalars()]
+            return json.dumps(items, ensure_ascii=False)
 
     async def create_volume(self, title: str) -> str:
         """创建新卷，自动追加到最后一卷之后。title 为必填卷名。创建成功后返回 id/order_index/title/时间戳。"""
@@ -590,23 +595,25 @@ class GoodguaTools(Toolkit):
 
     async def get_chapter(self, chapter_id: str) -> str:
         """获取指定章节的完整信息，包含正文全文（content 字段）。章节不存在时返回 error。数据量较大，仅在需要阅读或参考正文时调用。与 list_chapters 的区别：本工具返回正文全文，list_chapters 只返回目录概览（不含 content），浏览章节结构时优先使用 list_chapters。"""
-        result = await self.db.execute(
-            select(Chapter).where(Chapter.id == chapter_id, Chapter.work_id == self.work_id)
-        )
-        chapter = result.scalar_one_or_none()
-        if chapter is None:
-            return json.dumps({"error": "chapter not found"}, ensure_ascii=False)
-        return json.dumps(_serialize(chapter), ensure_ascii=False)
+        async with self._db_lock:
+            result = await self.db.execute(
+                select(Chapter).where(Chapter.id == chapter_id, Chapter.work_id == self.work_id)
+            )
+            chapter = result.scalar_one_or_none()
+            if chapter is None:
+                return json.dumps({"error": "chapter not found"}, ensure_ascii=False)
+            return json.dumps(_serialize(chapter), ensure_ascii=False)
 
     async def list_chapters(self, limit: int = 20) -> str:
         """列出当前作品章节目录概览，按章节顺序排列。默认最多返回 20 条，仅返回 id/volume_id/order_index/title/summary，不包含正文（content）。需查看正文内容时使用 get_chapter。"""
         limit = _normalize_list_limit(limit)
-        await _ensure_default_volume(self.db, self.work_id)
-        result = await self.db.execute(ordered_chapters_statement(self.work_id).limit(limit))
-        items = [
-            _serialize_lite(c, ["id", "volume_id", "order_index", "title", "summary"]) for c in result.scalars()
-        ]
-        return json.dumps(items, ensure_ascii=False)
+        async with self._db_lock:
+            await _ensure_default_volume(self.db, self.work_id)
+            result = await self.db.execute(ordered_chapters_statement(self.work_id).limit(limit))
+            items = [
+                _serialize_lite(c, ["id", "volume_id", "order_index", "title", "summary"]) for c in result.scalars()
+            ]
+            return json.dumps(items, ensure_ascii=False)
 
     async def create_chapter(
         self, title: str, summary: str = "", volume_id: str | None = None
@@ -705,11 +712,12 @@ class GoodguaTools(Toolkit):
 
     async def get_work_info(self) -> str:
         """获取当前作品的完整信息，包含标题、简介、类型标签、背景规则、梗概、创作重点、禁忌要求等全部字段。数据量较大，仅在需要确认整体设定或查询多个作品级字段时调用。"""
-        result = await self.db.execute(select(Work).where(Work.id == self.work_id))
-        work = result.scalar_one_or_none()
-        if work is None:
-            return json.dumps({"error": "work not found"}, ensure_ascii=False)
-        return json.dumps(_serialize(work), ensure_ascii=False)
+        async with self._db_lock:
+            result = await self.db.execute(select(Work).where(Work.id == self.work_id))
+            work = result.scalar_one_or_none()
+            if work is None:
+                return json.dumps({"error": "work not found"}, ensure_ascii=False)
+            return json.dumps(_serialize(work), ensure_ascii=False)
 
     async def update_work_info(self, field: str, content: str) -> str:
         """更新当前作品的基本信息字段。field 可选值：short_intro / synopsis / background_rules / focus_requirements / forbidden_requirements。content 覆盖原有内容（非追加）。传入无效 field 会返回 error 和可选值列表。"""

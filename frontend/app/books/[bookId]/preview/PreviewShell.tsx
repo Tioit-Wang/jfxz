@@ -19,7 +19,7 @@ const FONT_PRESETS = [
 
 const FONT_MIN = 12;
 const FONT_MAX = 28;
-const CHAPTER_BATCH = 5;
+const CHAPTER_BATCH = 1;
 
 export default function PreviewShell({ bookId }: { bookId: string }) {
   const router = useRouter();
@@ -41,6 +41,8 @@ export default function PreviewShell({ bookId }: { bookId: string }) {
   const loadedIdsRef = useRef<Set<string>>(new Set());
   const jumpTargetRef = useRef<string | null>(null);
   const loadingRef = useRef(false);
+  const reachedStartRef = useRef(false);
+  const reachedEndRef = useRef(false);
 
   const client = useMemo(
     () =>
@@ -53,25 +55,37 @@ export default function PreviewShell({ bookId }: { bookId: string }) {
   const loadChapters = useCallback(
     async (around: string | undefined, direction: LoadDirection | "jump") => {
       if (loadingRef.current) return;
+      if (direction === "up" && reachedStartRef.current) return;
+      if (direction === "down" && reachedEndRef.current) return;
       loadingRef.current = true;
       if (direction !== "jump") setLoadingMore(direction);
 
       try {
-        const result = await client.previewChapters(bookId, around, CHAPTER_BATCH);
+        const apiDir = direction === "down" ? "after" : direction === "up" ? "before" : undefined;
+        const result = await client.previewChapters(bookId, around, CHAPTER_BATCH, apiDir);
 
         setChapters((prev) => {
           const existing = new Map(prev.map((c) => [c.id, c]));
           const incoming = result.chapters.filter((c) => !existing.has(c.id));
 
+          if (direction === "jump") return result.chapters;
+          if (incoming.length === 0) {
+            if (direction === "up") reachedStartRef.current = true;
+            if (direction === "down") reachedEndRef.current = true;
+            return prev;
+          }
           if (direction === "down") return [...prev, ...incoming];
-          if (direction === "up") return [...incoming, ...prev];
-          return result.chapters;
+          return [...incoming, ...prev];
         });
 
         setTotal(result.total);
         if (direction === "jump") jumpTargetRef.current = around || null;
 
         for (const ch of result.chapters) loadedIdsRef.current.add(ch.id);
+        if (direction === "jump" && result.chapters.length >= result.total) {
+          reachedStartRef.current = true;
+          reachedEndRef.current = true;
+        }
         setError(null);
       } catch (err: unknown) {
         if (err && typeof err === "object" && "status" in err && (err as { status: number }).status === 401) return;
@@ -131,18 +145,18 @@ export default function PreviewShell({ bookId }: { bookId: string }) {
           if (!entry.isIntersecting) continue;
           if (entry.target === topSentinelRef.current) {
             const firstId = chapters[0]?.id;
-            if (firstId && !loadingRef.current) {
+            if (firstId && !loadingRef.current && !reachedStartRef.current) {
               loadChapters(firstId, "up");
             }
           } else if (entry.target === bottomSentinelRef.current) {
             const lastId = chapters[chapters.length - 1]?.id;
-            if (lastId && !loadingRef.current) {
+            if (lastId && !loadingRef.current && !reachedEndRef.current) {
               loadChapters(lastId, "down");
             }
           }
         }
       },
-      { root: container, rootMargin: "200px", threshold: 0 }
+      { root: container, rootMargin: "800px", threshold: 0 }
     );
 
     if (topSentinelRef.current) observer.observe(topSentinelRef.current);

@@ -1483,14 +1483,19 @@ async def list_chapters(
 async def preview_chapters(
     work_id: str,
     around: str | None = None,
+    direction: str | None = None,
     limit: Annotated[int, Query(ge=1, le=20)] = 5,
     user: User = Depends(current_user),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """Return chapters with full content for the preview page.
 
-    When `around` is provided, returns chapters centered around the target chapter,
-    with floor(limit/2) chapters before and after. When omitted, returns the first N chapters.
+    When `direction` is provided with `around`:
+      - "after": returns limit chapters AFTER the target (cursor-forward).
+      - "before": returns limit chapters BEFORE the target (cursor-backward).
+    Otherwise, the legacy centered behavior applies: chapters are centered around
+    the target with floor(limit/2) chapters before and after.
+    When both `around` and `direction` are omitted, returns the first N chapters.
     Only the work author can access this endpoint.
     """
     work = await owned_work(session, user.id, work_id)
@@ -1531,11 +1536,15 @@ async def preview_chapters(
                     break
                 before_count += 1
 
-        start_idx = max(0, before_count - half)
-        # Load from start_idx, limit entries
+        if direction == "after":
+            start_idx = before_count + 1
+        elif direction == "before":
+            start_idx = max(0, before_count - limit)
+        else:
+            start_idx = max(0, before_count - half)
         all_ordered = (await session.execute(ordered_chapters_statement(work_id))).scalars().all()
         page = all_ordered[start_idx:start_idx + limit]
-        around_index = before_count - start_idx
+        around_index = before_count - start_idx if direction not in ("after", "before") else None
     else:
         all_ordered = (await session.execute(ordered_chapters_statement(work_id))).scalars().all()
         page = all_ordered[:limit]
@@ -3530,10 +3539,17 @@ async def public_work_info(
 async def public_preview_chapters(
     share_token: str,
     around: str | None = None,
+    direction: str | None = None,
     limit: Annotated[int, Query(ge=1, le=20)] = 5,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """Public preview: no auth required. Returns chapters if sharing is enabled."""
+    """Public preview: no auth required. Returns chapters if sharing is enabled.
+
+    When `direction` is provided with `around`:
+      - "after": returns limit chapters AFTER the target (cursor-forward).
+      - "before": returns limit chapters BEFORE the target (cursor-backward).
+    Otherwise, the legacy centered behavior applies.
+    """
     work_result = await session.execute(
         select(Work).where(Work.share_token == share_token, Work.share_enabled == True)
     )
@@ -3580,10 +3596,15 @@ async def public_preview_chapters(
                     break
                 before_count += 1
 
-        start_idx = max(0, before_count - half)
+        if direction == "after":
+            start_idx = before_count + 1
+        elif direction == "before":
+            start_idx = max(0, before_count - limit)
+        else:
+            start_idx = max(0, before_count - half)
         all_ordered = (await session.execute(ordered_chapters_statement(work_id))).scalars().all()
         page = all_ordered[start_idx:start_idx + limit]
-        around_index = before_count - start_idx
+        around_index = before_count - start_idx if direction not in ("after", "before") else None
     else:
         all_ordered = (await session.execute(ordered_chapters_statement(work_id))).scalars().all()
         page = all_ordered[:limit]

@@ -955,9 +955,10 @@ export class ApiClient {
     return data.map(mapChapter);
   }
 
-  async previewChapters(workId: string, around?: string, limit = 5): Promise<{ chapters: Chapter[]; total: number; aroundIndex: number | null }> {
+  async previewChapters(workId: string, around?: string, limit = 5, direction?: "after" | "before"): Promise<{ chapters: Chapter[]; total: number; aroundIndex: number | null }> {
     const params = new URLSearchParams({ limit: String(limit) });
     if (around) params.set("around", around);
+    if (direction) params.set("direction", direction);
     const data = await this.request<{ chapters: ApiChapter[]; total: number; around_index: number | null }>(
       `/works/${workId}/preview?${params}`
     );
@@ -983,9 +984,11 @@ export class ApiClient {
     shareToken: string,
     around?: string,
     limit = 5,
+    direction?: "after" | "before",
   ): Promise<{ work: { title: string; shortIntro: string }; chapters: Chapter[]; total: number; aroundIndex: number | null }> {
     const params = new URLSearchParams({ limit: String(limit) });
     if (around) params.set("around", around);
+    if (direction) params.set("direction", direction);
     const data = await this.request<{
       work: { title: string; short_intro: string };
       chapters: ApiChapter[];

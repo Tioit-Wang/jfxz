@@ -16,7 +16,7 @@ const FONT_PRESETS = [
 
 const FONT_MIN = 12;
 const FONT_MAX = 28;
-const CHAPTER_BATCH = 5;
+const CHAPTER_BATCH = 1;
 
 export default function PublicPreviewShell({ shareToken }: { shareToken: string }) {
   const [mode, setMode] = useState<"pc" | "mobile">("pc");
@@ -47,7 +47,8 @@ export default function PublicPreviewShell({ shareToken }: { shareToken: string 
       if (direction !== "jump") setLoadingMore(direction);
 
       try {
-        const result = await client.publicPreviewChapters(shareToken, around, CHAPTER_BATCH);
+        const apiDir = direction === "down" ? "after" : direction === "up" ? "before" : undefined;
+        const result = await client.publicPreviewChapters(shareToken, around, CHAPTER_BATCH, apiDir);
 
         setWorkTitle(result.work.title);
 
@@ -116,7 +117,7 @@ export default function PublicPreviewShell({ shareToken }: { shareToken: string 
           }
         }
       },
-      { root: container, rootMargin: "1000px", threshold: 0 }
+      { root: container, rootMargin: "1500px", threshold: 0 }
     );
 
     if (topSentinelRef.current) observer.observe(topSentinelRef.current);

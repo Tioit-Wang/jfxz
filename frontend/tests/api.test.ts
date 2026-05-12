@@ -271,6 +271,8 @@ describe("api client", () => {
         backgroundRules: "规则",
         focusRequirements: "",
         forbiddenRequirements: "",
+        shareEnabled: false,
+        shareToken: null,
         updatedAt: ""
       })
     ).resolves.toMatchObject({ title: "作品改", backgroundRules: "规则" });

@@ -7,6 +7,8 @@ export type Work = {
   focusRequirements: string;
   forbiddenRequirements: string;
   tags: string[];
+  shareEnabled: boolean;
+  shareToken: string | null;
   updatedAt: string;
 };
 
@@ -46,6 +48,8 @@ export const works: Work[] = [
     focusRequirements: "强调潮湿、账本和灯塔的压迫感。",
     forbiddenRequirements: "避免突然转成轻松冒险喜剧。",
     tags: ["奇幻", "群像"],
+    shareEnabled: false,
+    shareToken: null,
     updatedAt: ""
   },
   {
@@ -57,6 +61,8 @@ export const works: Work[] = [
     focusRequirements: "保持书信体带来的距离与延迟。",
     forbiddenRequirements: "避免万能通讯设备破坏核心设定。",
     tags: ["科幻", "冒险"],
+    shareEnabled: false,
+    shareToken: null,
     updatedAt: ""
   }
 ];

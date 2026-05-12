@@ -35,6 +35,7 @@ type WorkspaceEditorPanelProps = {
   onOpenSummaryModal: () => void;
   onDeleteChapter: () => void;
   onPreview: () => void;
+  onOpenShare: () => void;
   onOpenEditorSettings: () => void;
   onOpenAccount: () => void;
   onAnalyze: () => void;
@@ -65,6 +66,7 @@ export function WorkspaceEditorPanel({
   onOpenSummaryModal,
   onDeleteChapter,
   onPreview,
+  onOpenShare,
   onOpenEditorSettings,
   onOpenAccount,
   onAnalyze,
@@ -81,9 +83,9 @@ export function WorkspaceEditorPanel({
         <div className="flex items-center gap-4">
           <button
             className="rounded p-1.5 text-gray-400 transition-colors hover:bg-accent hover:text-accent-foreground"
-            onClick={onPreview}
-            aria-label="预览章节"
-            title="预览章节"
+            onClick={onOpenShare}
+            aria-label="分享与预览"
+            title="分享与预览"
           >
             <Eye size={16} />
           </button>

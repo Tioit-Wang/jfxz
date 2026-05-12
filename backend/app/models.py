@@ -76,6 +76,9 @@ class Work(Base, TimestampMixin):
     focus_requirements: Mapped[str | None] = mapped_column(Text)
     forbidden_requirements: Mapped[str | None] = mapped_column(Text)
 
+    share_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    share_token: Mapped[str | None] = mapped_column(String(36), unique=True, index=True)
+
     volumes: Mapped[list["Volume"]] = relationship(cascade="all, delete-orphan")
     chapters: Mapped[list["Chapter"]] = relationship(cascade="all, delete-orphan")
     inspiration_notes: Mapped[list["InspirationNote"]] = relationship(cascade="all, delete-orphan")

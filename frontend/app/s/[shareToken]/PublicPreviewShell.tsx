@@ -1,14 +1,11 @@
 "use client";
 
-import { ArrowLeft, BookOpen, Monitor, Smartphone, Type } from "lucide-react";
-import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { BookOpen, Monitor, Smartphone, Type } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiClient } from "@/api";
 import type { Chapter } from "@/domain";
-import { userLoginPath } from "@/auth";
 import { cn } from "@/lib/utils";
-import { ChapterListView, type LoadDirection } from "./ChapterListView";
+import { ChapterListView, type LoadDirection } from "../../books/[bookId]/preview/ChapterListView";
 
 const FONT_PRESETS = [
   { label: "小", value: 14 },
@@ -21,11 +18,7 @@ const FONT_MIN = 12;
 const FONT_MAX = 28;
 const CHAPTER_BATCH = 5;
 
-export default function PreviewShell({ bookId }: { bookId: string }) {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const initialChapterId = searchParams.get("chapterId");
-
+export default function PublicPreviewShell({ shareToken }: { shareToken: string }) {
   const [mode, setMode] = useState<"pc" | "mobile">("pc");
   const [fontSize, setFontSize] = useState(() => mode === "mobile" ? 14 : 18);
   const [chapters, setChapters] = useState<Chapter[]>([]);
@@ -39,16 +32,9 @@ export default function PreviewShell({ bookId }: { bookId: string }) {
   const topSentinelRef = useRef<HTMLDivElement>(null);
   const bottomSentinelRef = useRef<HTMLDivElement>(null);
   const loadedIdsRef = useRef<Set<string>>(new Set());
-  const jumpTargetRef = useRef<string | null>(null);
   const loadingRef = useRef(false);
 
-  const client = useMemo(
-    () =>
-      new ApiClient(undefined, undefined, {
-        onUnauthorized: () => router.replace(userLoginPath(`/books/${bookId}/preview`)),
-      }),
-    [router, bookId]
-  );
+  const client = useMemo(() => new ApiClient(), []);
 
   const loadChapters = useCallback(
     async (around: string | undefined, direction: LoadDirection | "jump") => {
@@ -57,7 +43,9 @@ export default function PreviewShell({ bookId }: { bookId: string }) {
       if (direction !== "jump") setLoadingMore(direction);
 
       try {
-        const result = await client.previewChapters(bookId, around, CHAPTER_BATCH);
+        const result = await client.publicPreviewChapters(shareToken, around, CHAPTER_BATCH);
+
+        setWorkTitle(result.work.title);
 
         setChapters((prev) => {
           const existing = new Map(prev.map((c) => [c.id, c]));
@@ -69,55 +57,28 @@ export default function PreviewShell({ bookId }: { bookId: string }) {
         });
 
         setTotal(result.total);
-        if (direction === "jump") jumpTargetRef.current = around || null;
-
         for (const ch of result.chapters) loadedIdsRef.current.add(ch.id);
         setError(null);
-      } catch (err: unknown) {
-        if (err && typeof err === "object" && "status" in err && (err as { status: number }).status === 401) return;
-        setError("加载预览数据失败，请检查网络后重试");
+      } catch {
+        setError("内容不可用或分享已关闭");
       } finally {
         loadingRef.current = false;
         setLoadingMore(null);
         if (direction === "jump") setLoading(false);
       }
     },
-    [client, bookId]
+    [client, shareToken]
   );
 
-  // Bootstrap: load work info + initial chapters
   useEffect(() => {
     let cancelled = false;
     async function init() {
-      try {
-        const bootstrap = await client.getWorkspaceBootstrap(bookId, 1, 0);
-        if (cancelled) return;
-        setWorkTitle(bootstrap.work.title);
-        await loadChapters(initialChapterId ?? undefined, "jump");
-      } catch (err: unknown) {
-        if (cancelled) return;
-        if (err && typeof err === "object" && "status" in err && (err as { status: number }).status === 401) return;
-        setError("加载失败，请重试");
-        setLoading(false);
-      }
+      if (cancelled) return;
+      await loadChapters(undefined, "jump");
     }
     init();
     return () => { cancelled = true; };
-  }, [bookId, initialChapterId, client, loadChapters]);
-
-  // Scroll to jump target after chapters load
-  useEffect(() => {
-    if (loading || !jumpTargetRef.current) return;
-    const targetId = jumpTargetRef.current;
-    jumpTargetRef.current = null;
-    requestAnimationFrame(() => {
-      const el = document.getElementById(`ch-${targetId}`);
-      if (el) {
-        el.scrollIntoView({ behavior: "instant", block: "start" });
-        window.scrollBy(0, -80);
-      }
-    });
-  }, [loading, chapters]);
+  }, [shareToken, loadChapters]);
 
   // IntersectionObserver for scroll preloading
   useEffect(() => {
@@ -168,16 +129,13 @@ export default function PreviewShell({ bookId }: { bookId: string }) {
       {/* Toolbar */}
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-neutral-200 bg-white/90 px-4 backdrop-blur">
         <div className="flex items-center gap-3">
-          <Link
-            href={`/books/${bookId}`}
-            className="flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
-            title="返回编辑"
-          >
-            <ArrowLeft size={16} />
-            <span className="hidden sm:inline">返回</span>
-          </Link>
-          <span className="hidden truncate text-sm font-medium text-neutral-400 sm:inline">|</span>
-          {workTitle ? <span className="truncate text-sm text-neutral-500">{workTitle}</span> : null}
+          <span className="text-sm font-bold tracking-tight text-neutral-700">妙蛙写作</span>
+          {workTitle ? (
+            <>
+              <span className="text-sm text-neutral-400">|</span>
+              <span className="truncate text-sm text-neutral-500">{workTitle}</span>
+            </>
+          ) : null}
         </div>
 
         <div className="flex items-center gap-3">
@@ -260,24 +218,15 @@ export default function PreviewShell({ bookId }: { bookId: string }) {
         <div className="flex flex-1 items-center justify-center">
           <div className="text-center">
             <BookOpen size={48} className="mx-auto mb-4 text-neutral-300" />
-            <p className="mb-3 text-neutral-500">{error}</p>
-            <button
-              className="rounded-full bg-neutral-800 px-5 py-2 text-sm text-white transition-colors hover:bg-neutral-700"
-              onClick={() => {
-                setError(null);
-                setLoading(true);
-                loadChapters(initialChapterId ?? undefined, "jump");
-              }}
-            >
-              重试
-            </button>
+            <p className="mb-2 text-neutral-500">{error}</p>
+            <p className="text-xs text-neutral-400">请确认链接是否正确，或联系作者确认分享状态</p>
           </div>
         </div>
       ) : loading ? (
         <div className="flex flex-1 items-center justify-center">
           <div className="flex flex-col items-center gap-3">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-700" />
-            <p className="text-sm text-neutral-400">加载预览...</p>
+            <p className="text-sm text-neutral-400">加载中...</p>
           </div>
         </div>
       ) : chapters.length === 0 ? (
@@ -285,7 +234,6 @@ export default function PreviewShell({ bookId }: { bookId: string }) {
           <div className="text-center">
             <BookOpen size={48} className="mx-auto mb-4 text-neutral-300" />
             <p className="text-neutral-500">暂无章节内容</p>
-            <p className="mt-1 text-xs text-neutral-400">请先在编辑器中创建章节</p>
           </div>
         </div>
       ) : (
@@ -294,10 +242,8 @@ export default function PreviewShell({ bookId }: { bookId: string }) {
           className={cn("flex-1 overflow-y-auto", isMobile && "flex items-start justify-center py-8")}
         >
           <div className={cn(isMobile ? "relative" : "mx-auto max-w-[800px] px-6 py-8")}>
-            {/* iPhone 15 Pro frame — mobile mode */}
             {isMobile && (
               <div className="relative mx-auto overflow-hidden rounded-[44px] border-[6px] border-neutral-800 bg-white shadow-2xl" style={{ width: 393, minHeight: 852 }}>
-                {/* Dynamic Island */}
                 <div className="absolute left-1/2 top-1.5 z-20 h-[26px] w-[100px] -translate-x-1/2 rounded-full bg-neutral-800" />
                 <div className="h-full overflow-y-auto px-5 pb-10 pt-12" style={{ maxHeight: 852 }}>
                   <ChapterListView
@@ -313,7 +259,6 @@ export default function PreviewShell({ bookId }: { bookId: string }) {
               </div>
             )}
 
-            {/* PC mode */}
             {!isMobile && (
               <ChapterListView
                 chapters={chapters}

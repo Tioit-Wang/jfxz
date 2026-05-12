@@ -33,12 +33,16 @@ export default function PublicPreviewShell({ shareToken }: { shareToken: string 
   const bottomSentinelRef = useRef<HTMLDivElement>(null);
   const loadedIdsRef = useRef<Set<string>>(new Set());
   const loadingRef = useRef(false);
+  const reachedStartRef = useRef(false);
+  const reachedEndRef = useRef(false);
 
   const client = useMemo(() => new ApiClient(), []);
 
   const loadChapters = useCallback(
     async (around: string | undefined, direction: LoadDirection | "jump") => {
       if (loadingRef.current) return;
+      if (direction === "up" && reachedStartRef.current) return;
+      if (direction === "down" && reachedEndRef.current) return;
       loadingRef.current = true;
       if (direction !== "jump") setLoadingMore(direction);
 
@@ -51,13 +55,22 @@ export default function PublicPreviewShell({ shareToken }: { shareToken: string 
           const existing = new Map(prev.map((c) => [c.id, c]));
           const incoming = result.chapters.filter((c) => !existing.has(c.id));
 
+          if (direction === "jump") return result.chapters;
+          if (incoming.length === 0) {
+            if (direction === "up") reachedStartRef.current = true;
+            if (direction === "down") reachedEndRef.current = true;
+            return prev;
+          }
           if (direction === "down") return [...prev, ...incoming];
-          if (direction === "up") return [...incoming, ...prev];
-          return result.chapters;
+          return [...incoming, ...prev];
         });
 
         setTotal(result.total);
         for (const ch of result.chapters) loadedIdsRef.current.add(ch.id);
+        if (direction === "jump" && result.chapters.length >= result.total) {
+          reachedStartRef.current = true;
+          reachedEndRef.current = true;
+        }
         setError(null);
       } catch {
         setError("内容不可用或分享已关闭");
@@ -92,18 +105,18 @@ export default function PublicPreviewShell({ shareToken }: { shareToken: string 
           if (!entry.isIntersecting) continue;
           if (entry.target === topSentinelRef.current) {
             const firstId = chapters[0]?.id;
-            if (firstId && !loadingRef.current) {
+            if (firstId && !loadingRef.current && !reachedStartRef.current) {
               loadChapters(firstId, "up");
             }
           } else if (entry.target === bottomSentinelRef.current) {
             const lastId = chapters[chapters.length - 1]?.id;
-            if (lastId && !loadingRef.current) {
+            if (lastId && !loadingRef.current && !reachedEndRef.current) {
               loadChapters(lastId, "down");
             }
           }
         }
       },
-      { root: container, rootMargin: "200px", threshold: 0 }
+      { root: container, rootMargin: "1000px", threshold: 0 }
     );
 
     if (topSentinelRef.current) observer.observe(topSentinelRef.current);

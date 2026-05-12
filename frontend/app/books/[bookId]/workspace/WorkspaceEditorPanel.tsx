@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, Edit3, Loader2, RefreshCw, Settings, Trash2, UserCircle, Wand2, type LucideIcon } from "lucide-react";
+import { AlertCircle, Edit3, Eye, Loader2, RefreshCw, Settings, Trash2, UserCircle, Wand2, type LucideIcon } from "lucide-react";
 import type { ApiSuggestion } from "@/api";
 import { ChapterPlainTextEditor } from "@/components/ChapterPlainTextEditor";
 import { cn } from "@/lib/utils";
@@ -34,6 +34,7 @@ type WorkspaceEditorPanelProps = {
   onTitleChange: (value: string) => void;
   onOpenSummaryModal: () => void;
   onDeleteChapter: () => void;
+  onPreview: () => void;
   onOpenEditorSettings: () => void;
   onOpenAccount: () => void;
   onAnalyze: () => void;
@@ -63,6 +64,7 @@ export function WorkspaceEditorPanel({
   onTitleChange,
   onOpenSummaryModal,
   onDeleteChapter,
+  onPreview,
   onOpenEditorSettings,
   onOpenAccount,
   onAnalyze,
@@ -77,6 +79,14 @@ export function WorkspaceEditorPanel({
     <main data-testid="workspace-editor-panel" className="relative z-0 flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-white">
       <div className="z-10 flex h-14 shrink-0 items-center justify-between border-b border-border bg-white px-6">
         <div className="flex items-center gap-4">
+          <button
+            className="rounded p-1.5 text-gray-400 transition-colors hover:bg-accent hover:text-accent-foreground"
+            onClick={onPreview}
+            aria-label="预览章节"
+            title="预览章节"
+          >
+            <Eye size={16} />
+          </button>
           <button
             className="rounded p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600"
             onClick={onDeleteChapter}

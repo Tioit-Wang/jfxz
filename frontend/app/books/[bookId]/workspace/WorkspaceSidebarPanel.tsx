@@ -186,7 +186,7 @@ export function WorkspaceSidebarPanel({
       </section>
 
       <div className="flex min-h-0 flex-1 flex-col">
-        <section className="flex min-h-0 flex-1 flex-col border-b border-neutral-200">
+        <section className="flex min-h-0 flex-[2] flex-col border-b border-neutral-200">
           <div className="shrink-0 px-3 pt-3">
             <div className="grid grid-cols-3 border-b border-neutral-200">
               {[

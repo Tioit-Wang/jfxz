@@ -95,6 +95,7 @@ from app.api.routes import (
     list_volumes,
     list_works,
     login_email,
+    preview_chapters,
     message_page,
     must_get,
     normalized_run,
@@ -447,6 +448,92 @@ async def test_workspace_bootstrap_and_list_chapters_follow_volume_order(session
     assert [item["title"] for item in bundle["volumes"]] == ["第一卷", "第二卷"]
     assert [item["title"] for item in bundle["chapters"]] == ["第一卷第一章", "第二卷第一章"]
     assert [item["title"] for item in chapters] == ["第一卷第一章", "第二卷第一章"]
+
+
+async def test_preview_chapters_around_target(session: AsyncSession) -> None:
+    """Preview endpoint returns chapters with full content centered around a target chapter."""
+    user = await create_user_account(session, "preview@example.com", "user12345", "Preview")
+    work = Work(user_id=user.id, title="预览测试作品")
+    session.add(work)
+    await session.flush()
+
+    # Create 10 chapters across 2 volumes
+    session.add_all([
+        Volume(id="pv-vol1", work_id=work.id, order_index=1, title="第一卷"),
+        Volume(id="pv-vol2", work_id=work.id, order_index=2, title="第二卷"),
+    ])
+    chapters_data = []
+    for i in range(1, 6):
+        chapters_data.append(Chapter(
+            work_id=work.id, volume_id="pv-vol1", order_index=i,
+            title=f"第{i}章", content=f"第一卷第{i}章正文内容", summary=f"摘要{i}",
+        ))
+    for i in range(6, 11):
+        chapters_data.append(Chapter(
+            work_id=work.id, volume_id="pv-vol2", order_index=i - 5,
+            title=f"第{i}章", content=f"第二卷第{i}章正文内容", summary=f"摘要{i}",
+        ))
+    session.add_all(chapters_data)
+    await session.commit()
+
+    # Center around chapter 5, limit 5 → should get chapters 3,4,5,6,7
+    target = chapters_data[4]  # chapter 5 (index 4)
+    result = await preview_chapters(work.id, around=target.id, limit=5, user=user, session=session)
+    assert len(result["chapters"]) == 5
+    assert result["total"] == 10
+    assert result["around_index"] == 2  # chapter 5 is at index 2 in the returned 5
+    assert [ch["title"] for ch in result["chapters"]] == ["第3章", "第4章", "第5章", "第6章", "第7章"]
+    # Verify content is included
+    for ch in result["chapters"]:
+        assert "content" in ch
+        assert ch["content"]
+
+
+async def test_preview_chapters_no_around_returns_first_n(session: AsyncSession) -> None:
+    """Without around parameter, preview returns the first N chapters."""
+    user = await create_user_account(session, "preview2@example.com", "user12345", "Preview2")
+    work = Work(user_id=user.id, title="预览测试2")
+    session.add(work)
+    await session.flush()
+    session.add_all([
+        Chapter(work_id=work.id, order_index=i, title=f"章{i}", content=f"内容{i}", summary="")
+        for i in range(1, 8)
+    ])
+    await session.commit()
+
+    result = await preview_chapters(work.id, around=None, limit=3, user=user, session=session)
+    assert len(result["chapters"]) == 3
+    assert result["total"] == 7
+    assert result["around_index"] is None
+    assert [ch["title"] for ch in result["chapters"]] == ["章1", "章2", "章3"]
+
+
+async def test_preview_chapters_rejects_non_author(session: AsyncSession) -> None:
+    """Preview endpoint returns 404 for non-author users."""
+    owner = await create_user_account(session, "preview-owner@example.com", "user12345", "Owner")
+    other = await create_user_account(session, "preview-other@example.com", "user12345", "Other")
+    work = Work(user_id=owner.id, title="别人的作品")
+    session.add(work)
+    await session.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        await preview_chapters(work.id, user=other, session=session)
+    assert exc.value.status_code == 404
+
+
+async def test_preview_chapters_target_not_found_falls_back(session: AsyncSession) -> None:
+    """When around target doesn't exist, preview falls back to first N chapters."""
+    user = await create_user_account(session, "preview3@example.com", "user12345", "Preview3")
+    work = Work(user_id=user.id, title="预览测试3")
+    session.add(work)
+    await session.flush()
+    session.add(Chapter(work_id=work.id, order_index=1, title="唯一章", content="内容", summary=""))
+    await session.commit()
+
+    result = await preview_chapters(work.id, around="nonexistent-id", limit=5, user=user, session=session)
+    assert len(result["chapters"]) == 1
+    assert result["total"] == 1
+    assert result["chapters"][0]["title"] == "唯一章"
 
 
 async def test_inspiration_goal_routes_and_daily_progress(session: AsyncSession) -> None:

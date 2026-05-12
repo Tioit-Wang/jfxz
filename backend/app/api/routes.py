@@ -1450,6 +1450,75 @@ async def list_chapters(
     return [public(item) for item in result.scalars()]
 
 
+@router.get("/works/{work_id}/preview")
+async def preview_chapters(
+    work_id: str,
+    around: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=20)] = 5,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Return chapters with full content for the preview page.
+
+    When `around` is provided, returns chapters centered around the target chapter,
+    with floor(limit/2) chapters before and after. When omitted, returns the first N chapters.
+    Only the work author can access this endpoint.
+    """
+    work = await owned_work(session, user.id, work_id)
+    await ensure_default_volume(session, work_id)
+    total = (await session.execute(
+        select(func.count(Chapter.id)).where(Chapter.work_id == work_id)
+    )).scalar() or 0
+
+    half = limit // 2
+    if around:
+        target = await session.execute(
+            select(Chapter).where(Chapter.id == around, Chapter.work_id == work_id)
+        )
+        target_chapter = target.scalar_one_or_none()
+        if target_chapter is None:
+            # Fallback: load from the beginning
+            around = None
+
+    if around and target_chapter:
+        # Count chapters before target in volume-order ordering to find its position
+        volumes = (await session.execute(
+            select(Volume).where(Volume.work_id == work_id).order_by(Volume.order_index)
+        )).scalars().all()
+
+        before_count = 0
+        found = False
+        for vol in volumes:
+            if found:
+                break
+            chs = (await session.execute(
+                select(Chapter)
+                .where(Chapter.work_id == work_id, Chapter.volume_id == vol.id)
+                .order_by(Chapter.order_index)
+            )).scalars().all()
+            for ch in chs:
+                if ch.id == around:
+                    found = True
+                    break
+                before_count += 1
+
+        start_idx = max(0, before_count - half)
+        # Load from start_idx, limit entries
+        all_ordered = (await session.execute(ordered_chapters_statement(work_id))).scalars().all()
+        page = all_ordered[start_idx:start_idx + limit]
+        around_index = before_count - start_idx
+    else:
+        all_ordered = (await session.execute(ordered_chapters_statement(work_id))).scalars().all()
+        page = all_ordered[:limit]
+        around_index = None
+
+    return {
+        "chapters": [public(ch) for ch in page],
+        "total": total,
+        "around_index": around_index,
+    }
+
+
 @router.post("/works/{work_id}/chapters")
 async def create_chapter(
     work_id: str,
@@ -1814,6 +1883,17 @@ def append_text_block(blocks: list[dict[str, Any]], content: str) -> None:
     blocks.append({"type": "text", "text": content})
 
 
+def _tool_result_status(result_text: str) -> str:
+    """Return 'error' if the tool result JSON contains an error key, else 'completed'."""
+    if not result_text:
+        return "completed"
+    try:
+        parsed = json.loads(result_text)
+    except (json.JSONDecodeError, TypeError):
+        return "completed"
+    return "error" if isinstance(parsed, dict) and "error" in parsed else "completed"
+
+
 def start_tool_block(
     blocks: list[dict[str, Any]], tool_name: str, display: str
 ) -> None:
@@ -1825,6 +1905,7 @@ def start_tool_block(
 def complete_tool_block(
     blocks: list[dict[str, Any]], tool_name: str, display: str, result_text: str
 ) -> None:
+    status = _tool_result_status(result_text)
     for index in range(len(blocks) - 1, -1, -1):
         block = blocks[index]
         if (
@@ -1832,7 +1913,7 @@ def complete_tool_block(
             and block.get("tool") == tool_name
             and block.get("status") == "started"
         ):
-            block["status"] = "completed"
+            block["status"] = status
             block["display"] = display
             block["result"] = result_text
             return
@@ -1841,7 +1922,7 @@ def complete_tool_block(
             "type": "tool_call",
             "tool": tool_name,
             "display": display,
-            "status": "completed",
+            "status": status,
             "result": result_text,
         }
     )
@@ -1853,7 +1934,7 @@ def finalize_tool_blocks(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if block.get("type") != "tool_call" or block.get("status") != "started":
             finalized.append(block)
             continue
-        finalized.append({**block, "status": "completed"})
+        finalized.append({**block, "status": "error"})
     return finalized
 
 
@@ -2263,6 +2344,7 @@ async def send_chat_message(
                         if event.tool and hasattr(event.tool, "result") and event.tool.result:
                             raw = str(event.tool.result)
                             result_text = raw[:1000] if tool_name in _DETAIL_TOOLS else raw
+                        status = _tool_result_status(result_text)
                         tool_results.append(
                             {"tool": tool_name, "display": display, "result": result_text}
                         )
@@ -2272,7 +2354,7 @@ async def send_chat_message(
                             {
                                 "tool": tool_name,
                                 "display": display,
-                                "status": "completed",
+                                "status": status,
                                 "result": result_text,
                             },
                         )

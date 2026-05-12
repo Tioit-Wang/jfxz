@@ -217,6 +217,17 @@ def test_append_and_complete_tool_blocks_and_normalized_run_flags() -> None:
     assert tool_blocks[-1]["tool"] == "missing_tool"
     assert tool_blocks[-1]["status"] == "completed"
 
+    # Error result: tool returns JSON with "error" key
+    error_blocks: list[dict[str, object]] = [{"type": "tool_call", "tool": "get_chapter", "display": "查询章节", "status": "started"}]
+    complete_tool_block(error_blocks, "get_chapter", "查询章节", '{"error": "chapter not found"}')
+    assert error_blocks[0]["status"] == "error"
+    assert error_blocks[0]["result"] == '{"error": "chapter not found"}'
+
+    # Error result: appended block for missing started entry also gets error status
+    extra_blocks: list[dict[str, object]] = []
+    complete_tool_block(extra_blocks, "bad_tool", "坏工具", '{"error": "something wrong"}')
+    assert extra_blocks[-1]["status"] == "error"
+
     normalized = routes_module.normalized_run(
         {
             "role": "assistant",
@@ -231,6 +242,54 @@ def test_append_and_complete_tool_blocks_and_normalized_run_flags() -> None:
     assert normalized["billing_failed"] is True
     assert normalized["error"] == "扣费异常"
     assert normalized["blocks"][0]["text"] == "回复"
+
+
+def test_tool_result_status_detects_errors() -> None:
+    from app.api.routes import _tool_result_status
+
+    assert _tool_result_status("") == "completed"
+    assert _tool_result_status("not json") == "completed"
+    assert _tool_result_status('{"ok": true}') == "completed"
+    assert _tool_result_status('{"error": "chapter not found"}') == "error"
+    assert _tool_result_status('{"data": [], "error": null}') == "error"
+    assert _tool_result_status('[{"name": "test"}]') == "completed"
+
+
+def test_finalize_tool_blocks_marks_unfinished_as_error() -> None:
+    from app.api.routes import finalize_tool_blocks
+
+    blocks = [
+        {"type": "text", "text": "hello"},
+        {"type": "tool_call", "tool": "broken", "display": "坏工具", "status": "started"},
+        {"type": "tool_call", "tool": "good", "display": "好工具", "status": "completed", "result": "ok"},
+    ]
+    result = finalize_tool_blocks(blocks)
+    assert len(result) == 3
+    assert result[0] == {"type": "text", "text": "hello"}
+    assert result[1]["status"] == "error"
+    assert result[1]["tool"] == "broken"
+    assert result[2]["status"] == "completed"
+    assert result[2]["tool"] == "good"
+
+
+def test_build_reference_section_includes_ids() -> None:
+    from app.services.agent_service import _build_reference_section
+
+    refs = [
+        {"type": "chapter", "id": "ch-001", "name": "第一章", "summary": "开篇", "detail": "正文..."},
+        {"type": "character", "id": "char-abc", "name": "苏白", "summary": "主角", "detail": "少年剑客"},
+        {"type": "setting", "id": "set-xyz", "name": "青云宗", "summary": "修炼门派"},
+    ]
+    section = _build_reference_section(refs)
+    assert "ID：ch-001" in section
+    assert "ID：char-abc" in section
+    assert "ID：set-xyz" in section
+
+    # Without ID column — should not crash
+    no_id = [{"type": "chapter", "name": "无ID章节", "summary": "测试"}]
+    section_no_id = _build_reference_section(no_id)
+    assert "ID：" not in section_no_id
+    assert "无ID章节" in section_no_id
 
 
 async def test_send_chat_message_truncates_detail_tool_results_and_persists_done(
@@ -348,6 +407,72 @@ async def test_send_chat_message_keeps_empty_tool_results(
     chat_model = await session.get(routes_module.ChatSession, chat["id"])
     agent = await session.get(AgentRunStore, chat_model.agno_session_id)
     assert agent.runs[-1]["tool_results"][0]["result"] == ""
+
+
+async def test_send_chat_message_emits_error_status_when_tool_returns_error(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = await create_user_account(session, "stream-tool-error@example.com", "user12345")
+    work = await create_work(
+        WorkIn(title="工具错误", short_intro="", synopsis="", genre_tags=[], background_rules=""),
+        user,
+        session,
+    )
+    chat = await create_chat_session(work["id"], ChatSessionIn(), user, session)
+    account = await ensure_point_account(session, user.id)
+    account.vip_daily_points_balance = Decimal("100000")
+    await session.commit()
+
+    class Tool:
+        def __init__(self, name: str, result: str | None = None) -> None:
+            self.tool_name = name
+            self.result = result
+
+    class Event:
+        def __init__(self, event: RunEvent, content: str | None = None, tool: Tool | None = None, metrics: object | None = None) -> None:
+            self.event = event
+            self.content = content
+            self.tool = tool
+            self.metrics = metrics
+
+    async def _events():
+        yield Event(RunEvent.tool_call_started, tool=Tool("get_chapter"))
+        yield Event(RunEvent.tool_call_completed, tool=Tool("get_chapter", '{"error": "chapter not found"}'))
+        yield Event(
+            RunEvent.run_completed,
+            content="章节不存在",
+            metrics=SimpleNamespace(input_tokens=10, output_tokens=5, cache_read_tokens=0),
+        )
+
+    monkeypatch.setattr(
+        "app.services.agent_service.create_agent",
+        lambda *args, **kwargs: SimpleNamespace(arun=lambda *a, **k: _events()),
+    )
+
+    active_model = (
+        await session.execute(select(AiModel).where(AiModel.status == "active"))
+    ).scalars().first()
+    stream = await send_chat_message(
+        chat["id"],
+        ChatIn(message="查看这个章节", references=[], model_id=active_model.id),
+        user,
+        session,
+    )
+    body = b"".join([chunk async for chunk in stream.body_iterator]).decode()
+
+    # SSE event should have status: "error" (JSON encoder inserts space after colon)
+    assert "get_chapter" in body
+    assert '"status": "error"' in body
+    assert "event: tool_result" in body
+    assert "event: done" in body
+
+    # Persisted block should also have status: "error"
+    chat_model = await session.get(routes_module.ChatSession, chat["id"])
+    agent = await session.get(AgentRunStore, chat_model.agno_session_id)
+    assistant_message = agent.runs[-1]
+    tool_block = next(b for b in assistant_message["blocks"] if b.get("type") == "tool_call")
+    assert tool_block["status"] == "error"
+    assert "chapter not found" in tool_block["result"]
 
 
 async def test_send_chat_message_continues_after_run_completed_event(

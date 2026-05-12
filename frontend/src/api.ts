@@ -160,7 +160,7 @@ export type ToolCallBlock = {
   type: "tool_call";
   tool: string;
   display: string;
-  status: "started" | "completed";
+  status: "started" | "completed" | "error";
   result?: string;
 };
 
@@ -168,7 +168,7 @@ export type ContentBlock = TextBlock | ToolCallBlock;
 
 type ApiContentBlock =
   | { type: "text"; text: string }
-  | { type: "tool_call"; tool: string; display: string; status: "started" | "completed"; result?: string };
+  | { type: "tool_call"; tool: string; display: string; status: "started" | "completed" | "error"; result?: string };
 
 export type ChatMessage = {
   id: string;
@@ -939,6 +939,19 @@ export class ApiClient {
   async listChapters(workId: string): Promise<Chapter[]> {
     const data = await this.request<ApiChapter[]>(`/works/${workId}/chapters`);
     return data.map(mapChapter);
+  }
+
+  async previewChapters(workId: string, around?: string, limit = 5): Promise<{ chapters: Chapter[]; total: number; aroundIndex: number | null }> {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (around) params.set("around", around);
+    const data = await this.request<{ chapters: ApiChapter[]; total: number; around_index: number | null }>(
+      `/works/${workId}/preview?${params}`
+    );
+    return {
+      chapters: data.chapters.map(mapChapter),
+      total: data.total,
+      aroundIndex: data.around_index,
+    };
   }
 
   async createChapter(

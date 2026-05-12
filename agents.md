@@ -65,6 +65,25 @@ jfxz/
 - **API**: Single `routes.py` file. CSRF via `X-CSRF-Token` header on mutating requests. `X-Real-IP` / `X-Forwarded-For` trusted proxy handling.
 - **Frontend auth**: User-facing login/register via modal overlay (`AuthModal`), not separate page. Admin login: dedicated `/admin/login`.
 
+## BEHAVIORAL RULES
+
+### 目录级 Agent.md 自动加载
+
+进入任何目录执行任务前，先检查该目录下是否存在 `Agent.md` 或 `agents.md` 文件，如果存在则读取其内容作为上下文。
+
+- 适用于项目内所有目录，包括子目录、`docs/`、`backend/`、`frontend/` 等。
+- 目录级 `Agent.md` 可能包含该目录独有约定、技术选型说明、操作限制等，必须优先遵循。
+- 如果同时存在项目级 `agents.md` 和目录级 `Agent.md`，两者都要读取，目录级优先级更高。
+
+### 使用 ASK 工具提问
+
+任何需要询问用户的问题，必须使用 `AskUserQuestion` 工具进行，不得直接在聊天中提问。
+
+- 包括但不限于：澄清需求、确认方案、选择选项、询问偏好等。
+- 提供清晰的选项列表（2-4 个），每个选项附带简短说明，降低用户输入负担。
+- 拆分多个独立问题为多次 `AskUserQuestion` 调用，避免一次性提问过多。
+- 使用 `multiSelect: true` 允许用户选择多个不互斥的选项。
+
 ## ANTI-PATTERNS (THIS PROJECT)
 
 - **NEVER** modify or delete historical migration files

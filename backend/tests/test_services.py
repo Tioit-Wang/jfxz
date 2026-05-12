@@ -22,7 +22,7 @@ from app.models import (
     Volume,
     Work,
 )
-from app.services.agent_service import GoodguaTools, _serialize, build_system_prompt
+from app.services.agent_service import GoodguaTools, _count_words, _serialize, build_system_prompt
 from app.services.billing_service import (
     MIN_COST,
     _calculate_cost,
@@ -278,7 +278,9 @@ class TestGoodguaTools:
 
     async def test_character_crud(self, tools: GoodguaTools, session: AsyncSession) -> None:
         result = json.loads(await tools.list_characters())
-        assert result == []
+        assert result["items"] == []
+        assert result["total"] == 0
+        assert result["has_more"] is False
 
         created = json.loads(await tools.create_or_update_character("苏白", "主角", "详情"))
         assert created["name"] == "苏白"
@@ -286,7 +288,9 @@ class TestGoodguaTools:
         char_id = created["id"]
 
         listed = json.loads(await tools.list_characters())
-        assert len(listed) == 1
+        assert len(listed["items"]) == 1
+        assert listed["total"] == 1
+        assert listed["has_more"] is False
 
         fetched = json.loads(await tools.get_character(char_id))
         assert fetched["name"] == "苏白"
@@ -305,12 +309,12 @@ class TestGoodguaTools:
             session.add(Chapter(work_id=tools.work_id, order_index=index + 1, title=f"章节{index}", content="", summary="摘要"))
         await session.commit()
 
-        assert len(json.loads(await tools.list_characters())) == 20
-        assert len(json.loads(await tools.list_settings())) == 20
-        assert len(json.loads(await tools.list_chapters())) == 20
-        assert len(json.loads(await tools.list_characters(limit=5))) == 5
-        assert len(json.loads(await tools.list_settings(limit=5))) == 5
-        assert len(json.loads(await tools.list_chapters(limit=5))) == 5
+        assert len(json.loads(await tools.list_characters())["items"]) == 20
+        assert len(json.loads(await tools.list_settings())["items"]) == 20
+        assert len(json.loads(await tools.list_chapters())["items"]) == 20
+        assert len(json.loads(await tools.list_characters(limit=5))["items"]) == 5
+        assert len(json.loads(await tools.list_settings(limit=5))["items"]) == 5
+        assert len(json.loads(await tools.list_chapters(limit=5))["items"]) == 5
 
     async def test_setting_crud(self, tools: GoodguaTools, session: AsyncSession) -> None:
         created = json.loads(await tools.create_or_update_setting("魔法体系", "设定摘要", "设定详情", "world"))
@@ -320,12 +324,12 @@ class TestGoodguaTools:
         setting_id = created["id"]
 
         listed = json.loads(await tools.list_settings())
-        assert len(listed) == 1
+        assert len(listed["items"]) == 1
 
         filtered = json.loads(await tools.list_settings(setting_type="world"))
-        assert len(filtered) == 1
+        assert len(filtered["items"]) == 1
         empty = json.loads(await tools.list_settings(setting_type="combat"))
-        assert empty == []
+        assert empty["items"] == []
 
         fetched = json.loads(await tools.get_setting(setting_id))
         assert fetched["name"] == "魔法体系"
@@ -340,11 +344,13 @@ class TestGoodguaTools:
         await session.flush()
 
         listed = json.loads(await tools.list_chapters())
-        assert len(listed) == 1
-        assert listed[0]["volume_id"]
+        assert len(listed["items"]) == 1
+        assert listed["items"][0]["volume_id"]
+        assert listed["items"][0]["word_count"] == _count_words("正文内容")
 
         fetched = json.loads(await tools.get_chapter(chapter.id))
         assert fetched["title"] == "第一章"
+        assert fetched["word_count"] == _count_words("正文内容")
 
         updated = json.loads(await tools.update_chapter_summary(chapter.id, "新摘要"))
         assert updated["summary"] == "新摘要"
@@ -371,13 +377,44 @@ class TestGoodguaTools:
         created = json.loads(await tools.create_chapter("第二章", "摘要"))
         assert created["order_index"] == 2
         assert created["summary"] == "摘要"
-        assert created["volume_id"] == listed[0]["volume_id"]
+        assert created["volume_id"] == listed["items"][0]["volume_id"]
+        assert created["word_count"] == 0
+
+    async def test_create_chapter_after_target_and_reorder(self, tools: GoodguaTools, session: AsyncSession) -> None:
+        # Setup: create 4 chapters
+        for i, title in enumerate(["开篇", "发展", "高潮", "结局"], start=1):
+            session.add(Chapter(
+                work_id=tools.work_id, order_index=i - 1, title=title, content=f"正文{i}", summary=""
+            ))
+        await session.commit()
+
+        # Insert after "发展" (order_index=1) — should become order_index=2
+        target_id = (
+            await session.execute(
+                select(Chapter.id).where(Chapter.work_id == tools.work_id, Chapter.title == "发展")
+            )
+        ).scalar_one()
+        created = json.loads(await tools.create_chapter("转折", "承上启下", target_chapter_id=target_id))
+        assert created["order_index"] == 2
+        assert created["title"] == "转折"
+        assert created["word_count"] == 0
+
+        # Verify reorder: 开篇(0) 发展(1) 转折(2) 高潮(3) 结局(4)
+        listed = json.loads(await tools.list_chapters())
+        titles = [c["title"] for c in listed["items"]]
+        assert titles == ["开篇", "发展", "转折", "高潮", "结局"]
+        assert [c["order_index"] for c in listed["items"]] == [0, 1, 2, 3, 4]
+
+    async def test_create_chapter_target_not_found(self, tools: GoodguaTools) -> None:
+        result = json.loads(await tools.create_chapter("某章", target_chapter_id="nonexistent"))
+        assert "error" in result
+        assert "target chapter not found" in result["error"]
 
     async def test_volume_tools_and_chapter_volume_assignment(
         self, tools: GoodguaTools, session: AsyncSession
     ) -> None:
         default_volumes = json.loads(await tools.list_volumes())
-        assert default_volumes[0]["title"] == "默认卷"
+        assert default_volumes["items"][0]["title"] == "默认卷"
 
         created_volume = json.loads(await tools.create_volume("第二卷"))
         assert created_volume["order_index"] == 2
@@ -430,9 +467,9 @@ class TestGoodguaTools:
         moved = json.loads(await tools.update_volume("a-volume", "第二卷", order_index=1))
         volumes = json.loads(await tools.list_volumes())
 
-        assert [item["title"] for item in listed] == ["第一卷第一章", "第二卷第一章"]
+        assert [item["title"] for item in listed["items"]] == ["第一卷第一章", "第二卷第一章"]
         assert moved["order_index"] == 1
-        assert [(item["title"], item["order_index"]) for item in volumes] == [
+        assert [(item["title"], item["order_index"]) for item in volumes["items"]] == [
             ("第二卷", 1),
             ("第一卷", 2),
         ]
@@ -490,7 +527,7 @@ class TestGoodguaTools:
 
         tools = GoodguaTools(db=session, work_id="nonexistent-work")
         result = json.loads(await tools.list_chapters())
-        assert result == []
+        assert result["items"] == []
 
     async def test_get_setting_not_found(self, tools: GoodguaTools) -> None:
         result = json.loads(await tools.get_setting("nonexistent"))

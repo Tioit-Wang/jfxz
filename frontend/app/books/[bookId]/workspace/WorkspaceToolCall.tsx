@@ -2,6 +2,7 @@
 
 import { diffLines, type Change } from "diff";
 import {
+  AlertCircle,
   Check,
   ChevronDown,
   FileText,
@@ -62,6 +63,12 @@ function parseJson(resultStr: string): unknown | null {
   }
 }
 
+function hasError(resultStr: string): boolean {
+  const parsed = parseJson(resultStr);
+  if (!parsed || typeof parsed !== "object") return false;
+  return "error" in (parsed as Record<string, unknown>);
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
@@ -78,12 +85,27 @@ function truncate(value: string, length = 72): string {
   return value.length > length ? `${value.slice(0, length)}...` : value;
 }
 
-function resultItems(resultStr: string, key: string): Array<Record<string, unknown>> | null {
+function resultItems(resultStr: string): { items: Array<Record<string, unknown>>; total?: number; returned?: number; hasMore?: boolean } | null {
   const parsed = parseJson(resultStr);
-  if (Array.isArray(parsed)) return parsed.map(asRecord);
+  // Old format: bare array
+  if (Array.isArray(parsed)) return { items: parsed.map(asRecord) };
+  // New format: { items, total, returned, limit, has_more }
   const record = asRecord(parsed);
-  const list = record[key];
-  return Array.isArray(list) ? list.map(asRecord) : null;
+  const list = record["items"];
+  if (Array.isArray(list)) {
+    return {
+      items: list.map(asRecord),
+      total: typeof record["total"] === "number" ? record["total"] : undefined,
+      returned: typeof record["returned"] === "number" ? record["returned"] : undefined,
+      hasMore: !!record["has_more"],
+    };
+  }
+  // Fallback: try legacy key names (characters, settings, etc.)
+  for (const key of ["characters", "settings", "chapters", "volumes"]) {
+    const legacy = record[key];
+    if (Array.isArray(legacy)) return { items: legacy.map(asRecord) };
+  }
+  return null;
 }
 
 function FieldLine({ label, value }: { label: string; value: unknown }) {
@@ -148,30 +170,40 @@ function renderDiffResult(resultStr: string) {
   );
 }
 
-function renderNamedList(resultStr: string, key: string, emptyText: string) {
-  const items = resultItems(resultStr, key);
-  if (!items) return renderPlain(resultStr);
-  if (!items.length) return <p className="rounded-xl border border-dashed border-neutral-200 px-3 py-4 text-center text-xs text-neutral-400">{emptyText}</p>;
+function renderNamedList(resultStr: string, emptyText: string) {
+  const result = resultItems(resultStr);
+  if (!result) return renderPlain(resultStr);
+  if (!result.items.length) return <p className="rounded-xl border border-dashed border-neutral-200 px-3 py-4 text-center text-xs text-neutral-400">{emptyText}</p>;
+
+  const { items, total, returned, hasMore } = result;
+  const showPagination = total != null && returned != null;
 
   return (
-    <div className="grid gap-2">
-      {items.map((item, index) => {
-        const id = stringValue(item.id);
-        const title = stringValue(item.name ?? item.title) || "未命名";
-        const summary = stringValue(item.summary ?? item.detail ?? item.content);
-        const order = numberValue(item.order_index ?? item.order);
-        const volumeId = stringValue(item.volume_id);
-        return (
-          <div key={id || `${title}-${index}`} className="rounded-xl border border-neutral-200 bg-white px-3 py-2">
-            <div className="flex items-start justify-between gap-2">
-              <span className="min-w-0 truncate text-sm font-semibold text-neutral-900">{order ? `${order}. ` : ""}{title}</span>
-              {id ? <span className="shrink-0 rounded-full bg-neutral-100 px-2 py-0.5 font-mono text-[10px] text-neutral-500">{id.slice(0, 8)}</span> : null}
+    <div>
+      <div className="grid gap-2">
+        {items.map((item, index) => {
+          const id = stringValue(item.id);
+          const title = stringValue(item.name ?? item.title) || "未命名";
+          const summary = stringValue(item.summary ?? item.detail ?? item.content);
+          const order = numberValue(item.order_index ?? item.order);
+          const volumeId = stringValue(item.volume_id);
+          return (
+            <div key={id || `${title}-${index}`} className="rounded-xl border border-neutral-200 bg-white px-3 py-2">
+              <div className="flex items-start justify-between gap-2">
+                <span className="min-w-0 truncate text-sm font-semibold text-neutral-900">{order ? `${order}. ` : ""}{title}</span>
+                {id ? <span className="shrink-0 rounded-full bg-neutral-100 px-2 py-0.5 font-mono text-[10px] text-neutral-500">{id.slice(0, 8)}</span> : null}
+              </div>
+              {summary ? <p className="mt-1 truncate text-xs text-neutral-500">{truncate(summary, 96)}</p> : null}
+              {volumeId ? <p className="mt-1 font-mono text-[10px] text-neutral-400">卷 {volumeId.slice(0, 8)}</p> : null}
             </div>
-            {summary ? <p className="mt-1 truncate text-xs text-neutral-500">{truncate(summary, 96)}</p> : null}
-            {volumeId ? <p className="mt-1 font-mono text-[10px] text-neutral-400">卷 {volumeId.slice(0, 8)}</p> : null}
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
+      {showPagination ? (
+        <p className="mt-2 text-center text-[11px] text-neutral-400">
+          显示 {returned} / {total} 条{hasMore ? "，还有更多未显示" : ""}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -212,10 +244,10 @@ function renderDelete(resultStr: string, label: string, idKey: string) {
 function renderToolResult(block: ToolCallBlock) {
   if (!block.result) return null;
   if (block.tool === "update_chapter_content") return renderDiffResult(block.result);
-  if (block.tool === "list_characters") return renderNamedList(block.result, "characters", "暂无角色");
-  if (block.tool === "list_settings") return renderNamedList(block.result, "settings", "暂无设定");
-  if (block.tool === "list_chapters") return renderNamedList(block.result, "chapters", "暂无章节");
-  if (block.tool === "list_volumes") return renderNamedList(block.result, "volumes", "暂无卷");
+  if (block.tool === "list_characters") return renderNamedList(block.result, "暂无角色");
+  if (block.tool === "list_settings") return renderNamedList(block.result, "暂无设定");
+  if (block.tool === "list_chapters") return renderNamedList(block.result, "暂无章节");
+  if (block.tool === "list_volumes") return renderNamedList(block.result, "暂无卷");
   if (block.tool === "get_character") return renderDetail(block.result, ["name"], [["summary", "简介"], ["detail", "详细描述"]]);
   if (block.tool === "get_setting") return renderDetail(block.result, ["name"], [["type", "类型"], ["summary", "简介"], ["detail", "详情"]]);
   if (block.tool === "get_chapter") return renderDetail(block.result, ["title"], [["summary", "提要"], ["content", "正文"], ["volume_id", "卷 ID"]]);
@@ -233,6 +265,7 @@ function renderToolResult(block: ToolCallBlock) {
 
 export function WorkspaceToolCall({ block, expanded, onToggle }: WorkspaceToolCallProps) {
   const isStarted = block.status === "started";
+  const isError = !isStarted && block.result != null && hasError(block.result);
   const Icon = toolIcon(block.tool);
   const label = toolLabel(block.tool);
 
@@ -243,8 +276,11 @@ export function WorkspaceToolCall({ block, expanded, onToggle }: WorkspaceToolCa
         className="flex w-full cursor-pointer select-none items-center gap-2 px-3 py-2.5 text-left transition-colors hover:bg-neutral-50"
         onClick={onToggle}
       >
-        <span className={cn("grid size-7 shrink-0 place-items-center rounded-full", isStarted ? "bg-amber-50 text-amber-600" : "bg-emerald-50 text-emerald-600")}>
-          {isStarted ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+        <span className={cn(
+          "grid size-7 shrink-0 place-items-center rounded-full",
+          isStarted ? "bg-amber-50 text-amber-600" : isError ? "bg-red-50 text-red-600" : "bg-emerald-50 text-emerald-600"
+        )}>
+          {isStarted ? <Loader2 size={14} className="animate-spin" /> : isError ? <AlertCircle size={14} /> : <Check size={14} />}
         </span>
         <Icon size={14} className="shrink-0 text-neutral-500" />
         <span className="font-bold text-neutral-950">{label}</span>

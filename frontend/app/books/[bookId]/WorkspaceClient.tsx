@@ -89,6 +89,7 @@ import { applySuggestion, type Chapter, type Work, wordCount } from "@/domain";
 import { type WorkspaceMentionReference } from "./workspace/dnd";
 import { WorkspaceChatPanel } from "./workspace/WorkspaceChatPanel";
 import { WorkspaceEditorPanel } from "./workspace/WorkspaceEditorPanel";
+import ShareDialog from "./workspace/ShareDialog";
 import { WorkspaceSidebarPanel } from "./workspace/WorkspaceSidebarPanel";
 import { toolLabel, WorkspaceToolCall } from "./workspace/WorkspaceToolCall";
 
@@ -393,6 +394,9 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const [workspaceDefaultLayout, setWorkspaceDefaultLayout] = useState<Layout | undefined>(() => readWorkspaceLayout(bookId));
   const [workspaceLayoutLoaded, setWorkspaceLayoutLoaded] = useState(false);
   const [editorSettingsOpen, setEditorSettingsOpen] = useState(false);
+  const [shareEnabled, setShareEnabled] = useState(false);
+  const [shareToken, setShareToken] = useState<string | null>(null);
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [editorSettings, setEditorSettings] = useState<typeof DEFAULT_EDITOR_SETTINGS>(() => {
     if (typeof window === "undefined") return DEFAULT_EDITOR_SETTINGS;
     try {
@@ -621,6 +625,8 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
         setInspirationNotes(bootstrap.inspirationNotes);
         setWritingGoal(bootstrap.writingGoal);
         setDailyWordProgress(bootstrap.dailyWordProgress);
+        setShareEnabled(bootstrap.work.shareEnabled ?? false);
+        setShareToken(bootstrap.work.shareToken ?? null);
         setGoalDraft({
           targetWords: String(bootstrap.writingGoal.targetWords)
         });
@@ -1078,6 +1084,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     clearChatDraft();
     setChatStatus("streaming");
     window.setTimeout(() => chatInputRef.current?.focus(), 0);
+    let sseErrorShown = false;
     try {
       const final = await client.streamChatMessage(
         sessionId,
@@ -1318,6 +1325,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
           if (errorMessage.includes("interrupted") || errorMessage.includes("cancelled")) {
             return;
           }
+          sseErrorShown = true;
           setMessages((items) =>
             items.map((item) => (item.id === assistantId ? { ...item, error: errorMessage } : item))
           );
@@ -1365,12 +1373,14 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
         setChatStatus("idle");
         return;
       }
-      const errorMsg = error instanceof ApiError && error.status === 402
-        ? "积分不足，暂时无法发送"
-        : "发送失败，请稍后重试";
-      setMessages((items) =>
-        items.map((item) => (item.id === assistantId ? { ...item, error: errorMsg } : item))
-      );
+      if (!sseErrorShown) {
+        const errorMsg = error instanceof ApiError && error.status === 402
+          ? "积分不足，暂时无法发送"
+          : "发送失败，请稍后重试";
+        setMessages((items) =>
+          items.map((item) => (item.id === assistantId ? { ...item, error: errorMsg } : item))
+        );
+      }
       setChatStatus("idle");
     }
   }
@@ -1458,7 +1468,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     setWorkSaveStatus("saving");
     try {
       const updated = await client.updateWork({
-        id: work.id,
+        ...work,
         title: workDraft.title.trim(),
         shortIntro: workDraft.shortIntro.trim(),
         synopsis: workDraft.synopsis.trim(),
@@ -1466,7 +1476,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
         focusRequirements: workDraft.focusRequirements.trim(),
         forbiddenRequirements: workDraft.forbiddenRequirements.trim(),
         tags: workDraft.tags.split(",").map((t) => t.trim()).filter(Boolean),
-        updatedAt: work.updatedAt,
       });
       setWork(updated);
       setWorkEditOpen(false);
@@ -2027,6 +2036,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
               const chapterId = activeChapterIdRef.current;
               if (chapterId) window.open(`/books/${bookId}/preview?chapterId=${chapterId}`, "_blank");
             }}
+            onOpenShare={() => setShareDialogOpen(true)}
             onOpenEditorSettings={() => setEditorSettingsOpen(true)}
             onOpenAccount={() => void openAccount()}
             onAnalyze={() => void analyze()}
@@ -2694,6 +2704,21 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ShareDialog
+        open={shareDialogOpen}
+        onOpenChange={setShareDialogOpen}
+        bookId={bookId}
+        shareEnabled={shareEnabled}
+        shareToken={shareToken}
+        onShareToggle={async (enabled) => {
+          try {
+            const result = await client.toggleShare(bookId, enabled);
+            setShareEnabled(result.share_enabled);
+            setShareToken(result.share_token);
+          } catch { /* ignore */ }
+        }}
+      />
 
       <PaymentDialog
         open={paymentOpen}

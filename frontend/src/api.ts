@@ -18,7 +18,19 @@ export type ApiWork = {
   background_rules: string;
   focus_requirements?: string | null;
   forbidden_requirements?: string | null;
+  share_enabled?: boolean;
+  share_token?: string | null;
   updated_at?: string | null;
+};
+
+export type ShareStatus = {
+  share_enabled: boolean;
+  share_token: string | null;
+};
+
+export type PublicWorkInfo = {
+  title: string;
+  short_intro: string;
 };
 
 export type ApiChapter = {
@@ -555,6 +567,8 @@ export function mapWork(work: ApiWork): Work {
     focusRequirements: work.focus_requirements ?? "",
     forbiddenRequirements: work.forbidden_requirements ?? "",
     tags: work.genre_tags,
+    shareEnabled: work.share_enabled ?? false,
+    shareToken: work.share_token ?? null,
     updatedAt: work.updated_at ?? ""
   };
 }
@@ -948,6 +962,38 @@ export class ApiClient {
       `/works/${workId}/preview?${params}`
     );
     return {
+      chapters: data.chapters.map(mapChapter),
+      total: data.total,
+      aroundIndex: data.around_index,
+    };
+  }
+
+  async getShareStatus(workId: string): Promise<ShareStatus> {
+    return this.request<ShareStatus>(`/works/${workId}/share`);
+  }
+
+  async toggleShare(workId: string, shareEnabled: boolean): Promise<ShareStatus> {
+    return this.request<ShareStatus>(`/works/${workId}/share`, {
+      method: "PATCH",
+      body: JSON.stringify({ share_enabled: shareEnabled }),
+    });
+  }
+
+  async publicPreviewChapters(
+    shareToken: string,
+    around?: string,
+    limit = 5,
+  ): Promise<{ work: { title: string; shortIntro: string }; chapters: Chapter[]; total: number; aroundIndex: number | null }> {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (around) params.set("around", around);
+    const data = await this.request<{
+      work: { title: string; short_intro: string };
+      chapters: ApiChapter[];
+      total: number;
+      around_index: number | null;
+    }>(`/public/${shareToken}/preview?${params}`);
+    return {
+      work: { title: data.work.title, shortIntro: data.work.short_intro },
       chapters: data.chapters.map(mapChapter),
       total: data.total,
       aroundIndex: data.around_index,
@@ -1520,7 +1566,14 @@ export class ApiClient {
             continue;
           }
           if (event.event === "done") {
-            finalMessage = mapChatMessage(JSON.parse(event.data));
+            try {
+              const parsed = JSON.parse(event.data);
+              if (parsed && parsed.id) {
+                finalMessage = mapChatMessage(parsed);
+              }
+            } catch {
+              // Malformed done event — will be caught by the finalMessage null check below
+            }
           } else if (event.event === "error") {
             try {
               const errorData = JSON.parse(event.data);
@@ -1551,7 +1604,14 @@ export class ApiClient {
       if (buffer.trim()) {
         const event = parseSseEvent(buffer);
         if (event.event === "done" && event.data) {
-          finalMessage = mapChatMessage(JSON.parse(event.data));
+          try {
+            const parsed = JSON.parse(event.data);
+            if (parsed && parsed.id) {
+              finalMessage = mapChatMessage(parsed);
+            }
+          } catch {
+            // Malformed done event
+          }
         } else if (event.event === "error") {
           try {
             const errorData = JSON.parse(event.data!);

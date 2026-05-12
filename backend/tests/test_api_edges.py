@@ -2168,8 +2168,8 @@ async def test_send_chat_persists_partial_assistant_message_after_stream_error(
             chat["id"], ChatIn(message="测试中断", references=[], model_id=active_model.id), user, session
         )
         body = b"".join([chunk async for chunk in stream.body_iterator]).decode()
-        assert "event: error" in body
         assert "event: done" in body
+        assert "stream exploded" in body
 
         page = await list_chat_messages(chat["id"], user, session)
         assistant = page["messages"][1]
@@ -2177,7 +2177,7 @@ async def test_send_chat_persists_partial_assistant_message_after_stream_error(
         assert assistant["error"] == "stream exploded"
         assert assistant["blocks"][0] == {"type": "text", "text": "半截回复"}
         assert assistant["blocks"][1]["tool"] == "list_characters"
-        assert assistant["blocks"][1]["status"] == "completed"
+        assert assistant["blocks"][1]["status"] == "error"
     finally:
         _agent_service.create_agent = original
 

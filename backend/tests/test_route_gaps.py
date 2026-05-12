@@ -615,6 +615,214 @@ async def test_send_chat_message_skips_empty_assistant_persistence(
     assert len(agent.runs) == 1
 
 
+async def test_send_chat_message_fallback_done_has_proper_fields_when_empty_stream(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When stream produces no events, fallback done event has id/role/content/actions fields."""
+    user = await create_user_account(session, "fallback-empty@example.com", "user12345")
+    work = await create_work(
+        WorkIn(title="Fallback空流", short_intro="", synopsis="", genre_tags=[], background_rules=""),
+        user,
+        session,
+    )
+    chat = await create_chat_session(work["id"], ChatSessionIn(), user, session)
+    account = await ensure_point_account(session, user.id)
+    account.vip_daily_points_balance = Decimal("100000")
+    await session.commit()
+
+    async def _events():
+        if False:
+            yield None
+
+    monkeypatch.setattr(
+        "app.services.agent_service.create_agent",
+        lambda *args, **kwargs: SimpleNamespace(arun=lambda *a, **k: _events()),
+    )
+
+    active_model = (
+        await session.execute(select(AiModel).where(AiModel.status == "active"))
+    ).scalars().first()
+    stream = await send_chat_message(
+        chat["id"],
+        ChatIn(message="测试fallback", references=[], model_id=active_model.id),
+        user,
+        session,
+    )
+    body = b"".join([chunk async for chunk in stream.body_iterator]).decode()
+    assert "event: done" in body
+
+    # Extract the done event data and verify it has proper fields
+    for line in body.split("\n"):
+        if line.startswith("data: ") and "event: done" in body[:body.index(line)]:
+            data = json.loads(line[6:])
+            assert data.get("id")
+            assert data["role"] == "assistant"
+            assert "content" in data
+            assert "actions" in data
+            assert "blocks" in data
+            assert "tool_results" in data
+            assert "created_at" in data
+            break
+
+
+async def test_send_chat_message_sends_done_with_error_when_persist_fails(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When persist_assistant_message fails in error path, SSE still sends done with fallback."""
+    user = await create_user_account(session, "persist-fail@example.com", "user12345")
+    work = await create_work(
+        WorkIn(title="持久化失败", short_intro="", synopsis="", genre_tags=[], background_rules=""),
+        user,
+        session,
+    )
+    chat = await create_chat_session(work["id"], ChatSessionIn(), user, session)
+    account = await ensure_point_account(session, user.id)
+    account.vip_daily_points_balance = Decimal("100000")
+    await session.commit()
+
+    class Event:
+        def __init__(self, event: RunEvent, content: str | None = None, tool: object | None = None) -> None:
+            self.event = event
+            self.content = content
+            self.tool = tool
+
+    class Tool:
+        def __init__(self, name: str, result: str | None = None) -> None:
+            self.tool_name = name
+            self.result = result
+
+    async def _events():
+        yield Event(RunEvent.run_content, content="部分内容")
+        raise RuntimeError("agent crashed")
+
+    monkeypatch.setattr(
+        "app.services.agent_service.create_agent",
+        lambda *args, **kwargs: SimpleNamespace(arun=lambda *a, **k: _events()),
+    )
+
+    # Make session.commit fail after the first call (user message persist)
+    original_commit = session.commit
+    commit_count = 0
+
+    async def _failing_commit():
+        nonlocal commit_count
+        commit_count += 1
+        if commit_count > 1:
+            raise RuntimeError("simulated DB failure")
+        await original_commit()
+
+    monkeypatch.setattr(session, "commit", _failing_commit)
+
+    active_model = (
+        await session.execute(select(AiModel).where(AiModel.status == "active"))
+    ).scalars().first()
+    stream = await send_chat_message(
+        chat["id"],
+        ChatIn(message="测试持久化失败", references=[], model_id=active_model.id),
+        user,
+        session,
+    )
+    body = b"".join([chunk async for chunk in stream.body_iterator]).decode()
+
+    # Verify done event is sent despite persist failure
+    assert "event: done" in body
+
+    # Extract and verify the done event has error info
+    done_data = None
+    lines = body.split("\n")
+    for i, line in enumerate(lines):
+        if line.strip() == "event: done" and i + 1 < len(lines) and lines[i + 1].startswith("data: "):
+            done_data = json.loads(lines[i + 1][6:])
+            break
+
+    assert done_data is not None
+    assert done_data.get("id")
+    assert done_data["role"] == "assistant"
+    assert done_data["content"] == "部分内容"
+    assert done_data["error"] == "agent crashed"
+    assert "actions" in done_data
+
+
+async def test_send_chat_message_fallback_includes_actions_from_tool_results(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When persist fails and fallback is used, actions are computed from tool_results."""
+    user = await create_user_account(session, "fallback-actions@example.com", "user12345")
+    work = await create_work(
+        WorkIn(title="Fallback Actions", short_intro="", synopsis="", genre_tags=[], background_rules=""),
+        user,
+        session,
+    )
+    chat = await create_chat_session(work["id"], ChatSessionIn(), user, session)
+    account = await ensure_point_account(session, user.id)
+    account.vip_daily_points_balance = Decimal("100000")
+    await session.commit()
+
+    class Tool:
+        def __init__(self, name: str, result: str | None = None) -> None:
+            self.tool_name = name
+            self.result = result
+
+    class Event:
+        def __init__(self, event: RunEvent, content: str | None = None, tool: Tool | None = None) -> None:
+            self.event = event
+            self.content = content
+            self.tool = tool
+
+    async def _events():
+        yield Event(RunEvent.tool_call_started, tool=Tool("create_or_update_character"))
+        yield Event(
+            RunEvent.tool_call_completed,
+            tool=Tool("create_or_update_character", '{"id":"c1","name":"角色"}'),
+        )
+        raise RuntimeError("crash after tool")
+
+    monkeypatch.setattr(
+        "app.services.agent_service.create_agent",
+        lambda *args, **kwargs: SimpleNamespace(arun=lambda *a, **k: _events()),
+    )
+
+    # Make session.commit fail after the first call
+    original_commit = session.commit
+    commit_count = 0
+
+    async def _failing_commit():
+        nonlocal commit_count
+        commit_count += 1
+        if commit_count > 1:
+            raise RuntimeError("simulated DB failure")
+        await original_commit()
+
+    monkeypatch.setattr(session, "commit", _failing_commit)
+
+    active_model = (
+        await session.execute(select(AiModel).where(AiModel.status == "active"))
+    ).scalars().first()
+    stream = await send_chat_message(
+        chat["id"],
+        ChatIn(message="测试actions", references=[], model_id=active_model.id),
+        user,
+        session,
+    )
+    body = b"".join([chunk async for chunk in stream.body_iterator]).decode()
+    assert "event: done" in body
+
+    # Extract done data
+    done_data = None
+    lines = body.split("\n")
+    for i, line in enumerate(lines):
+        if line.strip() == "event: done" and i + 1 < len(lines) and lines[i + 1].startswith("data: "):
+            done_data = json.loads(lines[i + 1][6:])
+            break
+
+    assert done_data is not None
+    # Verify actions are properly computed from tool_results
+    assert len(done_data["actions"]) == 1
+    assert done_data["actions"][0]["type"] == "save_character"
+    assert done_data["actions"][0]["label"] == "创建/更新角色"
+    assert done_data["error"] == "crash after tool"
+
+
 async def test_confirm_verified_payment_renews_plan_and_handles_zero_credit_pack(
     session: AsyncSession,
 ) -> None:

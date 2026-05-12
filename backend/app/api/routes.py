@@ -97,6 +97,10 @@ class WorkIn(BaseModel):
     forbidden_requirements: str | None = Field(default=None, max_length=10000)
 
 
+class ShareToggleIn(BaseModel):
+    share_enabled: bool
+
+
 class NamedContentIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     summary: str = Field(min_length=1, max_length=4000)
@@ -983,6 +987,31 @@ async def get_work(
 ) -> dict[str, Any]:
     work = await owned_work(session, user.id, work_id)
     return public(work)
+
+
+@router.get("/works/{work_id}/share")
+async def get_share_status(
+    work_id: str,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    work = await owned_work(session, user.id, work_id)
+    return {"share_enabled": work.share_enabled, "share_token": work.share_token}
+
+
+@router.patch("/works/{work_id}/share")
+async def toggle_share(
+    work_id: str,
+    payload: ShareToggleIn,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    work = await owned_work(session, user.id, work_id)
+    if payload.share_enabled and not work.share_token:
+        work.share_token = str(uuid4())
+    work.share_enabled = payload.share_enabled
+    await session.commit()
+    return {"share_enabled": work.share_enabled, "share_token": work.share_token}
 
 
 @router.post("/works/{work_id}/workspace-bootstrap")
@@ -2263,6 +2292,23 @@ async def send_chat_message(
         error_messages: list[str] = []
         stream_error: BaseException | None = None
 
+        def _build_fallback_message(fallback_error: str | None = None) -> dict[str, Any]:
+            actions = [a for a in (tool_action(tr["tool"]) for tr in tool_results) if a is not None]
+            message_error = "; ".join(dict.fromkeys(error_messages)) if error_messages else fallback_error
+            return {
+                "id": str(uuid4()),
+                "role": "assistant",
+                "content": "".join(full_content_parts),
+                "mentions": [],
+                "references": references,
+                "actions": actions,
+                "blocks": finalize_tool_blocks(blocks),
+                "tool_results": tool_results,
+                "billing_failed": billing_failed,
+                "error": message_error,
+                "created_at": now().isoformat(),
+            }
+
         async def persist_assistant_message() -> dict[str, Any] | None:
             full_content = "".join(full_content_parts)
             finalized_blocks = finalize_tool_blocks(blocks)
@@ -2393,8 +2439,9 @@ async def send_chat_message(
 
                 # Persist partial content before yielding — the client may already be gone
                 _assistant_message = await persist_assistant_message()
-                if _assistant_message is not None:
-                    yield encode_sse("done", _assistant_message)
+                if _assistant_message is None:
+                    _assistant_message = _build_fallback_message(fallback_error=str(error) or "Agent run failed")
+                yield encode_sse("done", _assistant_message)
 
                 # Re-raise non-Exception errors so the framework can handle cancellation.
                 # The partial content has already been persisted above, so it won't be lost.
@@ -2448,10 +2495,9 @@ async def send_chat_message(
                     )
 
             assistant_message = await persist_assistant_message()
-            if assistant_message is not None:
-                yield encode_sse("done", assistant_message)
-            else:
-                yield encode_sse("done", {})
+            if assistant_message is None:
+                assistant_message = _build_fallback_message()
+            yield encode_sse("done", assistant_message)
 
     return StreamingResponse(stream_reply(), media_type="text/event-stream")
 
@@ -3461,3 +3507,90 @@ async def admin_credit_transaction_detail(
     data["product_type"] = order.product_type if order else None
 
     return data
+
+
+# ── Public sharing endpoints (no authentication required) ──────────────────
+
+
+@router.get("/public/{share_token}/info")
+async def public_work_info(
+    share_token: str,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    work_result = await session.execute(
+        select(Work).where(Work.share_token == share_token, Work.share_enabled == True)
+    )
+    work = work_result.scalar_one_or_none()
+    if work is None:
+        raise HTTPException(status_code=404, detail="shared work not found")
+    return {"title": work.title, "short_intro": work.short_intro}
+
+
+@router.get("/public/{share_token}/preview")
+async def public_preview_chapters(
+    share_token: str,
+    around: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=20)] = 5,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Public preview: no auth required. Returns chapters if sharing is enabled."""
+    work_result = await session.execute(
+        select(Work).where(Work.share_token == share_token, Work.share_enabled == True)
+    )
+    work = work_result.scalar_one_or_none()
+    if work is None:
+        raise HTTPException(status_code=404, detail="shared work not found")
+
+    work_id = work.id
+    await ensure_default_volume(session, work_id)
+
+    total = (await session.execute(
+        select(func.count(Chapter.id)).where(Chapter.work_id == work_id)
+    )).scalar() or 0
+
+    half = limit // 2
+    around_index = None
+
+    if around:
+        target = await session.execute(
+            select(Chapter).where(Chapter.id == around, Chapter.work_id == work_id)
+        )
+        target_chapter = target.scalar_one_or_none()
+        if target_chapter is None:
+            around = None
+
+    if around and target_chapter:
+        volumes = (await session.execute(
+            select(Volume).where(Volume.work_id == work_id).order_by(Volume.order_index)
+        )).scalars().all()
+
+        before_count = 0
+        found = False
+        for vol in volumes:
+            if found:
+                break
+            chs = (await session.execute(
+                select(Chapter)
+                .where(Chapter.work_id == work_id, Chapter.volume_id == vol.id)
+                .order_by(Chapter.order_index)
+            )).scalars().all()
+            for ch in chs:
+                if ch.id == around:
+                    found = True
+                    break
+                before_count += 1
+
+        start_idx = max(0, before_count - half)
+        all_ordered = (await session.execute(ordered_chapters_statement(work_id))).scalars().all()
+        page = all_ordered[start_idx:start_idx + limit]
+        around_index = before_count - start_idx
+    else:
+        all_ordered = (await session.execute(ordered_chapters_statement(work_id))).scalars().all()
+        page = all_ordered[:limit]
+
+    return {
+        "work": {"title": work.title, "short_intro": work.short_intro},
+        "chapters": [public(ch) for ch in page],
+        "total": total,
+        "around_index": around_index,
+    }

@@ -167,11 +167,8 @@ PROMPT_TEMPLATE = """\
   - volume_id 可选；不传时，若有 target_chapter_id 则自动使用目标章所在卷，否则使用默认第一卷
   创建前应调用 `list_chapters` 了解已有章节结构和命名风格，确保新章命名一致。
 
-- `update_chapter_summary(chapter_id, summary)` — 更新指定章节的摘要
-  summary 覆盖原有摘要。**不要**先输出摘要文本让用户预览——直接调用工具，用一句话确认结果即可。
-
-- `update_chapter_content(chapter_id, content)` — 更新指定章节的正文内容
-  此工具会直接保存正文，系统自动展示新旧 diff。**禁止**先输出全文到对话中让用户确认——直接调用工具，根据返回的变更状态简短确认即可。
+- `update_chapter(chapter_id, title?, summary?, content?)` — 更新指定章节的标题、摘要和/或正文
+  只传需要修改的字段，未传的字段保持不变。可同时修改多个字段（如同时改标题和正文）。content 变更时系统自动展示新旧 diff，**不要**先输出修改后的全文到对话中——直接调用工具，根据返回结果简短确认即可。
 
 ### 作品信息
 
@@ -206,9 +203,10 @@ PROMPT_TEMPLATE = """\
 
 **主动获取，不要问用户。** 需要查询角色、设定、章节等已有数据时，先调用对应工具获取，不要反问用户提供信息。
 
+**简要说明，批量执行。** 在执行一组关联的工具调用前，先用一句话概述即将进行的操作（如"我先查看当前章节结构，再更新标题和正文"），然后连续调用所有需要的工具。不要在每个工具调用前都重复描述——同一批次的操作只需开头说明一次。
+
 **直接操作，不要预览。**
-- 修改章节正文 → 直接调用 `update_chapter_content`。**不要**先把修改后的全文输出到对话中，系统会自动展示 diff。
-- 修改章节摘要 → 直接调用 `update_chapter_summary`。**不要**先输出摘要文本。
+- 修改章节内容（标题/摘要/正文） → 直接调用 `update_chapter`。**不要**先把修改内容输出到对话中，系统会自动展示 diff。
 - 创建或更新角色/设定 → 直接调用对应工具。操作完成后用一句话确认结果即可，不需要重复完整内容。
 
 **先了解，再创作。** 创建新章节时如果用户没有指定标题，先调用 `list_chapters` 了解现有章节结构，再生成合适的标题。
@@ -352,8 +350,7 @@ class GoodguaTools(Toolkit):
         self.register(self.get_chapter)
         self.register(self.list_chapters)
         self.register(self.create_chapter)
-        self.register(self.update_chapter_summary)
-        self.register(self.update_chapter_content)
+        self.register(self.update_chapter)
         self.register(self.get_work_info)
         self.register(self.update_work_info)
 
@@ -759,8 +756,14 @@ class GoodguaTools(Toolkit):
                 await self.db.rollback()
                 raise
 
-    async def update_chapter_summary(self, chapter_id: str, summary: str) -> str:
-        """更新指定章节的摘要。summary 覆盖原有摘要内容。不要先输出摘要文本让用户预览——直接调用工具，用一句话确认结果即可。返回更新后章节的 id/title/summary/updated_at。"""
+    async def update_chapter(
+        self,
+        chapter_id: str,
+        title: str | None = None,
+        summary: str | None = None,
+        content: str | None = None,
+    ) -> str:
+        """更新指定章节的标题、摘要和/或正文。只传需要修改的字段，未传的字段保持不变。可同时修改多个字段（如同时改标题和正文）。content 变更时系统自动展示新旧 diff，**不要**先输出修改内容到对话中——直接调用工具即可。"""
         async with self._db_lock:
             try:
                 result = await self.db.execute(
@@ -769,46 +772,32 @@ class GoodguaTools(Toolkit):
                 chapter = result.scalar_one_or_none()
                 if chapter is None:
                     return json.dumps({"error": "chapter not found"}, ensure_ascii=False)
-                chapter.summary = summary
-                await self.db.commit()
-                return json.dumps(
-                    _serialize_lite(chapter, ["id", "title", "summary", "updated_at"]),
-                    ensure_ascii=False,
-                )
-            except Exception:
-                await self.db.rollback()
-                raise
 
-    async def update_chapter_content(self, chapter_id: str, content: str) -> str:
-        """更新指定章节的正文内容。content 覆盖原有正文。系统会自动展示新旧版本 diff，因此**不要**先把修改后的全文输出到对话中让用户确认——直接调用工具即可。返回新旧内容长度对比、变更预览和 content_changed 状态，据此简短确认修改完成。"""
-        async with self._db_lock:
-            try:
-                result = await self.db.execute(
-                    select(Chapter).where(Chapter.id == chapter_id, Chapter.work_id == self.work_id)
-                )
-                chapter = result.scalar_one_or_none()
-                if chapter is None:
-                    return json.dumps({"error": "chapter not found"}, ensure_ascii=False)
-                old_content = chapter.content or ""
-                chapter.content = content
-                await _add_daily_words(
-                    self.db, self.work_id, _count_words(content) - _count_words(old_content)
-                )
+                response: dict = {"chapter_id": chapter.id}
+
+                if title is not None:
+                    chapter.title = title
+                response["title"] = chapter.title
+
+                if summary is not None:
+                    chapter.summary = summary
+                response["summary"] = chapter.summary
+
+                if content is not None:
+                    old_content = chapter.content or ""
+                    chapter.content = content
+                    word_delta = _count_words(content) - _count_words(old_content)
+                    await _add_daily_words(self.db, self.work_id, word_delta)
+                    response["old_content_preview"] = old_content[:200]
+                    response["new_content_preview"] = content[:200]
+                    response["old_content_length"] = len(old_content)
+                    response["new_content_length"] = len(content)
+                    response["preview_truncated"] = len(old_content) > 200 or len(content) > 200
+                    response["content_changed"] = old_content != content
+
+                response["status"] = "updated"
                 await self.db.commit()
-                return json.dumps(
-                    {
-                        "chapter_id": chapter.id,
-                        "title": chapter.title,
-                        "old_content_preview": old_content[:200],
-                        "new_content_preview": content[:200],
-                        "old_content_length": len(old_content),
-                        "new_content_length": len(content),
-                        "preview_truncated": len(old_content) > 200 or len(content) > 200,
-                        "content_changed": old_content != content,
-                        "status": "updated",
-                    },
-                    ensure_ascii=False,
-                )
+                return json.dumps(response, ensure_ascii=False)
             except Exception:
                 await self.db.rollback()
                 raise

@@ -169,7 +169,7 @@ _TOOL_ACTION_MAP = {
     "update_volume": "update_volume",
     "get_chapter": "get_chapter",
     "list_chapters": "list_chapters",
-    "update_chapter_summary": "update_chapter_summary",
+    "update_chapter": "update_chapter",
     "get_work_info": "get_work_info",
     "update_work_info": "update_work_info",
 }

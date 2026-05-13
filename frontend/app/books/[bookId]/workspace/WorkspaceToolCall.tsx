@@ -34,8 +34,7 @@ const TOOL_LABELS: Record<string, string> = {
   get_chapter: "查询章节",
   list_chapters: "列出章节",
   create_chapter: "创建章节",
-  update_chapter_summary: "更新提要",
-  update_chapter_content: "更新正文",
+  update_chapter: "更新章节",
   list_volumes: "列出卷",
   create_volume: "创建卷",
   update_volume: "更新卷",
@@ -243,7 +242,15 @@ function renderDelete(resultStr: string, label: string, idKey: string) {
 
 function renderToolResult(block: ToolCallBlock) {
   if (!block.result) return null;
-  if (block.tool === "update_chapter_content") return renderDiffResult(block.result);
+  if (block.tool === "update_chapter") {
+    const parsed = asRecord(parseJson(block.result));
+    // Show diff when content was changed
+    if (parsed.old_content_preview != null || parsed.new_content_preview != null) {
+      return renderDiffResult(block.result);
+    }
+    // Otherwise show detail card
+    return renderDetail(block.result, ["title"], [["summary", "提要"], ["volume_id", "卷 ID"]]);
+  }
   if (block.tool === "list_characters") return renderNamedList(block.result, "暂无角色");
   if (block.tool === "list_settings") return renderNamedList(block.result, "暂无设定");
   if (block.tool === "list_chapters") return renderNamedList(block.result, "暂无章节");
@@ -257,7 +264,7 @@ function renderToolResult(block: ToolCallBlock) {
   if (block.tool === "create_or_update_character") return renderDetail(block.result, ["name"], [["summary", "简介"], ["detail", "详细描述"]]);
   if (block.tool === "create_or_update_setting") return renderDetail(block.result, ["name"], [["type", "类型"], ["summary", "简介"], ["detail", "详情"]]);
   if (block.tool === "create_volume" || block.tool === "update_volume") return renderDetail(block.result, ["title"], [["order_index", "排序"]]);
-  if (block.tool === "create_chapter" || block.tool === "update_chapter_summary") return renderDetail(block.result, ["title"], [["summary", "提要"], ["volume_id", "卷 ID"]]);
+  if (block.tool === "create_chapter") return renderDetail(block.result, ["title"], [["summary", "提要"], ["volume_id", "卷 ID"]]);
   if (block.tool === "delete_character") return renderDelete(block.result, "已删除角色", "character_id");
   if (block.tool === "delete_setting") return renderDelete(block.result, "已删除设定", "setting_id");
   return renderPlain(block.result);

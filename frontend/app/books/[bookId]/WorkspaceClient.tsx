@@ -1226,9 +1226,12 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                   }
                   break;
                 }
-                case "update_chapter_content": {
-                  const chapterId = result.chapter_id as string;
-                  if (chapterId) {
+                case "update_chapter": {
+                  const chapterId = (result.chapter_id ?? result.id) as string;
+                  if (!chapterId) break;
+                  const hasContentChange = result.content_changed === true || result.old_content_preview != null;
+                  if (hasContentChange) {
+                    // Content was modified — refresh full chapter data from server
                     void client.listChapters(bookId).then((freshChapters) => {
                       setChapters(freshChapters);
                       const freshChapter = freshChapters.find((chapter) => chapter.id === chapterId);
@@ -1256,20 +1259,29 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                         }
                       }
                     }).catch(() => undefined);
-                  }
-                  break;
-                }
-                case "update_chapter_summary": {
-                  if (result.id) {
-                    const chapterId = result.id as string;
+                  } else {
+                    // Only title/summary changed — update from tool result
+                    const newTitle = (result.title as string) ?? "";
                     const newSummary = (result.summary as string) ?? "";
                     setChapters((prev) =>
-                      prev.map((ch) => (ch.id === chapterId ? { ...ch, summary: newSummary } : ch))
+                      prev.map((ch) => {
+                        if (ch.id !== chapterId) return ch;
+                        const updated = { ...ch };
+                        if (newTitle) updated.title = newTitle;
+                        if (result.summary !== undefined) updated.summary = newSummary;
+                        return updated;
+                      })
                     );
                     if (activeChapterIdRef.current === chapterId) {
-                      setSummary(newSummary);
-                      setSummaryDraft(newSummary);
-                      summaryRef.current = newSummary;
+                      if (newTitle) {
+                        setTitle(newTitle);
+                        titleRef.current = newTitle;
+                      }
+                      if (result.summary !== undefined) {
+                        setSummary(newSummary);
+                        setSummaryDraft(newSummary);
+                        summaryRef.current = newSummary;
+                      }
                     }
                   }
                   break;

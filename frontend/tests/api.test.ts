@@ -437,7 +437,7 @@ describe("api client", () => {
       role: "assistant",
       content: "你好",
       references: [],
-      actions: [{ type: "update_chapter_summary", label: "更新章节提要" }],
+      actions: [{ type: "update_chapter", label: "更新章节" }],
       created_at: "now"
     };
     const stream = new ReadableStream({

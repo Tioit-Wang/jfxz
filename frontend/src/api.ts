@@ -162,7 +162,7 @@ export type ChatMention = {
 };
 
 export type ChatAction = {
-  type: "save_character" | "save_setting" | "update_chapter_summary" | "update_work_info";
+  type: "save_character" | "save_setting" | "update_chapter" | "update_work_info";
   label: string;
 };
 

@@ -352,11 +352,11 @@ class TestGoodguaTools:
         assert fetched["title"] == "第一章"
         assert fetched["word_count"] == _count_words("正文内容")
 
-        updated = json.loads(await tools.update_chapter_summary(chapter.id, "新摘要"))
+        updated = json.loads(await tools.update_chapter(chapter.id, summary="新摘要"))
         assert updated["summary"] == "新摘要"
 
         long_content = "新正文" * 100
-        content_result = json.loads(await tools.update_chapter_content(chapter.id, long_content))
+        content_result = json.loads(await tools.update_chapter(chapter.id, content=long_content))
         assert content_result["new_content_preview"] == long_content[:200]
         assert "new_content" not in content_result
         assert content_result["new_content_length"] == len(long_content)
@@ -366,9 +366,9 @@ class TestGoodguaTools:
         ).scalar_one()
         assert progress.words_added == len(long_content) - len("正文内容")
         extended_content = f"{long_content}追加"
-        await tools.update_chapter_content(chapter.id, extended_content)
+        await tools.update_chapter(chapter.id, content=extended_content)
         assert progress.words_added == len(extended_content) - len("正文内容")
-        await tools.update_chapter_content(chapter.id, "短")
+        await tools.update_chapter(chapter.id, content="短")
         assert progress.words_added == len(extended_content) - len("正文内容")
 
         not_found = json.loads(await tools.get_chapter("nonexistent"))
@@ -513,9 +513,9 @@ class TestGoodguaTools:
         assert "error" in result
 
     async def test_update_chapter_not_found(self, tools: GoodguaTools) -> None:
-        result = json.loads(await tools.update_chapter_summary("nonexistent", "摘要"))
+        result = json.loads(await tools.update_chapter("nonexistent", summary="摘要"))
         assert "error" in result
-        content_result = json.loads(await tools.update_chapter_content("nonexistent", "正文"))
+        content_result = json.loads(await tools.update_chapter("nonexistent", content="正文"))
         assert "error" in content_result
 
     async def test_work_scoping(self, session: AsyncSession) -> None:
@@ -594,13 +594,11 @@ class TestGoodguaTools:
         with pytest.raises(RuntimeError):
             await tools.delete_character(character.id)
         with pytest.raises(RuntimeError):
-            await tools.update_chapter_summary(chapter.id, "新摘要")
-        with pytest.raises(RuntimeError):
-            await tools.update_chapter_content(chapter.id, "新正文")
+            await tools.update_chapter(chapter.id, summary="新摘要")
         with pytest.raises(RuntimeError):
             await tools.update_work_info("short_intro", "新简介")
 
-        assert rollback.await_count == 8
+        assert rollback.await_count == 7
 
 
 # ---- billing_service tests ----

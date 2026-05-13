@@ -2157,8 +2157,7 @@ _TOOL_DISPLAY_NAMES = {
     "get_chapter": "查询章节",
     "list_chapters": "列出章节",
     "create_chapter": "创建章节",
-    "update_chapter_summary": "更新章节提要",
-    "update_chapter_content": "更新章节正文",
+    "update_chapter": "更新章节",
     "get_work_info": "查询作品信息",
     "update_work_info": "更新作品信息",
 }
@@ -2177,7 +2176,7 @@ _TOOL_ACTION_TYPES = {
     "update_volume": "update_volume",
     "get_chapter": "get_chapter",
     "list_chapters": "list_chapters",
-    "update_chapter_summary": "update_chapter_summary",
+    "update_chapter": "update_chapter",
     "get_work_info": "get_work_info",
     "update_work_info": "update_work_info",
 }

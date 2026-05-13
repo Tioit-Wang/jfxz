@@ -1,4 +1,4 @@
-import type { Chapter, Work } from "./domain";
+import type { Chapter, ChapterVersion, Work } from "./domain";
 
 export type Fetcher = typeof fetch;
 
@@ -46,6 +46,20 @@ export type ApiSuggestion = {
   quote: string;
   issue: string;
   options: string[];
+};
+
+export type ApiChapterVersion = {
+  id: string;
+  version_number: number;
+  title: string;
+  content?: string;
+  summary?: string | null;
+  source: "human" | "ai";
+  source_detail: string | null;
+  word_count: number;
+  created_at: string | null;
+  updated_at: string | null;
+  is_current: boolean;
 };
 
 export type ApiNamedContent = {
@@ -596,6 +610,22 @@ export function mapChapter(chapter: ApiChapter): Chapter {
   };
 }
 
+export function mapChapterVersion(v: ApiChapterVersion): ChapterVersion {
+  return {
+    id: v.id,
+    versionNumber: v.version_number,
+    title: v.title,
+    content: v.content,
+    summary: v.summary,
+    source: v.source,
+    sourceDetail: v.source_detail,
+    wordCount: v.word_count,
+    createdAt: v.created_at ?? "",
+    updatedAt: v.updated_at ?? "",
+    isCurrent: v.is_current,
+  };
+}
+
 export function mapNamedContent(item: ApiNamedContent): NamedContent {
   return {
     id: item.id,
@@ -1069,6 +1099,40 @@ export class ApiClient {
     await this.request<{ ok: boolean }>(`/works/${workId}/chapters/${chapterId}`, {
       method: "DELETE"
     });
+  }
+
+  async listChapterVersions(
+    workId: string,
+    chapterId: string,
+    options?: { limit?: number; cursor?: number }
+  ): Promise<{ items: ChapterVersion[]; total: number; hasMore: boolean }> {
+    const params = new URLSearchParams();
+    if (options?.limit) params.set("limit", String(options.limit));
+    if (options?.cursor) params.set("cursor", String(options.cursor));
+    const qs = params.toString();
+    const data = await this.request<{ items: ApiChapterVersion[]; total: number; has_more: boolean }>(
+      `/works/${workId}/chapters/${chapterId}/versions${qs ? `?${qs}` : ""}`
+    );
+    return { items: data.items.map(mapChapterVersion), total: data.total, hasMore: data.has_more };
+  }
+
+  async getChapterVersion(workId: string, chapterId: string, versionId: string): Promise<ChapterVersion> {
+    const data = await this.request<ApiChapterVersion>(
+      `/works/${workId}/chapters/${chapterId}/versions/${versionId}`
+    );
+    return mapChapterVersion(data);
+  }
+
+  async restoreChapterVersion(
+    workId: string,
+    chapterId: string,
+    versionId: string
+  ): Promise<ChapterVersion> {
+    const data = await this.request<ApiChapterVersion>(
+      `/works/${workId}/chapters/${chapterId}/versions/${versionId}/restore`,
+      { method: "POST" }
+    );
+    return mapChapterVersion(data);
   }
 
   async analyzeChapter(workId: string, content: string): Promise<ApiSuggestion[]> {

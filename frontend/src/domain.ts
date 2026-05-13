@@ -26,6 +26,20 @@ export type Suggestion = {
   replacement: string;
 };
 
+export type ChapterVersion = {
+  id: string;
+  versionNumber: number;
+  title: string;
+  content?: string;
+  summary?: string | null;
+  source: "human" | "ai";
+  sourceDetail: string | null;
+  wordCount: number;
+  createdAt: string;
+  updatedAt: string;
+  isCurrent: boolean;
+};
+
 export type AdminUser = {
   email: string;
   nickname: string;

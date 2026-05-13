@@ -90,6 +90,7 @@ import { type WorkspaceMentionReference } from "./workspace/dnd";
 import { WorkspaceChatPanel } from "./workspace/WorkspaceChatPanel";
 import { WorkspaceEditorPanel } from "./workspace/WorkspaceEditorPanel";
 import ShareDialog from "./workspace/ShareDialog";
+import VersionHistoryDialog from "./workspace/VersionHistoryDialog";
 import { WorkspaceSidebarPanel } from "./workspace/WorkspaceSidebarPanel";
 import { toolLabel, WorkspaceToolCall } from "./workspace/WorkspaceToolCall";
 
@@ -394,6 +395,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const [workspaceDefaultLayout, setWorkspaceDefaultLayout] = useState<Layout | undefined>(() => readWorkspaceLayout(bookId));
   const [workspaceLayoutLoaded, setWorkspaceLayoutLoaded] = useState(false);
   const [editorSettingsOpen, setEditorSettingsOpen] = useState(false);
+  const [versionHistoryOpen, setVersionHistoryOpen] = useState(false);
   const [shareEnabled, setShareEnabled] = useState(false);
   const [shareToken, setShareToken] = useState<string | null>(null);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
@@ -2050,6 +2052,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
             }}
             onOpenShare={() => setShareDialogOpen(true)}
             onOpenEditorSettings={() => setEditorSettingsOpen(true)}
+            onOpenVersionHistory={() => setVersionHistoryOpen(true)}
             onOpenAccount={() => void openAccount()}
             onAnalyze={() => void analyze()}
             onContentChange={updateContent}
@@ -2849,6 +2852,29 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <VersionHistoryDialog
+        open={versionHistoryOpen}
+        onOpenChange={setVersionHistoryOpen}
+        workId={bookId}
+        chapterId={activeChapter?.id}
+        client={client}
+        onRestored={async () => {
+          try {
+            const list = await client.listChapters(bookId);
+            setChapters(list);
+            const updated = list.find((c) => c.id === activeChapter?.id);
+            if (updated) {
+              setTitle(updated.title);
+              setSummary(updated.summary);
+              setContent(updated.content);
+              titleRef.current = updated.title;
+              summaryRef.current = updated.summary;
+              contentRef.current = updated.content;
+            }
+          } catch { /* ignore */ }
+        }}
+      />
 
       <Dialog open={workEditOpen} onOpenChange={setWorkEditOpen}>
         <DialogContent className="overflow-hidden p-0 sm:max-w-5xl xl:max-w-6xl [&_[data-slot=dialog-close]]:right-5 [&_[data-slot=dialog-close]]:top-5 [&_[data-slot=dialog-close]]:z-20 [&_[data-slot=dialog-close]]:bg-white/85 [&_[data-slot=dialog-close]]:backdrop-blur">

@@ -1614,6 +1614,10 @@ async def update_chapter(
         if payload.words_added is not None
         else count_words(chapter.content) - previous_words,
     )
+    from app.services.version_service import get_or_create_human_version
+    await get_or_create_human_version(
+        session, chapter.id, chapter.title, chapter.content, chapter.summary
+    )
     await session.commit()
     return public(chapter)
 
@@ -1629,6 +1633,78 @@ async def delete_chapter(
     await session.delete(await must_get_in_work(session, Chapter, chapter_id, work_id))
     await session.commit()
     return {"ok": True}
+
+
+@router.get("/works/{work_id}/chapters/{chapter_id}/versions")
+async def list_chapter_versions(
+    work_id: str,
+    chapter_id: str,
+    limit: int = Query(default=20, ge=1, le=100),
+    cursor: int | None = Query(default=None),
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    from app.services.version_service import get_chapter_versions, get_max_version_number
+
+    await owned_work(session, user.id, work_id)
+    await must_get_in_work(session, Chapter, chapter_id, work_id)
+    items, total, has_more = await get_chapter_versions(session, chapter_id, limit, cursor)
+    max_num = await get_max_version_number(session, chapter_id) if items else 0
+    return {
+        "items": [
+            {
+                "id": v.id,
+                "version_number": v.version_number,
+                "title": v.title,
+                "source": v.source,
+                "source_detail": v.source_detail,
+                "word_count": v.word_count,
+                "created_at": v.created_at.isoformat() if v.created_at else None,
+                "updated_at": v.updated_at.isoformat() if v.updated_at else None,
+                "is_current": v.version_number == max_num,
+            }
+            for v in items
+        ],
+        "total": total,
+        "has_more": has_more,
+    }
+
+
+@router.get("/works/{work_id}/chapters/{chapter_id}/versions/{version_id}")
+async def get_chapter_version(
+    work_id: str,
+    chapter_id: str,
+    version_id: str,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    from app.services.version_service import get_version_content
+
+    await owned_work(session, user.id, work_id)
+    await must_get_in_work(session, Chapter, chapter_id, work_id)
+    version = await get_version_content(session, version_id)
+    if version is None or version.chapter_id != chapter_id:
+        raise HTTPException(status_code=404, detail="version not found")
+    return public(version)
+
+
+@router.post("/works/{work_id}/chapters/{chapter_id}/versions/{version_id}/restore")
+async def restore_chapter_version(
+    work_id: str,
+    chapter_id: str,
+    version_id: str,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    from app.services.version_service import restore_version
+
+    await owned_work(session, user.id, work_id)
+    await must_get_in_work(session, Chapter, chapter_id, work_id)
+    new_version = await restore_version(session, chapter_id, version_id)
+    if new_version is None:
+        raise HTTPException(status_code=404, detail="version not found")
+    await session.commit()
+    return public(new_version)
 
 
 @router.post("/works/{work_id}/chapters/reorder")

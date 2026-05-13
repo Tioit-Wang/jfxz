@@ -130,6 +130,21 @@ class Chapter(Base, TimestampMixin):
     summary: Mapped[str | None] = mapped_column(Text)
 
 
+class ChapterVersion(Base, TimestampMixin):
+    __tablename__ = "chapter_versions"
+    __table_args__ = (UniqueConstraint("chapter_id", "version_number"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    chapter_id: Mapped[str] = mapped_column(ForeignKey("chapters.id", ondelete="CASCADE"), index=True)
+    version_number: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(200))
+    content: Mapped[str] = mapped_column(Text, default="")
+    summary: Mapped[str | None] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(String(20))
+    source_detail: Mapped[str | None] = mapped_column(String(200))
+    word_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
 class InspirationNote(Base, TimestampMixin):
     __tablename__ = "inspiration_notes"
 

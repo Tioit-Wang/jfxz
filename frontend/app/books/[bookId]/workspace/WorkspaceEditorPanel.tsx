@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, Edit3, Eye, Loader2, RefreshCw, Settings, Trash2, UserCircle, Wand2, type LucideIcon } from "lucide-react";
+import { AlertCircle, Clock, Edit3, Eye, Loader2, RefreshCw, Settings, Trash2, UserCircle, Wand2, type LucideIcon } from "lucide-react";
 import type { ApiSuggestion } from "@/api";
 import { ChapterPlainTextEditor } from "@/components/ChapterPlainTextEditor";
 import { cn } from "@/lib/utils";
@@ -37,6 +37,7 @@ type WorkspaceEditorPanelProps = {
   onPreview: () => void;
   onOpenShare: () => void;
   onOpenEditorSettings: () => void;
+  onOpenVersionHistory: () => void;
   onOpenAccount: () => void;
   onAnalyze: () => void;
   onContentChange: (value: string) => void;
@@ -68,6 +69,7 @@ export function WorkspaceEditorPanel({
   onPreview,
   onOpenShare,
   onOpenEditorSettings,
+  onOpenVersionHistory,
   onOpenAccount,
   onAnalyze,
   onContentChange,
@@ -102,6 +104,14 @@ export function WorkspaceEditorPanel({
             aria-label="编辑器设置"
           >
             <Settings size={16} />
+          </button>
+          <button
+            className="rounded p-1.5 text-gray-400 transition-colors hover:bg-accent hover:text-accent-foreground"
+            onClick={onOpenVersionHistory}
+            aria-label="历史版本"
+            title="历史版本"
+          >
+            <Clock size={16} />
           </button>
         </div>
         <div className="flex items-center gap-2">

@@ -2,19 +2,23 @@ import { describe, expect, it } from "vitest";
 import { formatRange, getParagraphRange } from "../src/components/ChapterPlainTextEditor";
 
 function makeDoc(paragraphs: string[]) {
-  const block = (text: string, _i: number) => ({
-    nodeSize: text.length + 2 // ProseMirror paragraph: start token + content + end token
-  });
-
-  const blocks = paragraphs.map(block);
-  let cursor = 0;
+  // ProseMirror paragraph: nodeSize = content.length + 2 (start token + content + end token)
+  const nodeSizes = paragraphs.map((t) => t.length + 2);
+  // Absolute doc position of each paragraph start = 1 + sum of previous nodeSizes
+  // (doc open token at pos 0, first paragraph at pos 1)
+  const offsets = [1];
+  for (let i = 1; i < nodeSizes.length; i++) {
+    offsets.push(offsets[i - 1] + nodeSizes[i - 1]);
+  }
   return {
-    forEach(f: (block: { nodeSize: number }, offset: number) => boolean | void) {
-      for (let i = 0; i < blocks.length; i++) {
-        const result = f(blocks[i], cursor);
-        cursor += blocks[i].nodeSize;
-        if (result === false) break;
+    resolve(pos: number) {
+      // Find which paragraph contains this position
+      for (let i = nodeSizes.length - 1; i >= 0; i--) {
+        if (pos >= offsets[i]) {
+          return { index: (_depth: number) => i };
+        }
       }
+      return { index: (_depth: number) => 0 };
     }
   };
 }

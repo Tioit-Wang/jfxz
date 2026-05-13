@@ -105,27 +105,10 @@ function suggestionIndexFromEvent(event: Event): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
-export function getParagraphRange(doc: { forEach: (f: (block: { nodeSize: number }, offset: number) => boolean | void) => void }, from: number, to: number): { start: number; end: number } {
-  let startPara = 0;
-  let endPara = 0;
-  let currentPara = 0;
-  let foundStart = false;
-
-  doc.forEach((block, offset) => {
-    currentPara++;
-    const blockEnd = offset + block.nodeSize;
-    if (!foundStart && from <= blockEnd) {
-      startPara = currentPara;
-      foundStart = true;
-    }
-    if (to <= blockEnd) {
-      endPara = currentPara;
-      return false;
-    }
-  });
-
-  if (!foundStart) return { start: 1, end: 1 };
-  return { start: startPara, end: endPara };
+export function getParagraphRange(doc: { resolve: (pos: number) => { index: (depth: number) => number } }, from: number, to: number): { start: number; end: number } {
+  const fromIndex = doc.resolve(from).index(0);
+  const toIndex = doc.resolve(Math.max(0, to - 1)).index(0);
+  return { start: fromIndex + 1, end: toIndex + 1 };
 }
 
 export function formatRange(range: { start: number; end: number }): string {

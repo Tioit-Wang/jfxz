@@ -351,6 +351,8 @@ class TestGoodguaTools:
         fetched = json.loads(await tools.get_chapter(chapter.id))
         assert fetched["title"] == "第一章"
         assert fetched["word_count"] == _count_words("正文内容")
+        assert fetched["content"] == "1 正文内容"
+        assert fetched["total_lines"] == 1
 
         updated = json.loads(await tools.update_chapter(chapter.id, summary="新摘要"))
         assert updated["summary"] == "新摘要"
@@ -370,6 +372,45 @@ class TestGoodguaTools:
         assert progress.words_added == len(extended_content) - len("正文内容")
         await tools.update_chapter(chapter.id, content="短")
         assert progress.words_added == len(extended_content) - len("正文内容")
+
+        # --- 部分更新测试 ---
+        # 先写入多行内容
+        multi_line = "第一行\n\n第三行\n第四行\n第五行"
+        await tools.update_chapter(chapter.id, content=multi_line)
+        fetched = json.loads(await tools.get_chapter(chapter.id))
+        assert fetched["total_lines"] == 5
+        assert fetched["content"] == "1 第一行\n2 \n3 第三行\n4 第四行\n5 第五行"
+
+        # 局部替换单行
+        partial = json.loads(await tools.update_chapter(chapter.id, content="新的第三行", start_line=3))
+        assert partial["content_changed"] is True
+        assert partial["changed_range"] == {"start": 3, "end": 3}
+        fetched = json.loads(await tools.get_chapter(chapter.id))
+        assert fetched["content"] == "1 第一行\n2 \n3 新的第三行\n4 第四行\n5 第五行"
+
+        # 局部替换多行
+        partial = json.loads(await tools.update_chapter(chapter.id, content="合并行", start_line=3, end_line=4))
+        assert partial["changed_range"] == {"start": 3, "end": 4}
+        fetched = json.loads(await tools.get_chapter(chapter.id))
+        assert fetched["total_lines"] == 4
+        assert fetched["content"] == "1 第一行\n2 \n3 合并行\n4 第五行"
+
+        # 局部插入
+        partial = json.loads(await tools.update_chapter(chapter.id, content="插入行A\n插入行B", start_line=2, end_line=1))
+        assert partial["content_changed"] is True
+        fetched = json.loads(await tools.get_chapter(chapter.id))
+        assert fetched["total_lines"] == 6
+        assert fetched["content"] == "1 第一行\n2 插入行A\n3 插入行B\n4 \n5 合并行\n6 第五行"
+
+        # 局部删除
+        partial = json.loads(await tools.update_chapter(chapter.id, content="", start_line=4, end_line=5))
+        fetched = json.loads(await tools.get_chapter(chapter.id))
+        assert fetched["total_lines"] == 4
+        assert fetched["content"] == "1 第一行\n2 插入行A\n3 插入行B\n4 第五行"
+
+        # 行号超出范围
+        err = json.loads(await tools.update_chapter(chapter.id, content="x", start_line=99))
+        assert "error" in err
 
         not_found = json.loads(await tools.get_chapter("nonexistent"))
         assert "error" in not_found

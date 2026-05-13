@@ -148,7 +148,8 @@ PROMPT_TEMPLATE = """\
 - `update_volume(volume_id, title, order_index?)` — 修改指定卷
   title 覆盖原卷名；order_index 可选，仅在需要调整卷顺序时传入。
 
-- `get_chapter(chapter_id)` — 获取指定章节完整信息，含正文全文（content 字段）和字数（word_count 字段）
+- `get_chapter(chapter_id)` — 获取指定章节完整信息，含带行号的正文（content 字段）、总行数（total_lines）和字数（word_count）
+  正文中每行格式为 "行号 正文"（如 "1 彭校长的办公室不大。"），空行也有行号。后续用 `update_chapter` 修改时可引用行号进行局部更新。
   数据量较大，仅在需要阅读或参考正文时调用。
   与 `list_chapters` 的区别：本工具返回正文全文；`list_chapters` 只返回目录概览（含字数，不含正文），浏览章节结构时优先使用。
 
@@ -167,8 +168,14 @@ PROMPT_TEMPLATE = """\
   - volume_id 可选；不传时，若有 target_chapter_id 则自动使用目标章所在卷，否则使用默认第一卷
   创建前应调用 `list_chapters` 了解已有章节结构和命名风格，确保新章命名一致。
 
-- `update_chapter(chapter_id, title?, summary?, content?)` — 更新指定章节的标题、摘要和/或正文
+- `update_chapter(chapter_id, title?, summary?, content?, start_line?, end_line?)` — 更新指定章节的标题、摘要和/或正文
   只传需要修改的字段，未传的字段保持不变。可同时修改多个字段（如同时改标题和正文）。content 变更时系统自动展示新旧 diff，**不要**先输出修改后的全文到对话中——直接调用工具，根据返回结果简短确认即可。
+
+  **部分更新（节省 token）**：先通过 `get_chapter` 查看行号，再指定行号范围只替换变更部分：
+  - 传入 `start_line` 和 `end_line`（均为 1-based，对应 `get_chapter` 返回的行号）：替换 [start_line, end_line] 范围的行。`end_line` 默认等于 `start_line`（替换单行）。
+  - 若 `end_line < start_line`（如 `start_line=5, end_line=4`）：在 start_line 之前插入新内容，不删除已有行。
+  - 不传 `start_line`：全量替换（默认行为，向后兼容）。
+  - 示例：`update_chapter(id, content="新文本", start_line=3, end_line=5)` 替换第 3-5 行；`update_chapter(id, content="", start_line=7, end_line=9)` 删除第 7-9 行。
 
 ### 作品信息
 
@@ -206,7 +213,7 @@ PROMPT_TEMPLATE = """\
 **简要说明，批量执行。** 在执行一组关联的工具调用前，先用一句话概述即将进行的操作（如"我先查看当前章节结构，再更新标题和正文"），然后连续调用所有需要的工具。不要在每个工具调用前都重复描述——同一批次的操作只需开头说明一次。
 
 **直接操作，不要预览。**
-- 修改章节内容（标题/摘要/正文） → 直接调用 `update_chapter`。**不要**先把修改内容输出到对话中，系统会自动展示 diff。
+- 修改章节内容（标题/摘要/正文） → 直接调用 `update_chapter`。先 `get_chapter` 查看行号，再按行号范围局部更新以节省 token。**不要**先把修改内容输出到对话中，系统会自动展示 diff。
 - 创建或更新角色/设定 → 直接调用对应工具。操作完成后用一句话确认结果即可，不需要重复完整内容。
 
 **先了解，再创作。** 创建新章节时如果用户没有指定标题，先调用 `list_chapters` 了解现有章节结构，再生成合适的标题。
@@ -287,6 +294,35 @@ def _serialize_lite(model, fields: list[str]) -> dict:
     return result
 
 
+def _add_line_numbers(text: str) -> tuple[str, int]:
+    """为正文每行添加行号前缀，返回 (带行号的文本, 总行数)。"""
+    if not text:
+        return "", 0
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines = lines[:-1]
+    total = len(lines)
+    numbered = "\n".join(f"{i + 1} {line}" for i, line in enumerate(lines))
+    return numbered, total
+
+
+def _content_to_lines(text: str) -> list[str]:
+    """将正文拆分为行列表，去除末尾空行。"""
+    if not text:
+        return []
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines = lines[:-1]
+    return lines
+
+
+def _lines_to_content(lines: list[str]) -> str:
+    """将行列表合并回正文，末尾加换行。"""
+    if not lines:
+        return ""
+    return "\n".join(lines) + "\n"
+
+
 def _normalize_list_limit(limit: int, default: int = 20, maximum: int = 100) -> int:
     if not isinstance(limit, int):
         return default
@@ -365,9 +401,10 @@ class GoodguaTools(Toolkit):
                 return json.dumps({"error": "character not found"}, ensure_ascii=False)
             return json.dumps(_serialize(character), ensure_ascii=False)
 
-    async def list_characters(self, limit: int = 20) -> str:
-        """列出当前作品角色概览，按更新时间倒序排列。默认最多返回 20 条，仅返回 id/name/summary 三个字段，不包含 detail。返回结果包含分页元数据：items（角色列表）、total（总数）、returned（本次返回数）、limit（请求上限）、has_more（是否还有更多）。需查看角色详细设定时使用 get_character。"""
+    async def list_characters(self, limit: int = 20, offset: int = 0) -> str:
+        """列出当前作品角色概览，按更新时间倒序排列。仅返回 id/name/summary 三个字段，不包含 detail。返回结果包含分页元数据：items、total、returned、limit、offset、has_more。当 has_more 为 true 时，应使用 offset + limit 作为下一次调用的 offset 继续翻页获取剩余数据，而不是增大 limit 重新请求。需查看角色详细设定时使用 get_character。"""
         limit = _normalize_list_limit(limit)
+        offset = max(0, offset)
         async with self._db_lock:
             total = (await self.db.execute(
                 select(func.count(Character.id)).where(Character.work_id == self.work_id)
@@ -376,6 +413,7 @@ class GoodguaTools(Toolkit):
                 select(Character)
                 .where(Character.work_id == self.work_id)
                 .order_by(Character.updated_at.desc())
+                .offset(offset)
                 .limit(limit)
             )
             items = [_serialize_lite(c, ["id", "name", "summary"]) for c in result.scalars()]
@@ -384,7 +422,8 @@ class GoodguaTools(Toolkit):
                 "total": total,
                 "returned": len(items),
                 "limit": limit,
-                "has_more": total > len(items),
+                "offset": offset,
+                "has_more": offset + len(items) < total,
             }, ensure_ascii=False)
 
     async def create_or_update_character(
@@ -462,9 +501,10 @@ class GoodguaTools(Toolkit):
                 return json.dumps({"error": "setting not found"}, ensure_ascii=False)
             return json.dumps(_serialize(setting), ensure_ascii=False)
 
-    async def list_settings(self, setting_type: str | None = None, limit: int = 20) -> str:
-        """列出当前作品设定概览，可选按 setting_type 过滤。默认最多返回 20 条，仅返回 id/type/name/summary 四个字段，不包含 detail。返回结果包含分页元数据：items（设定列表）、total（总数，受 setting_type 过滤影响）、returned（本次返回数）、limit（请求上限）、has_more（是否还有更多）。需查看详细设定时使用 get_setting。"""
+    async def list_settings(self, setting_type: str | None = None, limit: int = 20, offset: int = 0) -> str:
+        """列出当前作品设定概览，可选按 setting_type 过滤。仅返回 id/type/name/summary 四个字段，不包含 detail。返回结果包含分页元数据：items、total、returned、limit、offset、has_more。当 has_more 为 true 时，应使用 offset + limit 作为下一次调用的 offset 继续翻页获取剩余数据，而不是增大 limit 重新请求。需查看详细设定时使用 get_setting。"""
         limit = _normalize_list_limit(limit)
+        offset = max(0, offset)
         async with self._db_lock:
             count_stmt = select(func.count(SettingItem.id)).where(SettingItem.work_id == self.work_id)
             data_stmt = select(SettingItem).where(SettingItem.work_id == self.work_id)
@@ -472,14 +512,15 @@ class GoodguaTools(Toolkit):
                 count_stmt = count_stmt.where(SettingItem.type == setting_type)
                 data_stmt = data_stmt.where(SettingItem.type == setting_type)
             total = (await self.db.execute(count_stmt)).scalar() or 0
-            result = await self.db.execute(data_stmt.order_by(SettingItem.updated_at.desc()).limit(limit))
+            result = await self.db.execute(data_stmt.order_by(SettingItem.updated_at.desc()).offset(offset).limit(limit))
             items = [_serialize_lite(s, ["id", "type", "name", "summary"]) for s in result.scalars()]
             return json.dumps({
                 "items": items,
                 "total": total,
                 "returned": len(items),
                 "limit": limit,
-                "has_more": total > len(items),
+                "offset": offset,
+                "has_more": offset + len(items) < total,
             }, ensure_ascii=False)
 
     async def create_or_update_setting(
@@ -555,9 +596,10 @@ class GoodguaTools(Toolkit):
                 await self.db.rollback()
                 raise
 
-    async def list_volumes(self, limit: int = 20) -> str:
-        """列出当前作品卷概览，按卷顺序排列。默认最多返回 20 条，返回 id/order_index/title。返回结果包含分页元数据：items（卷列表）、total（总数）、returned（本次返回数）、limit（请求上限）、has_more（是否还有更多）。创建章节时如需指定所属卷，先用本工具确认 volume_id。"""
+    async def list_volumes(self, limit: int = 20, offset: int = 0) -> str:
+        """列出当前作品卷概览，按卷顺序排列。返回 id/order_index/title。返回结果包含分页元数据：items、total、returned、limit、offset、has_more。当 has_more 为 true 时，应使用 offset + limit 作为下一次调用的 offset 继续翻页获取剩余数据，而不是增大 limit 重新请求。创建章节时如需指定所属卷，先用本工具确认 volume_id。"""
         limit = _normalize_list_limit(limit)
+        offset = max(0, offset)
         async with self._db_lock:
             await _ensure_default_volume(self.db, self.work_id)
             total = (await self.db.execute(
@@ -567,6 +609,7 @@ class GoodguaTools(Toolkit):
                 select(Volume)
                 .where(Volume.work_id == self.work_id)
                 .order_by(Volume.order_index)
+                .offset(offset)
                 .limit(limit)
             )
             items = [_serialize_lite(v, ["id", "order_index", "title"]) for v in result.scalars()]
@@ -575,7 +618,8 @@ class GoodguaTools(Toolkit):
                 "total": total,
                 "returned": len(items),
                 "limit": limit,
-                "has_more": total > len(items),
+                "offset": offset,
+                "has_more": offset + len(items) < total,
             }, ensure_ascii=False)
 
     async def create_volume(self, title: str) -> str:
@@ -630,7 +674,7 @@ class GoodguaTools(Toolkit):
                 raise
 
     async def get_chapter(self, chapter_id: str) -> str:
-        """获取指定章节的完整信息，包含正文全文（content 字段）和字数（word_count 字段）。章节不存在时返回 error。数据量较大，仅在需要阅读或参考正文时调用。与 list_chapters 的区别：本工具返回正文全文，list_chapters 只返回目录概览（不含 content），浏览章节结构时优先使用 list_chapters。"""
+        """获取指定章节完整信息，含带行号的正文（content 字段）和字数（word_count 字段）。正文中每行以 "行号 " 开头（如 "1 彭校长的办公室不大。"），空行也有行号。total_lines 字段为总行数。章节不存在时返回 error。数据量较大，仅在需要阅读或参考正文时调用。"""
         async with self._db_lock:
             result = await self.db.execute(
                 select(Chapter).where(Chapter.id == chapter_id, Chapter.work_id == self.work_id)
@@ -639,18 +683,22 @@ class GoodguaTools(Toolkit):
             if chapter is None:
                 return json.dumps({"error": "chapter not found"}, ensure_ascii=False)
             data = _serialize(chapter)
+            numbered, total_lines = _add_line_numbers(chapter.content or "")
+            data["content"] = numbered
+            data["total_lines"] = total_lines
             data["word_count"] = _count_words(chapter.content or "")
             return json.dumps(data, ensure_ascii=False)
 
-    async def list_chapters(self, limit: int = 20) -> str:
-        """列出当前作品章节目录概览，按章节顺序排列。默认最多返回 20 条，仅返回 id/volume_id/order_index/title/summary/word_count，不包含正文（content）。返回结果包含分页元数据：items（章节列表）、total（总数）、returned（本次返回数）、limit（请求上限）、has_more（是否还有更多）。需查看正文内容时使用 get_chapter。"""
+    async def list_chapters(self, limit: int = 20, offset: int = 0) -> str:
+        """列出当前作品章节目录概览，按章节顺序排列。仅返回 id/volume_id/order_index/title/summary/word_count，不包含正文（content）。返回结果包含分页元数据：items、total、returned、limit、offset、has_more。当 has_more 为 true 时，应使用 offset + limit 作为下一次调用的 offset 继续翻页获取剩余数据，而不是增大 limit 重新请求。需查看正文内容时使用 get_chapter。"""
         limit = _normalize_list_limit(limit)
+        offset = max(0, offset)
         async with self._db_lock:
             await _ensure_default_volume(self.db, self.work_id)
             total = (await self.db.execute(
                 select(func.count(Chapter.id)).where(Chapter.work_id == self.work_id)
             )).scalar() or 0
-            result = await self.db.execute(ordered_chapters_statement(self.work_id).limit(limit))
+            result = await self.db.execute(ordered_chapters_statement(self.work_id).offset(offset).limit(limit))
             chapters = list(result.scalars())
             items = [
                 {
@@ -664,7 +712,8 @@ class GoodguaTools(Toolkit):
                 "total": total,
                 "returned": len(items),
                 "limit": limit,
-                "has_more": total > len(items),
+                "offset": offset,
+                "has_more": offset + len(items) < total,
             }, ensure_ascii=False)
 
     async def create_chapter(
@@ -762,8 +811,15 @@ class GoodguaTools(Toolkit):
         title: str | None = None,
         summary: str | None = None,
         content: str | None = None,
+        start_line: int | None = None,
+        end_line: int | None = None,
     ) -> str:
-        """更新指定章节的标题、摘要和/或正文。只传需要修改的字段，未传的字段保持不变。可同时修改多个字段（如同时改标题和正文）。content 变更时系统自动展示新旧 diff，**不要**先输出修改内容到对话中——直接调用工具即可。"""
+        """更新指定章节的标题、摘要和/或正文。只传需要修改的字段，未传的字段保持不变。可同时修改多个字段。content 变更时系统自动展示新旧 diff，**不要**先输出修改内容到对话中——直接调用工具即可。
+
+支持部分更新：传入 start_line 和 end_line 时，只替换指定行范围，大幅节省 token。
+- start_line <= end_line：替换 [start_line, end_line] 行
+- end_line < start_line（或 end_line 缺省时传 start_line - 1）：在 start_line 之前插入新内容
+- 不传 start_line：全量替换（默认行为）"""
         async with self._db_lock:
             try:
                 result = await self.db.execute(
@@ -783,7 +839,62 @@ class GoodguaTools(Toolkit):
                     chapter.summary = summary
                 response["summary"] = chapter.summary
 
-                if content is not None:
+                if content is not None and start_line is not None:
+                    # --- 部分更新模式 ---
+                    old_content = chapter.content or ""
+                    old_lines = _content_to_lines(old_content)
+                    total_old = len(old_lines)
+
+                    effective_end = end_line if end_line is not None else start_line
+
+                    if start_line < 1 or start_line > total_old + 1:
+                        return json.dumps(
+                            {"error": f"start_line {start_line} 超出范围（1-{total_old + 1}）"},
+                            ensure_ascii=False,
+                        )
+                    if effective_end > total_old:
+                        return json.dumps(
+                            {"error": f"end_line {effective_end} 超出范围（最多 {total_old}）"},
+                            ensure_ascii=False,
+                        )
+
+                    new_lines = _content_to_lines(content)
+
+                    if effective_end >= start_line:
+                        # 替换模式：替换 [start_line, end_line]
+                        before = old_lines[: start_line - 1]
+                        after = old_lines[effective_end:]
+                        merged = before + new_lines + after
+                    else:
+                        # 插入模式：在 start_line 之前插入，不删已有行
+                        before = old_lines[: start_line - 1]
+                        after = old_lines[start_line - 1 :]
+                        merged = before + new_lines + after
+
+                    new_content = _lines_to_content(merged)
+                    chapter.content = new_content
+                    word_delta = _count_words(new_content) - _count_words(old_content)
+                    await _add_daily_words(self.db, self.work_id, word_delta)
+
+                    # 生成变更区域的上下文预览（变更行 ± 3 行）
+                    ctx = 3
+                    changed_start = max(0, start_line - 1 - ctx)
+                    changed_end = min(len(merged), (effective_end if effective_end >= start_line else start_line - 1) + len(new_lines) + ctx)
+                    old_ctx_start = max(0, start_line - 1 - ctx)
+                    old_ctx_end = min(len(old_lines), effective_end + ctx) if effective_end >= start_line else min(len(old_lines), start_line - 1 + ctx)
+                    old_preview = "\n".join(old_lines[old_ctx_start:old_ctx_end])
+                    new_preview = "\n".join(merged[changed_start:changed_end])
+
+                    response["old_content_preview"] = old_preview
+                    response["new_content_preview"] = new_preview
+                    response["old_content_length"] = len(old_content)
+                    response["new_content_length"] = len(new_content)
+                    response["preview_truncated"] = len(old_preview) > 500 or len(new_preview) > 500
+                    response["content_changed"] = old_content != new_content
+                    response["changed_range"] = {"start": start_line, "end": effective_end}
+
+                elif content is not None:
+                    # --- 全量替换模式 ---
                     old_content = chapter.content or ""
                     chapter.content = content
                     word_delta = _count_words(content) - _count_words(old_content)
@@ -796,6 +907,12 @@ class GoodguaTools(Toolkit):
                     response["content_changed"] = old_content != content
 
                 response["status"] = "updated"
+                if response.get("content_changed", True):
+                    from app.services.version_service import create_version_snapshot
+                    await create_version_snapshot(
+                        self.db, chapter.id, chapter.title, chapter.content,
+                        chapter.summary, source="ai", source_detail="agno-session",
+                    )
                 await self.db.commit()
                 return json.dumps(response, ensure_ascii=False)
             except Exception:

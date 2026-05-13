@@ -560,6 +560,31 @@ class TestGoodguaTools:
         content_result = json.loads(await tools.update_chapter("nonexistent", content="正文"))
         assert "error" in content_result
 
+    async def test_update_chapter_content_requires_read(self, tools: GoodguaTools, session: AsyncSession) -> None:
+        """修改章节正文前必须先 get_chapter，否则返回 error。"""
+        chapter = Chapter(work_id=tools.work_id, order_index=1, title="测试章", content="原文")
+        session.add(chapter)
+        await session.flush()
+
+        # 未读取，直接修改正文 → 拒绝
+        result = json.loads(await tools.update_chapter(chapter.id, content="新内容"))
+        assert "error" in result
+        assert "get_chapter" in result["error"]
+
+        # 读取后 → 允许修改
+        await tools.get_chapter(chapter.id)
+        ok = json.loads(await tools.update_chapter(chapter.id, content="新内容"))
+        assert "error" not in ok
+
+    async def test_create_chapter_auto_marked_read(self, tools: GoodguaTools) -> None:
+        """create_chapter 创建的章节自动标记为已读，可立即修改正文。"""
+        created = json.loads(await tools.create_chapter("新章"))
+        chapter_id = created["id"]
+
+        # 创建后直接修改正文 → 不拦截
+        result = json.loads(await tools.update_chapter(chapter_id, content="第一章内容"))
+        assert "error" not in result
+
     async def test_work_scoping(self, session: AsyncSession) -> None:
         other_work = await _make_work(session, "u-other")
         chapter = Chapter(work_id=other_work.id, order_index=1, title="其他作品章节", content="内容")

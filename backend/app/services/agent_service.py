@@ -236,7 +236,7 @@ PROMPT_TEMPLATE = """\
 **简要说明，批量执行。** 在执行一组关联的工具调用前，先用一句话概述即将进行的操作（如"我先查看当前章节结构，再更新标题和正文"），然后连续调用所有需要的工具。不要在每个工具调用前都重复描述——同一批次的操作只需开头说明一次。
 
 **直接操作，不要预览。**
-- 修改章节内容 → **先** `get_chapter` 查看行号，定位要改的段落范围，**再** `update_chapter` 指定 `start_line` / `end_line` 进行局部更新。**绝对不要**先把修改后的全文粘贴到对话中——系统会自动展示新旧 diff。
+- 修改章节正文前，**必须**先调用 `get_chapter` 读取该章节的当前内容——系统会强制校验（未读取则拒绝修改）。读取后根据行号定位要改的段落范围，再 `update_chapter` 指定 `start_line` / `end_line` 进行局部更新。**绝对不要**先把修改后的全文粘贴到对话中——系统会自动展示新旧 diff。
 - 创建或更新角色/设定 → 直接调用对应工具。操作完成后用一句话确认结果即可，不需要重复完整内容。
 
 **先了解，再创作。** 创建新章节时如果用户没有指定标题，先调用 `list_chapters` 了解现有章节结构，再生成合适的标题。
@@ -373,6 +373,7 @@ class GoodguaTools(Toolkit):
         self.db = db
         self.work_id = work_id
         self._db_lock = _work_db_lock(work_id)
+        self._read_chapters: set[str] = set()  # 本会话中已通过 get_chapter 读取过的章节 ID
         self.register(self.get_character)
         self.register(self.list_characters)
         self.register(self.create_or_update_character)
@@ -688,6 +689,7 @@ class GoodguaTools(Toolkit):
             data["content"] = numbered
             data["total_lines"] = total_lines
             data["word_count"] = _count_words(chapter.content or "")
+            self._read_chapters.add(chapter_id)
             return json.dumps(data, ensure_ascii=False)
 
     async def list_chapters(self, limit: int = 20, offset: int = 0) -> str:
@@ -792,6 +794,7 @@ class GoodguaTools(Toolkit):
                 self.db.add(chapter)
                 await self.db.commit()
                 await self.db.refresh(chapter)
+                self._read_chapters.add(chapter.id)
                 return json.dumps(
                     {
                         **_serialize_lite(
@@ -839,6 +842,12 @@ class GoodguaTools(Toolkit):
                 if summary is not None:
                     chapter.summary = summary
                 response["summary"] = chapter.summary
+
+                if content is not None and chapter_id not in self._read_chapters:
+                    return json.dumps(
+                        {"error": "必须先读取本章节内容才能修改正文，请先调用 get_chapter 查看当前内容"},
+                        ensure_ascii=False,
+                    )
 
                 if content is not None and start_line is not None:
                     # --- 部分更新模式 ---

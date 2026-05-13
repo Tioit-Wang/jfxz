@@ -272,24 +272,6 @@ def test_finalize_tool_blocks_marks_unfinished_as_error() -> None:
     assert result[2]["tool"] == "good"
 
 
-def test_build_reference_section_includes_ids() -> None:
-    from app.services.agent_service import _build_reference_section
-
-    refs = [
-        {"type": "chapter", "id": "ch-001", "name": "第一章", "summary": "开篇", "detail": "正文..."},
-        {"type": "character", "id": "char-abc", "name": "苏白", "summary": "主角", "detail": "少年剑客"},
-        {"type": "setting", "id": "set-xyz", "name": "青云宗", "summary": "修炼门派"},
-    ]
-    section = _build_reference_section(refs)
-    assert "ID：ch-001" in section
-    assert "ID：char-abc" in section
-    assert "ID：set-xyz" in section
-
-    # Without ID column — should not crash
-    no_id = [{"type": "chapter", "name": "无ID章节", "summary": "测试"}]
-    section_no_id = _build_reference_section(no_id)
-    assert "ID：" not in section_no_id
-    assert "无ID章节" in section_no_id
 
 
 async def test_send_chat_message_truncates_detail_tool_results_and_persists_done(
@@ -337,7 +319,7 @@ async def test_send_chat_message_truncates_detail_tool_results_and_persists_done
     ).scalars().first()
     stream = await send_chat_message(
         chat["id"],
-        ChatIn(message="展开角色", references=[], model_id=active_model.id),
+        ChatIn(message="展开角色", model_id=active_model.id),
         user,
         session,
     )
@@ -397,7 +379,7 @@ async def test_send_chat_message_keeps_empty_tool_results(
     ).scalars().first()
     stream = await send_chat_message(
         chat["id"],
-        ChatIn(message="空结果", references=[], model_id=active_model.id),
+        ChatIn(message="空结果", model_id=active_model.id),
         user,
         session,
     )
@@ -454,7 +436,7 @@ async def test_send_chat_message_emits_error_status_when_tool_returns_error(
     ).scalars().first()
     stream = await send_chat_message(
         chat["id"],
-        ChatIn(message="查看这个章节", references=[], model_id=active_model.id),
+        ChatIn(message="查看这个章节", model_id=active_model.id),
         user,
         session,
     )
@@ -514,7 +496,7 @@ async def test_send_chat_message_continues_after_run_completed_event(
     ).scalars().first()
     stream = await send_chat_message(
         chat["id"],
-        ChatIn(message="继续生成", references=[], model_id=active_model.id),
+        ChatIn(message="继续生成", model_id=active_model.id),
         user,
         session,
     )
@@ -561,7 +543,7 @@ async def test_send_chat_message_persists_error_messages_without_content(
     ).scalars().first()
     stream = await send_chat_message(
         chat["id"],
-        ChatIn(message="报错分支", references=[], model_id=active_model.id),
+        ChatIn(message="报错分支", model_id=active_model.id),
         user,
         session,
     )
@@ -603,7 +585,7 @@ async def test_send_chat_message_skips_empty_assistant_persistence(
     ).scalars().first()
     stream = await send_chat_message(
         chat["id"],
-        ChatIn(message="没有返回", references=[], model_id=active_model.id),
+        ChatIn(message="没有返回", model_id=active_model.id),
         user,
         session,
     )
@@ -644,7 +626,7 @@ async def test_send_chat_message_fallback_done_has_proper_fields_when_empty_stre
     ).scalars().first()
     stream = await send_chat_message(
         chat["id"],
-        ChatIn(message="测试fallback", references=[], model_id=active_model.id),
+        ChatIn(message="测试fallback", model_id=active_model.id),
         user,
         session,
     )
@@ -718,7 +700,7 @@ async def test_send_chat_message_sends_done_with_error_when_persist_fails(
     ).scalars().first()
     stream = await send_chat_message(
         chat["id"],
-        ChatIn(message="测试持久化失败", references=[], model_id=active_model.id),
+        ChatIn(message="测试持久化失败", model_id=active_model.id),
         user,
         session,
     )
@@ -800,7 +782,7 @@ async def test_send_chat_message_fallback_includes_actions_from_tool_results(
     ).scalars().first()
     stream = await send_chat_message(
         chat["id"],
-        ChatIn(message="测试actions", references=[], model_id=active_model.id),
+        ChatIn(message="测试actions", model_id=active_model.id),
         user,
         session,
     )

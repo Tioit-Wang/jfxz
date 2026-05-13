@@ -7,6 +7,7 @@ import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ApiSuggestion } from "@/api";
 import { cn } from "@/lib/utils";
+import { Quote } from "lucide-react";
 
 type EditorStyleSettings = {
   fontStack: string;
@@ -23,7 +24,16 @@ type ChapterPlainTextEditorProps = {
   disabled?: boolean;
   onChange: (value: string) => void;
   onActivateSuggestion: (index: number) => void;
+  onQuoteToChat?: (range: string, selectedText: string) => void;
   styleSettings?: EditorStyleSettings;
+};
+
+type QuoteButtonState = {
+  x: number;
+  y: number;
+  visible: boolean;
+  range: { start: number; end: number };
+  text: string;
 };
 
 type HoverState = {
@@ -95,6 +105,33 @@ function suggestionIndexFromEvent(event: Event): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
+export function getParagraphRange(doc: { forEach: (f: (block: { nodeSize: number }, offset: number) => boolean | void) => void }, from: number, to: number): { start: number; end: number } {
+  let startPara = 0;
+  let endPara = 0;
+  let currentPara = 0;
+  let foundStart = false;
+
+  doc.forEach((block, offset) => {
+    currentPara++;
+    const blockEnd = offset + block.nodeSize;
+    if (!foundStart && from <= blockEnd) {
+      startPara = currentPara;
+      foundStart = true;
+    }
+    if (to <= blockEnd) {
+      endPara = currentPara;
+      return false;
+    }
+  });
+
+  if (!foundStart) return { start: 1, end: 1 };
+  return { start: startPara, end: endPara };
+}
+
+export function formatRange(range: { start: number; end: number }): string {
+  return `L${range.start}-L${range.end}`;
+}
+
 export function ChapterPlainTextEditor({
   value,
   suggestions,
@@ -102,6 +139,7 @@ export function ChapterPlainTextEditor({
   disabled = false,
   onChange,
   onActivateSuggestion,
+  onQuoteToChat,
   styleSettings
 }: ChapterPlainTextEditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -109,6 +147,8 @@ export function ChapterPlainTextEditor({
   const activeIndexRef = useRef(activeSuggestionIndex);
   const activateRef = useRef(onActivateSuggestion);
   const [hover, setHover] = useState<HoverState | null>(null);
+  const [quoteButton, setQuoteButton] = useState<QuoteButtonState>({ x: 0, y: 0, visible: false, range: { start: 0, end: 0 }, text: "" });
+  const quoteBtnRef = useRef<HTMLButtonElement | null>(null);
 
   suggestionsRef.current = suggestions;
   activeIndexRef.current = activeSuggestionIndex;
@@ -192,6 +232,27 @@ export function ChapterPlainTextEditor({
     },
     onUpdate: ({ editor }) => {
       onChange(plainText(editor));
+    },
+    onSelectionUpdate: ({ editor }) => {
+      if (!onQuoteToChat) return;
+      const { from, to, empty } = editor.state.selection;
+      if (empty) {
+        setQuoteButton((prev) => (prev.visible ? { ...prev, visible: false } : prev));
+        return;
+      }
+      const range = getParagraphRange(editor.state.doc, from, to);
+      const selectedText = editor.state.doc.textBetween(from, to, "\n");
+      const coords = editor.view.coordsAtPos(from);
+      if (containerRef.current) {
+        const containerRect = containerRef.current.getBoundingClientRect();
+        setQuoteButton({
+          x: coords.left - containerRect.left,
+          y: coords.top - containerRect.top - 40,
+          visible: true,
+          range,
+          text: selectedText,
+        });
+      }
     }
   });
 
@@ -240,6 +301,23 @@ export function ChapterPlainTextEditor({
         >
           {hover.issue}
         </div>
+      ) : null}
+      {quoteButton.visible ? (
+        <button
+          ref={quoteBtnRef}
+          className="absolute z-20 inline-flex items-center gap-1.5 rounded-lg border border-border bg-popover px-3 py-1.5 text-xs font-medium text-foreground shadow-soft transition-colors hover:bg-accent hover:text-accent-foreground"
+          style={{ left: quoteButton.x, top: Math.max(0, quoteButton.y) }}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            const range = formatRange(quoteButton.range);
+            onQuoteToChat?.(range, quoteButton.text);
+            setQuoteButton((prev) => ({ ...prev, visible: false }));
+          }}
+          aria-label="引用选中文本到对话"
+        >
+          <Quote size={13} />
+          引用到对话
+        </button>
       ) : null}
       <EditorContent editor={editor} aria-label="章节正文" className="flex min-h-[58vh] flex-1 flex-col" />
     </div>

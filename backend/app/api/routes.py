@@ -59,7 +59,6 @@ from app.services.workspace_structure import move_volume_to_order, ordered_chapt
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-REFERENCE_LIMIT = 20
 USER_COOKIE = "goodgua_session"
 ADMIN_COOKIE = "goodgua_admin_session"
 CSRF_COOKIE = "goodgua_csrf"
@@ -143,8 +142,6 @@ class WritingGoalIn(BaseModel):
 class ChatIn(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     model_id: str | None = Field(default=None, max_length=100)
-    mentions: list[dict[str, Any]] = Field(default_factory=list, max_length=REFERENCE_LIMIT)
-    references: list[dict[str, Any]] = Field(default_factory=list, max_length=REFERENCE_LIMIT)
     thinking_intensity: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
@@ -1957,8 +1954,6 @@ def normalized_run(run: dict[str, Any], index: int) -> dict[str, Any]:
             "id": f"corrupted-{index}",
             "role": "assistant",
             "content": "[数据损坏]",
-            "mentions": [],
-            "references": [],
             "actions": [],
             "created_at": now().isoformat(),
             "billing_failed": False,
@@ -1972,8 +1967,6 @@ def normalized_run(run: dict[str, Any], index: int) -> dict[str, Any]:
         "id": message_id,
         "role": role,
         "content": str(run.get("content", "")),
-        "mentions": run.get("mentions") or [],
-        "references": run.get("references") or [],
         "actions": run.get("actions") or [],
         "created_at": created_at,
     }
@@ -2070,148 +2063,6 @@ def message_page(
     }
 
 
-def normalize_mentions(mentions: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    normalized: list[dict[str, Any]] = []
-    for mention in mentions[:REFERENCE_LIMIT]:
-        ref_type = str(mention.get("type", ""))
-        ref_id = str(mention.get("id", ""))
-        label = str(mention.get("label", ""))
-        start = mention.get("start")
-        end = mention.get("end")
-        if ref_type not in {"chapter", "character", "setting"} or not ref_id or not label:
-            continue
-        if not isinstance(start, int) or not isinstance(end, int) or start < 0 or end <= start:
-            continue
-        normalized.append(
-            {"type": ref_type, "id": ref_id, "label": label, "start": start, "end": end}
-        )
-    return normalized
-
-
-def normalize_references(
-    references: list[dict[str, Any]], mentions: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    normalized: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
-
-    def add(ref: dict[str, Any]) -> None:
-        ref_type = str(ref.get("type", ""))
-        ref_id = str(ref.get("id", ""))
-        if not ref_type or not ref_id:
-            return
-        key = (ref_type, ref_id)
-        if key in seen:
-            return
-        seen.add(key)
-        item = {"type": ref_type, "id": ref_id}
-        for field in ["name", "summary", "quote", "issue", "replacement", "detail"]:
-            if ref.get(field):
-                item[field] = str(ref.get(field))
-        normalized.append(item)
-
-    for mention in mentions:
-        add({"type": mention["type"], "id": mention["id"], "name": mention["label"]})
-    for ref in references[:REFERENCE_LIMIT]:
-        add(ref)
-    return normalized[:REFERENCE_LIMIT]
-
-
-async def reference_context(
-    session: AsyncSession, work_id: str, references: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    selected_refs: list[dict[str, str]] = []
-    seen: set[tuple[str, str]] = set()
-    ids_by_type = {"chapter": set(), "character": set(), "setting": set()}
-    for ref in references[:REFERENCE_LIMIT]:
-        ref_type = str(ref.get("type", ""))
-        ref_id = str(ref.get("id", ""))
-        if ref_type in ids_by_type:
-            if not ref_id:
-                continue
-            key = (ref_type, ref_id)
-            if key in seen:
-                continue
-            seen.add(key)
-            selected_refs.append({"type": ref_type, "id": ref_id})
-            ids_by_type[ref_type].add(ref_id)
-        elif ref_type == "suggestion":
-            selected_refs.append(
-                {
-                    "type": "suggestion",
-                    "id": ref_id,
-                    "name": str(ref.get("name", "")),
-                    "summary": str(ref.get("summary") or ref.get("issue") or ""),
-                    "detail": str(
-                        ref.get("quote") or ref.get("replacement") or ref.get("detail") or ""
-                    ),
-                }
-            )
-
-    async def fetch_by_ids(model: type[Any], ids: set[str]) -> dict[str, Any]:
-        if not ids:
-            return {}
-        result = await session.execute(
-            select(model).where(model.work_id == work_id, model.id.in_(ids))
-        )
-        return {item.id: item for item in result.scalars()}
-
-    chapters = await fetch_by_ids(Chapter, ids_by_type["chapter"])
-    characters = await fetch_by_ids(Character, ids_by_type["character"])
-    settings = await fetch_by_ids(SettingItem, ids_by_type["setting"])
-
-    contexts: list[dict[str, Any]] = []
-    for ref in selected_refs:
-        ref_type = ref["type"]
-        ref_id = ref.get("id", "")
-        if ref_type == "chapter":
-            item = chapters.get(ref_id)
-            if item is not None:
-                contexts.append(
-                    {
-                        "type": "chapter",
-                        "id": item.id,
-                        "name": item.title,
-                        "summary": item.summary or "",
-                        "detail": item.content[:500],
-                    }
-                )
-        elif ref_type == "character":
-            item = characters.get(ref_id)
-            if item is not None:
-                contexts.append(
-                    {
-                        "type": "character",
-                        "id": item.id,
-                        "name": item.name,
-                        "summary": item.summary,
-                        "detail": item.detail or "",
-                    }
-                )
-        elif ref_type == "setting":
-            item = settings.get(ref_id)
-            if item is not None:
-                contexts.append(
-                    {
-                        "type": "setting",
-                        "id": item.id,
-                        "name": item.name,
-                        "summary": item.summary,
-                        "detail": item.detail or "",
-                    }
-                )
-        else:
-            contexts.append(
-                {
-                    "type": "suggestion",
-                    "id": ref_id or f"suggestion-{len(contexts) + 1}",
-                    "name": ref.get("name") or "AI 建议",
-                    "summary": ref.get("summary") or "",
-                    "detail": ref.get("detail") or "",
-                }
-            )
-    return contexts
-
-
 def encode_sse(event: str | None, data: Any) -> bytes:
     prefix = f"event: {event}\n" if event else ""
     payload = json.dumps(data, ensure_ascii=False)
@@ -2302,20 +2153,14 @@ async def send_chat_message(
             detail="AI provider not configured, please set GOODGUA_AI_PROVIDER_API_KEY",
         )
 
-    # Context collection (before pre-check so we can estimate tokens accurately)
+    # Context collection
     work = await owned_work(session, user.id, chat.work_id)
-    mentions = normalize_mentions(payload.mentions)
-    references = normalize_references(payload.references, mentions)
-    refs = await reference_context(session, chat.work_id, references)
 
     # Pre-check balance with improved token estimation
     from app.services.billing_service import pre_check_balance
 
     estimated_tokens = _SYSTEM_PROMPT_TOKEN_ESTIMATE
     estimated_tokens += _estimate_tokens(payload.message)
-    for ref in refs:
-        estimated_tokens += _estimate_tokens(ref.get("summary", ""))
-        estimated_tokens += _estimate_tokens(ref.get("detail", ""))
     estimated_tokens += _estimate_tokens(work.short_intro or "")
     estimated_tokens += _estimate_tokens(work.synopsis or "")
     await pre_check_balance(session, user.id, model, estimated_input_tokens=estimated_tokens)
@@ -2327,8 +2172,6 @@ async def send_chat_message(
         "id": str(uuid4()),
         "role": "user",
         "content": payload.message,
-        "mentions": mentions,
-        "references": references,
         "created_at": now().isoformat(),
     }
     run_lock = _agent_run_lock(chat.agno_session_id)
@@ -2383,8 +2226,6 @@ async def send_chat_message(
                 "id": str(uuid4()),
                 "role": "assistant",
                 "content": "".join(full_content_parts),
-                "mentions": [],
-                "references": references,
                 "actions": actions,
                 "blocks": finalize_tool_blocks(blocks),
                 "tool_results": tool_results,
@@ -2412,8 +2253,6 @@ async def send_chat_message(
                 "id": str(uuid4()),
                 "role": "assistant",
                 "content": full_content,
-                "mentions": [],
-                "references": references,
                 "actions": actions,
                 "blocks": finalized_blocks,
                 "tool_results": tool_results,
@@ -2439,7 +2278,6 @@ async def send_chat_message(
             agno_agent = create_agent(
                 model=model,
                 work=work,
-                refs=refs,
                 db_session=session,
                 tool_db_session=tool_session,
                 work_id=chat.work_id,

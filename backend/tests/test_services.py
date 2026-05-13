@@ -154,19 +154,20 @@ class TestAgentServiceHelpers:
 
     def test_build_system_prompt_includes_work_info(self) -> None:
         work = Work(title="雾港纪事", short_intro="港城故事", synopsis="灯塔", genre_tags=["奇幻"], background_rules="规则")
-        prompt = build_system_prompt(work, [])
+        prompt = build_system_prompt(work)
         assert "雾港纪事" in prompt
         assert "港城故事" in prompt
         assert "奇幻" in prompt
         assert "get_character" in prompt
         assert "list_volumes" in prompt
 
-    def test_build_system_prompt_includes_refs(self) -> None:
-        work = Work(title="作品")
-        refs = [{"type": "character", "name": "苏白", "summary": "主角", "detail": "细节"}]
-        prompt = build_system_prompt(work, refs)
-        assert "苏白" in prompt
-        assert "主角" in prompt
+    def test_build_system_prompt_includes_work_info(self) -> None:
+        work = Work(title="作品", short_intro="简介", genre_tags=["奇幻"])
+        prompt = build_system_prompt(work)
+        assert "作品" in prompt
+        assert "简介" in prompt
+        assert "奇幻" in prompt
+        assert "引用标记" in prompt  # 新格式说明已添加
 
     async def test_serialize_handles_datetime_and_decimal(self, session: AsyncSession) -> None:
         work = Work(user_id="u-serialize", title="测试", short_intro="s", genre_tags=[])
@@ -191,11 +192,12 @@ class TestAgentServiceHelpers:
         assert lite["display_name"] == "TestModel"
         assert _normalize_list_limit("bad") == 20
 
-    def test_build_system_prompt_refs_without_summary_or_detail(self) -> None:
+    def test_build_system_prompt_includes_ref_mark_section(self) -> None:
         work = Work(title="作品")
-        refs = [{"type": "character", "name": "苏白"}]
-        prompt = build_system_prompt(work, refs)
-        assert "苏白" in prompt
+        prompt = build_system_prompt(work)
+        assert "引用标记" in prompt
+        assert "ref:chapter" in prompt
+        assert "get_chapter" in prompt
 
     def test_get_agent_db_caches_instance(self) -> None:
         import app.services.agent_service as _mod
@@ -225,7 +227,7 @@ class TestAgentServiceHelpers:
                 ai_provider_api_key="test-key",
                 database_url="sqlite+aiosqlite:///:memory:",
             )
-            result = create_agent(model, work, [], mock_db, "w1", "s1")
+            result = create_agent(model, work, mock_db, "w1", "s1")
             mock_agent_cls.assert_called_once()
             assert result is mock_agent_cls.return_value
         _mod._db = None
@@ -255,7 +257,6 @@ class TestAgentServiceHelpers:
             create_agent(
                 model,
                 work,
-                [],
                 mock_db,
                 "w1",
                 "s1",

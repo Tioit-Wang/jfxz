@@ -101,7 +101,6 @@ from app.api.routes import (
     normalized_run,
     owned_work,
     patch_me,
-    reference_context,
     register_email,
     seed_defaults,
     send_chat_message,
@@ -581,38 +580,6 @@ async def test_inspiration_goal_routes_and_daily_progress(session: AsyncSession)
     assert await delete_inspiration_note(work["id"], note["id"], user, session) == {"ok": True}
 
 
-async def test_reference_context_batches_refs_without_session_get(session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
-    user = await create_user_account(session, "batch-refs@example.com", "user12345", "Batch")
-    await session.commit()
-    work = await create_work(
-        WorkIn(title="批量引用", short_intro="", synopsis="", genre_tags=[], background_rules=""),
-        user,
-        session,
-    )
-    work_id = work["id"]
-    chapter = (await list_chapters(work_id, user, session))[0]
-    character = await create_character(work_id, NamedContentIn(name="角色", summary="摘要", detail=None), user, session)
-    setting = await create_setting(work_id, NamedContentIn(name="设定", summary="摘要", detail=None), user, session)
-
-    async def forbidden_get(*_args: object, **_kwargs: object) -> object:
-        raise AssertionError("reference_context should batch with execute instead of per-reference session.get")
-
-    monkeypatch.setattr(type(session), "get", forbidden_get)
-    refs = await reference_context(
-        session,
-        work_id,
-        [
-            {"type": "chapter", "id": chapter["id"]},
-            {"type": "chapter", "id": chapter["id"]},
-            {"type": "character", "id": character["id"]},
-            {"type": "setting", "id": setting["id"]},
-            {"type": "suggestion", "issue": "问题", "quote": "原文"},
-        ],
-    )
-
-    assert [item["type"] for item in refs] == ["chapter", "character", "setting", "suggestion"]
-
-
 async def test_chat_helpers_and_error_branches(session: AsyncSession) -> None:
     user = await create_user_account(session, "chat-helper@example.com", "user12345", "Helper")
     other = await create_user_account(session, "chat-other@example.com", "user12345", "Other")
@@ -623,20 +590,6 @@ async def test_chat_helpers_and_error_branches(session: AsyncSession) -> None:
         session,
     )
     work_id = work["id"]
-    chapter = (await list_chapters(work_id, user, session))[0]
-    character = await create_character(work_id, NamedContentIn(name="角色", summary="摘要", detail=None), user, session)
-    setting = await create_setting(work_id, NamedContentIn(name="设定", summary="摘要", detail=None), user, session)
-    refs = await reference_context(
-        session,
-        work_id,
-        [
-            {"type": "chapter", "id": chapter["id"]},
-            {"type": "character", "id": character["id"]},
-            {"type": "setting", "id": setting["id"]},
-            {"type": "suggestion", "issue": "问题"},
-        ],
-    )
-    assert [item["type"] for item in refs] == ["chapter", "character", "setting", "suggestion"]
     assert normalized_run({"role": "ai", "content": "旧消息"}, 2)["role"] == "assistant"
     page = message_page(
         [
@@ -657,7 +610,7 @@ async def test_chat_helpers_and_error_branches(session: AsyncSession) -> None:
     assert 'data: "文本"' in encode_sse(None, "文本").decode()
     from app.services.agent_service import build_system_prompt
     work_obj = await session.get(Work, work_id)
-    prompt = build_system_prompt(work_obj, [])
+    prompt = build_system_prompt(work_obj)
     assert work_obj.title in prompt
 
     chat = await create_chat_session(work_id, ChatSessionIn(), user, session)
@@ -665,10 +618,10 @@ async def test_chat_helpers_and_error_branches(session: AsyncSession) -> None:
         await list_chat_messages(chat["id"], other, session)
     assert list_error.value.status_code == 404
     with pytest.raises(HTTPException) as send_error:
-        await send_chat_message(chat["id"], ChatIn(message="hi", references=[]), other, session)
+        await send_chat_message(chat["id"], ChatIn(message="hi"), other, session)
     assert send_error.value.status_code == 404
     with pytest.raises(HTTPException) as points_error:
-        await send_chat_message(chat["id"], ChatIn(message="hi", references=[]), user, session)
+        await send_chat_message(chat["id"], ChatIn(message="hi"), user, session)
     assert points_error.value.status_code == 402
 
     account = await ensure_point_account(session, user.id)
@@ -683,13 +636,13 @@ async def test_chat_helpers_and_error_branches(session: AsyncSession) -> None:
     with pytest.raises(HTTPException) as inactive_model_error:
         await send_chat_message(
             chat["id"],
-            ChatIn(message="hi", references=[], model_id=inactive_model.id),
+            ChatIn(message="hi", model_id=inactive_model.id),
             user,
             session,
         )
     assert inactive_model_error.value.status_code == 400
     with pytest.raises(HTTPException) as missing_model_error:
-        await send_chat_message(chat["id"], ChatIn(message="hi", references=[], model_id="missing-model"), user, session)
+        await send_chat_message(chat["id"], ChatIn(message="hi", model_id="missing-model"), user, session)
     assert missing_model_error.value.status_code == 400
     assert (
         await session.scalar(select(func.count(PointTransaction.id)).where(PointTransaction.source_id == chat["id"]))
@@ -704,7 +657,7 @@ async def test_chat_helpers_and_error_branches(session: AsyncSession) -> None:
     await session.commit()
     active_model = (await session.execute(select(AiModel).where(AiModel.status == "active"))).scalars().first()
     stream = await send_chat_message(
-        chat["id"], ChatIn(message="首条消息", references=[], model_id=active_model.id), user, session
+        chat["id"], ChatIn(message="首条消息", model_id=active_model.id), user, session
     )
     body = b"".join([chunk async for chunk in stream.body_iterator]).decode()
     assert "event: done" in body
@@ -724,7 +677,7 @@ async def test_send_chat_without_active_models_does_not_consume_points(session: 
     await session.commit()
 
     with pytest.raises(HTTPException) as no_model_error:
-        await send_chat_message(chat["id"], ChatIn(message="hi", references=[]), user, session)
+        await send_chat_message(chat["id"], ChatIn(message="hi"), user, session)
 
     assert no_model_error.value.status_code == 503
     assert (
@@ -1448,12 +1401,6 @@ async def test_direct_user_routes_cover_core_documented_workflows(session: Async
         chat["id"],
         ChatIn(
             message="继续写章节和角色设定",
-            references=[
-                {"type": "chapter", "id": chapter["id"]},
-                {"type": "character", "id": character["id"]},
-                {"type": "setting", "id": setting["id"]},
-                {"type": "suggestion", "name": "AI 建议", "summary": "节奏建议", "quote": "正文"},
-            ],
         ),
         user,
         session,
@@ -1774,15 +1721,6 @@ def test_parse_analysis_output_requires_valid_json_and_quotes() -> None:
     assert routes_module.strip_json_fence('```json\n{"suggestions":[]}') == '{"suggestions":[]}'
 
 
-def test_normalize_mentions_skips_invalid_items() -> None:
-    assert routes_module.normalize_mentions(
-        [
-            {"type": "bad", "id": "x", "label": "坏", "start": 0, "end": 1},
-            {"type": "chapter", "id": "c1", "label": "章", "start": "0", "end": 1},
-            {"type": "chapter", "id": "c2", "label": "章二", "start": 1, "end": 1},
-            {"type": "setting", "id": "s1", "label": "设定", "start": 0, "end": 3},
-        ]
-    ) == [{"type": "setting", "id": "s1", "label": "设定", "start": 0, "end": 3}]
 
 
 async def test_request_analysis_configuration_and_http_paths(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1836,31 +1774,6 @@ async def test_request_analysis_configuration_and_http_paths(monkeypatch: pytest
     assert request_error.value.status_code == 502
 
 
-async def test_reference_context_ignores_missing_ids_and_preserves_suggestions(session: AsyncSession) -> None:
-    user = await create_user_account(session, "refs-missing@example.com", "user12345")
-    await session.commit()
-    work = await create_work(WorkIn(title="引用缺口", short_intro="", synopsis="", genre_tags=[], background_rules=""), user, session)
-    chapter = (await list_chapters(work["id"], user, session))[0]
-
-    refs = await reference_context(
-        session,
-        work["id"],
-        [
-            {"type": "chapter", "id": ""},
-            {"type": "unknown", "id": "ignored"},
-            {"type": "suggestion", "detail": "直接建议"},
-            {"type": "suggestion", "detail": "后续建议"},
-            {"type": "chapter", "id": chapter["id"]},
-            {"type": "chapter", "id": "missing-chapter"},
-            {"type": "character", "id": "missing-character"},
-            {"type": "setting", "id": "missing-setting"},
-        ],
-    )
-
-    assert [item["type"] for item in refs] == ["suggestion", "suggestion", "chapter"]
-    assert refs[0]["id"] == "suggestion-1"
-
-
 async def test_send_chat_done_event_survives_deleted_agent(session: AsyncSession) -> None:
     user = await create_user_account(session, "deleted-agent@example.com", "user12345")
     await session.commit()
@@ -1869,7 +1782,7 @@ async def test_send_chat_done_event_survives_deleted_agent(session: AsyncSession
     account = await ensure_point_account(session, user.id)
     account.vip_daily_points_balance = 10000000
     await session.commit()
-    stream = await send_chat_message(chat["id"], ChatIn(message="删除后仍完成", references=[]), user, session)
+    stream = await send_chat_message(chat["id"], ChatIn(message="删除后仍完成"), user, session)
     chat_model = await session.get(ChatSession, chat["id"])
     agent = await session.get(AgentRunStore, chat_model.agno_session_id)
     await session.delete(agent)
@@ -2115,7 +2028,7 @@ async def test_send_chat_streams_tool_call_started_and_empty_content(
     try:
         active_model = (await session.execute(select(AiModel).where(AiModel.status == "active"))).scalars().first()
         stream = await send_chat_message(
-            chat["id"], ChatIn(message="测试流式事件", references=[], model_id=active_model.id), user, session
+            chat["id"], ChatIn(message="测试流式事件", model_id=active_model.id), user, session
         )
         body = b"".join([chunk async for chunk in stream.body_iterator]).decode()
         assert "event: done" in body
@@ -2165,7 +2078,7 @@ async def test_send_chat_persists_partial_assistant_message_after_stream_error(
     try:
         active_model = (await session.execute(select(AiModel).where(AiModel.status == "active"))).scalars().first()
         stream = await send_chat_message(
-            chat["id"], ChatIn(message="测试中断", references=[], model_id=active_model.id), user, session
+            chat["id"], ChatIn(message="测试中断", model_id=active_model.id), user, session
         )
         body = b"".join([chunk async for chunk in stream.body_iterator]).decode()
         assert "event: done" in body
@@ -2198,7 +2111,7 @@ async def test_send_chat_rejects_missing_api_key_in_non_test_env(
     monkeypatch.setattr(routes_module, "get_settings", lambda: test_settings)
 
     with pytest.raises(HTTPException) as exc:
-        await send_chat_message(chat["id"], ChatIn(message="hi", references=[]), user, session)
+        await send_chat_message(chat["id"], ChatIn(message="hi"), user, session)
     assert exc.value.status_code == 503
 
 
@@ -2237,7 +2150,7 @@ async def test_send_chat_billing_failure_when_no_metrics(
     try:
         active_model = (await session.execute(select(AiModel).where(AiModel.status == "active"))).scalars().first()
         stream = await send_chat_message(
-            chat["id"], ChatIn(message="测试", references=[], model_id=active_model.id), user, session
+            chat["id"], ChatIn(message="测试", model_id=active_model.id), user, session
         )
         body = b"".join([chunk async for chunk in stream.body_iterator]).decode()
         assert "event: done" in body
@@ -2265,7 +2178,7 @@ async def test_send_chat_billing_exception_during_deduction(
     monkeypatch.setattr("app.services.billing_service.deduct_by_usage", _failing_deduct)
 
     stream = await send_chat_message(
-        chat["id"], ChatIn(message="触发扣费异常", references=[], model_id=active_model.id), user, session
+        chat["id"], ChatIn(message="触发扣费异常", model_id=active_model.id), user, session
     )
     body = b"".join([chunk async for chunk in stream.body_iterator]).decode()
     assert "event: done" in body

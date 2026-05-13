@@ -284,20 +284,14 @@ async def test_billing_chat_and_admin(client: AsyncClient) -> None:
         f"/chat-sessions/{chat['id']}/messages",
         headers=headers,
         json={
-            "message": "让 @苏白 和 @苏白 第二次更犹豫",
-            "mentions": [
-                {"type": "character", "id": "p1", "label": "苏白", "start": 2, "end": 5},
-                {"type": "character", "id": "p1", "label": "苏白", "start": 8, "end": 11},
-            ],
-            "references": [{"type": "character", "id": "p1", "name": "苏白"}],
+            "message": "让 [苏白](ref:character:p1) 和 [苏白](ref:character:p1) 第二次更犹豫",
         },
     )
     assert "data:" in stream.text
     assert "event: done" in stream.text
     messages = (await client.get(f"/chat-sessions/{chat['id']}/messages", headers=headers)).json()
     assert [message["role"] for message in messages["messages"]] == ["user", "assistant"]
-    assert len(messages["messages"][0]["mentions"]) == 2
-    assert messages["messages"][0]["references"] == [{"type": "character", "id": "p1", "name": "苏白"}]
+    assert "[苏白](ref:character:p1)" in messages["messages"][0]["content"]
     assert messages["messages"][1]["actions"]
 
     assert (await client.get("/admin/users?q=writer", headers=admin)).json()["items"]
@@ -417,7 +411,7 @@ async def test_error_paths(client: AsyncClient) -> None:
     chat = (await client.post(f"/works/{no_points_work}/chat-sessions", headers=no_points, json={})).json()
     assert (
         await client.post(
-            f"/chat-sessions/{chat['id']}/messages", headers=no_points, json={"message": "hi", "references": []}
+            f"/chat-sessions/{chat['id']}/messages", headers=no_points, json={"message": "hi"}
         )
     ).status_code == 402
     assert (

@@ -98,8 +98,6 @@ PROMPT_TEMPLATE = """\
 - 创作重点：{{ focus_requirements }}
 - 禁忌要求：{{ forbidden_requirements }}
 
-## 参考资料上下文
-{{ reference_section }}
 ## 可用工具
 
 所有数据操作都通过工具完成。每个工具返回 JSON 格式的结果。
@@ -148,7 +146,7 @@ PROMPT_TEMPLATE = """\
 - `update_volume(volume_id, title, order_index?)` — 修改指定卷
   title 覆盖原卷名；order_index 可选，仅在需要调整卷顺序时传入。
 
-- `get_chapter(chapter_id)` — 获取指定章节完整信息，含带行号的正文（content 字段）、总行数（total_lines）和字数（word_count）
+- `get_chapter(chapter_id)` — 获取指定章节完整信息，含带段落编号的正文（content 字段）、总段落数（total_lines）和字数（word_count）。正文每段以行号开头（如 "1 正文"）。当用户引用了 Ls-Le 范围时，重点阅读第 s 到 e 段。
   正文中每行格式为 "行号 正文"（如 "1 彭校长的办公室不大。"），空行也有行号。后续用 `update_chapter` 修改时可引用行号进行局部更新。
   数据量较大，仅在需要阅读或参考正文时调用。
   与 `list_chapters` 的区别：本工具返回正文全文；`list_chapters` 只返回目录概览（含字数，不含正文），浏览章节结构时优先使用。
@@ -185,6 +183,19 @@ PROMPT_TEMPLATE = """\
 - `update_work_info(field, content)` — 更新作品信息字段
   field 可选值：short_intro / synopsis / background_rules / focus_requirements / forbidden_requirements
   content 覆盖原有内容（非追加）。传入无效 field 会返回 error 和可选值列表。
+
+## 引用标记
+
+用户消息中可能包含引用标记，格式为 [名称](ref:type:id) 或 [名称](ref:type:id:Ls-Le)。
+
+- [名称](ref:chapter:id) → 调用 get_chapter(chapter_id=id) 获取详情
+- [名称](ref:chapter:id:Ls-Le) → 调用 get_chapter(chapter_id=id)，重点关注正文中第 s 到 e 段
+- [名称](ref:character:id) → 调用 get_character(character_id=id) 获取详情
+- [名称](ref:setting:id) → 调用 get_setting(setting_id=id) 获取详情
+
+当用户使用"这段"、"此处"、"上面"等指代词时，通常指向引用标记所指内容。请先调用工具获取引用内容再回答。
+
+不要在回复中使用 [名称](ref:...) 格式，使用自然中文回复。
 
 ## 写作技巧
 
@@ -232,28 +243,7 @@ PROMPT_TEMPLATE = """\
 - **对外表述规范**：所有自然语言输出（包括工具调用前的说明、工具返回后的确认、对话回复）都只能使用中文业务语义描述，不得直接输出工具函数名、接口名、内部标识符或代码式调用表达式。"""
 
 
-def _build_reference_section(refs: list[dict]) -> str:
-    if not refs:
-        return "（无）\n"
-    lines = []
-    for ref in refs:
-        ref_type = ref.get("type", "")
-        ref_id = ref.get("id", "")
-        name = ref.get("name", "")
-        summary = ref.get("summary", "")
-        detail = ref.get("detail", "")
-        lines.append(f"### [{ref_type}] {name}")
-        if ref_id:
-            lines.append(f"ID：{ref_id}")
-        if summary:
-            lines.append(f"摘要：{summary}")
-        if detail:
-            lines.append(f"详情：{detail}")
-        lines.append("")
-    return "\n".join(lines)
-
-
-def build_system_prompt(work: Work, refs: list[dict]) -> str:
+def build_system_prompt(work: Work) -> str:
     return (
         PROMPT_TEMPLATE.replace("{{ title }}", work.title)
         .replace("{{ short_intro }}", work.short_intro or "（无）")
@@ -265,7 +255,6 @@ def build_system_prompt(work: Work, refs: list[dict]) -> str:
         .replace("{{ synopsis }}", work.synopsis or "（无）")
         .replace("{{ focus_requirements }}", work.focus_requirements or "（无）")
         .replace("{{ forbidden_requirements }}", work.forbidden_requirements or "（无）")
-        .replace("{{ reference_section }}", _build_reference_section(refs))
     )
 
 
@@ -295,14 +284,14 @@ def _serialize_lite(model, fields: list[str]) -> dict:
 
 
 def _add_line_numbers(text: str) -> tuple[str, int]:
-    """为正文每行添加行号前缀，返回 (带行号的文本, 总行数)。"""
+    """为正文每段添加段落编号，返回 (带编号的文本, 总段落数)。"""
     if not text:
         return "", 0
-    lines = text.split("\n")
-    if lines and lines[-1] == "":
-        lines = lines[:-1]
-    total = len(lines)
-    numbered = "\n".join(f"{i + 1} {line}" for i, line in enumerate(lines))
+    paragraphs = text.split("\n")
+    if paragraphs and paragraphs[-1] == "":
+        paragraphs = paragraphs[:-1]
+    total = len(paragraphs)
+    numbered = "\n".join(f"{i + 1} {p}" for i, p in enumerate(paragraphs))
     return numbered, total
 
 
@@ -674,7 +663,7 @@ class GoodguaTools(Toolkit):
                 raise
 
     async def get_chapter(self, chapter_id: str) -> str:
-        """获取指定章节完整信息，含带行号的正文（content 字段）和字数（word_count 字段）。正文中每行以 "行号 " 开头（如 "1 彭校长的办公室不大。"），空行也有行号。total_lines 字段为总行数。章节不存在时返回 error。数据量较大，仅在需要阅读或参考正文时调用。"""
+        """获取指定章节完整信息，含带段落编号的正文（content 字段）和字数（word_count 字段）。正文每段以行号开头（如 "1 正文内容"），total_lines 字段为总段落数。当用户引用了特定段落范围（如 L5-L8），请重点关注第 5 到 8 段的内容。章节不存在时返回 error。"""
         async with self._db_lock:
             result = await self.db.execute(
                 select(Chapter).where(Chapter.id == chapter_id, Chapter.work_id == self.work_id)
@@ -962,7 +951,6 @@ class GoodguaTools(Toolkit):
 def create_agent(
     model,
     work: Work,
-    refs: list[dict],
     db_session: AsyncSession,
     work_id: str,
     agno_session_id: str,
@@ -971,7 +959,7 @@ def create_agent(
 ) -> Agent:
     settings = get_settings()
     toolkit = GoodguaTools(db=tool_db_session or db_session, work_id=work_id)
-    prompt = build_system_prompt(work, refs)
+    prompt = build_system_prompt(work)
     model_cls = DeepSeek if "deepseek" in model.provider_model_id.lower() else OpenAIChat
     model_kwargs: dict = dict(
         id=model.provider_model_id,

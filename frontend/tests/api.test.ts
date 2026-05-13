@@ -61,6 +61,8 @@ describe("api client", () => {
       focusRequirements: "",
       forbiddenRequirements: "",
       updatedAt: "",
+      shareEnabled: false,
+      shareToken: null,
       tags: ["奇幻"]
     });
     expect(mapChapter({ id: "c1", order_index: 1, title: "章", summary: null, content: "正文" })).toEqual({
@@ -452,15 +454,13 @@ describe("api client", () => {
     const client = new ApiClient("http://api", fetcher);
     const chunks: string[] = [];
 
-    await expect(client.streamChatMessage("s1", "hi", [], [], (chunk) => chunks.push(chunk), "model-1")).resolves.toMatchObject({
+    await expect(client.streamChatMessage("s1", "hi", (chunk) => chunks.push(chunk), "model-1")).resolves.toMatchObject({
       id: "a1",
       content: "你好"
     });
     expect(chunks).toEqual(["你", "好"]);
     expect(JSON.parse(fetcher.mock.calls[0][1]?.body as string)).toEqual({
       message: "hi",
-      references: [],
-      mentions: [],
       model_id: "model-1"
     });
   });
@@ -496,8 +496,6 @@ describe("api client", () => {
     const result = await client.streamChatMessage(
       "s1",
       "列出角色",
-      [],
-      [],
       (chunk) => chunks.push(chunk),
       undefined,
       undefined,
@@ -538,7 +536,7 @@ describe("api client", () => {
     const toolCalls: Array<{ tool: string; status: string }> = [];
 
     const result = await client.streamChatMessage(
-      "s1", "hi", [], [], vi.fn(), undefined, undefined, (tool, status) => toolCalls.push({ tool, status })
+      "s1", "hi",vi.fn(), undefined, undefined, (tool, status) => toolCalls.push({ tool, status })
     );
     expect(result).toMatchObject({ id: "a3" });
     expect(toolCalls).toEqual([]);
@@ -582,11 +580,11 @@ describe("api client", () => {
       hasMore: true,
       nextBefore: "older"
     });
-    await expect(client.streamChatMessage("s1", "hi", [], [], (chunk) => chunks.push(chunk))).resolves.toMatchObject({
+    await expect(client.streamChatMessage("s1", "hi",(chunk) => chunks.push(chunk))).resolves.toMatchObject({
       id: "a2"
     });
     expect(chunks).toEqual(["片段"]);
-    await expect(client.streamChatMessage("s1", "hi", [], [], vi.fn())).rejects.toMatchObject(
+    await expect(client.streamChatMessage("s1", "hi",vi.fn())).rejects.toMatchObject(
       new ApiError("stream body unavailable", 200)
     );
   });
@@ -599,7 +597,7 @@ describe("api client", () => {
       }
     });
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(stream, { status: 200 }));
-    await expect(new ApiClient("http://api", fetcher).streamChatMessage("s1", "hi", [], [], vi.fn())).rejects.toMatchObject(
+    await expect(new ApiClient("http://api", fetcher).streamChatMessage("s1", "hi",vi.fn())).rejects.toMatchObject(
       new ApiError("missing final assistant message", 200)
     );
   });
@@ -628,7 +626,7 @@ describe("api client", () => {
     const client = new ApiClient("http://api", fetcher);
     const errors: string[] = [];
 
-    const result = await client.streamChatMessage("s1", "hi", [], [], vi.fn(), undefined, undefined, undefined, (message) => errors.push(message));
+    const result = await client.streamChatMessage("s1", "hi",vi.fn(), undefined, undefined, undefined, (message) => errors.push(message));
 
     expect(result).toMatchObject({ id: "a4", content: "半截回复", error: "Tool 'list_characters' failed: timeout" });
     expect(result.blocks).toEqual([{ type: "text", text: "半截回复" }]);
@@ -1007,7 +1005,7 @@ describe("api client", () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(stream, { status: 200 }));
     const client = new ApiClient("http://api", fetcher);
 
-    const result = await client.streamChatMessage("s1", "hi", [], [], vi.fn());
+    const result = await client.streamChatMessage("s1", "hi",vi.fn());
     expect(result.blocks).toBeDefined();
     expect(result.blocks!.length).toBe(2);
     expect(result.blocks![0]).toEqual({ type: "text", text: "已查询角色。" });
@@ -1032,7 +1030,7 @@ describe("api client", () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(stream, { status: 200 }));
     const client = new ApiClient("http://api", fetcher);
 
-    const result = await client.streamChatMessage("s1", "hi", [], [], vi.fn());
+    const result = await client.streamChatMessage("s1", "hi",vi.fn());
     expect(result.blocks).toBeUndefined();
   });
 });

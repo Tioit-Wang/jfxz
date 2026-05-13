@@ -171,8 +171,7 @@ export type ChatMention = {
   type: "chapter" | "character" | "setting";
   id: string;
   label: string;
-  start: number;
-  end: number;
+  range?: string;
 };
 
 export type ChatAction = {
@@ -201,8 +200,6 @@ export type ChatMessage = {
   role: "user" | "assistant";
   content: string;
   blocks?: ContentBlock[];
-  mentions: ChatMention[];
-  references: ChatReference[];
   actions: ChatAction[];
   createdAt: string;
   billing_failed?: boolean;
@@ -788,8 +785,6 @@ function mapChatMessage(message: {
   id: string;
   role: "user" | "assistant";
   content: string;
-  mentions?: ChatMention[];
-  references?: ChatReference[];
   actions?: ChatAction[];
   created_at: string;
   billing_failed?: boolean;
@@ -801,8 +796,6 @@ function mapChatMessage(message: {
     role: message.role,
     content: message.content,
     blocks: normalizeContentBlocks(message.blocks),
-    mentions: message.mentions ?? [],
-    references: message.references ?? [],
     actions: message.actions ?? [],
     createdAt: message.created_at,
     billing_failed: message.billing_failed,
@@ -926,8 +919,6 @@ export class ApiClient {
           role: "user" | "assistant";
           content: string;
           blocks?: ApiContentBlock[];
-          mentions?: ChatMention[];
-          references?: ChatReference[];
           actions?: ChatAction[];
           created_at: string;
           billing_failed?: boolean;
@@ -1570,8 +1561,6 @@ export class ApiClient {
         role: "user" | "assistant";
         content: string;
         blocks?: ApiContentBlock[];
-        mentions?: ChatMention[];
-        references?: ChatReference[];
         actions?: ChatAction[];
         created_at: string;
         billing_failed?: boolean;
@@ -1590,8 +1579,6 @@ export class ApiClient {
   async streamChatMessage(
     sessionId: string,
     message: string,
-    references: ChatReference[],
-    mentions: ChatMention[],
     onChunk: (chunk: string) => void,
     modelId?: string,
     thinkingIntensity?: number,
@@ -1604,8 +1591,6 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify({
         message,
-        references,
-        mentions,
         ...(modelId ? { model_id: modelId } : {}),
         ...(thinkingIntensity !== undefined ? { thinking_intensity: thinkingIntensity } : {}),
       })

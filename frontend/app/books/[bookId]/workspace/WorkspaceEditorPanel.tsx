@@ -42,6 +42,7 @@ type WorkspaceEditorPanelProps = {
   onAnalyze: () => void;
   onContentChange: (value: string) => void;
   onActivateSuggestion: (index: number) => void;
+  onQuoteToChat?: (range: string, selectedText: string) => void;
   remoteUpdateNotice: string | null;
   onAcceptRemoteUpdate: () => void;
 };
@@ -74,6 +75,7 @@ export function WorkspaceEditorPanel({
   onAnalyze,
   onContentChange,
   onActivateSuggestion,
+  onQuoteToChat,
   remoteUpdateNotice,
   onAcceptRemoteUpdate,
 }: WorkspaceEditorPanelProps) {
@@ -195,6 +197,7 @@ export function WorkspaceEditorPanel({
                 disabled={status === "loading"}
                 onChange={onContentChange}
                 onActivateSuggestion={onActivateSuggestion}
+                onQuoteToChat={onQuoteToChat}
                 styleSettings={styleSettings}
               />
             </>

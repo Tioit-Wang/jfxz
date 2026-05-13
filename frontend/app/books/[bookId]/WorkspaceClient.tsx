@@ -60,6 +60,7 @@ import {
 } from "@/api";
 import { userLoginPath } from "@/auth";
 import { type ChatMentionInputHandle } from "@/components/ChatMentionInput";
+import { parseRefMarks } from "@/lib/ref-mark";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -771,22 +772,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     persistRecentReferences(next);
   }
 
-  function explicitReferences(message: string): ChatReference[] {
-    return allReferenceItems.filter((ref) => message.includes(`@${ref.name}`));
-  }
-
-  function mentionReferences(mentions: ChatMention[]): ChatReference[] {
-    return mentions.map((mention) => {
-      const item = allReferenceItems.find((ref) => ref.type === mention.type && ref.id === mention.id);
-      return {
-        type: mention.type,
-        id: mention.id,
-        name: item?.name ?? mention.label,
-        summary: item?.summary
-      };
-    });
-  }
-
   function clearChatDraft() {
     setChatInput("");
     setChatMentions([]);
@@ -1044,6 +1029,14 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     chatInputRef.current?.insertMention(reference);
   }
 
+  function handleQuoteToChat(chapterId: string, chapterName: string, range: string) {
+    if (chatStatus === "streaming") return;
+    chatInputRef.current?.insertQuoteMention(
+      { id: chapterId, name: chapterName, summary: "", type: "chapter" },
+      range
+    );
+  }
+
   async function sendMessage() {
     const message = chatInput;
     if (!message.trim() || !selectedModelId) return;
@@ -1060,14 +1053,12 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       setActiveSessionId(session.id);
       sessionId = session.id;
     }
-    const references = dedupeReferences([...pendingReferences, ...mentionReferences(chatMentions), ...explicitReferences(message)]);
+    const references = dedupeReferences([...pendingReferences]);
     rememberReferences(references);
     const userMessage: ChatMessage = {
       id: `local-user-${Date.now()}`,
       role: "user",
       content: message,
-      mentions: chatMentions,
-      references,
       actions: [],
       createdAt: new Date().toISOString()
     };
@@ -1077,8 +1068,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       id: assistantId,
       role: "assistant",
       content: "",
-      mentions: [],
-      references,
       actions: [],
       createdAt: new Date().toISOString()
     };
@@ -1091,8 +1080,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       const final = await client.streamChatMessage(
         sessionId,
         message,
-        references,
-        chatMentions,
         (chunk) => {
           setMessages((items) =>
             items.map((item) => {
@@ -1883,34 +1870,28 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       );
     }
 
-    // Render without blocks (simple messages, user messages with mentions)
-    const mentions = message.mentions
-      .filter((mention) => mention.start >= 0 && mention.end > mention.start && mention.end <= message.content.length)
-      .sort((left, right) => left.start - right.start);
+    // Render without blocks (simple messages, user messages with ref marks)
+    const refMarks = parseRefMarks(message.content);
+    if (!refMarks.length) return renderMarkdown(message.content, isStreaming);
 
-    if (!mentions.length) return renderMarkdown(message.content, isStreaming);
-
+    const nodes: ReactNode[] = [];
     let cursor = 0;
-    return (
-      <p>
-        {mentions.flatMap((mention, index) => {
-          const nodes = [];
-          if (mention.start > cursor) {
-            nodes.push(<span key={`text-${index}`}>{message.content.slice(cursor, mention.start)}</span>);
-          }
-          nodes.push(
-            <span key={`mention-${index}`} className={cn("mx-0.5 rounded border px-1.5 py-0.5 text-xs", referenceTone(mention.type))}>
-              {message.content.slice(mention.start, mention.end)}
-            </span>
-          );
-          cursor = mention.end;
-          if (index === mentions.length - 1 && cursor < message.content.length) {
-            nodes.push(<span key="text-tail">{message.content.slice(cursor)}</span>);
-          }
-          return nodes;
-        })}
-      </p>
-    );
+    refMarks.forEach((mark, index) => {
+      if (mark.start > cursor) {
+        nodes.push(<span key={`t-${index}`}>{message.content.slice(cursor, mark.start)}</span>);
+      }
+      const display = mark.range ? `@${mark.label} [${mark.range}]` : `@${mark.label}`;
+      nodes.push(
+        <span key={`r-${index}`} className={cn("mx-0.5 rounded border px-1.5 py-0.5 text-xs", referenceTone(mark.type))}>
+          {display}
+        </span>
+      );
+      cursor = mark.end;
+    });
+    if (cursor < message.content.length) {
+      nodes.push(<span key="tail">{message.content.slice(cursor)}</span>);
+    }
+    return <p>{nodes}</p>;
   }
 
   return (
@@ -2060,6 +2041,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
               setActiveSuggestionIndex(index);
               setOverlay(true);
             }}
+            onQuoteToChat={activeChapter ? (range) => handleQuoteToChat(activeChapter.id, activeChapter.title, range) : undefined}
             remoteUpdateNotice={remoteUpdateNotice}
             onAcceptRemoteUpdate={acceptRemoteUpdate}
           />

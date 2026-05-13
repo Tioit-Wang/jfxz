@@ -136,8 +136,8 @@ describe("ChatMentionInput", () => {
     );
 
     await waitFor(() =>
-      expect(onChange).toHaveBeenLastCalledWith("@苏白 ", [
-        { type: "character", id: "p1", label: "苏白", start: 0, end: 3 }
+      expect(onChange).toHaveBeenLastCalledWith("[苏白](ref:character:p1) ", [
+        { type: "character", id: "p1", label: "苏白", range: undefined }
       ])
     );
   });
@@ -166,8 +166,8 @@ describe("ChatMentionInput", () => {
 
     expect(onSelectReference).toHaveBeenCalledWith(character);
     await waitFor(() =>
-      expect(onChange).toHaveBeenCalledWith(expect.stringContaining("@苏白"), [
-        { type: "character", id: "p1", label: "苏白", start: 0, end: 3 }
+      expect(onChange).toHaveBeenCalledWith(expect.stringContaining("[苏白](ref:character:p1)"), [
+        { type: "character", id: "p1", label: "苏白", range: undefined }
       ])
     );
   });
@@ -195,9 +195,9 @@ describe("ChatMentionInput", () => {
     await user.click((await screen.findByText("苏白")).closest("button") as HTMLButtonElement);
 
     await waitFor(() =>
-      expect(onChange).toHaveBeenLastCalledWith("@苏白 和 @苏白 ", [
-        { type: "character", id: "p1", label: "苏白", start: 0, end: 3 },
-        { type: "character", id: "p1", label: "苏白", start: 6, end: 9 }
+      expect(onChange).toHaveBeenLastCalledWith("[苏白](ref:character:p1) 和 [苏白](ref:character:p1) ", [
+        { type: "character", id: "p1", label: "苏白", range: undefined },
+        { type: "character", id: "p1", label: "苏白", range: undefined }
       ])
     );
   });

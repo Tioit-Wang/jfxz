@@ -13,6 +13,7 @@ export type ChatMentionInputHandle = {
   focus: () => void;
   insertMention: (reference: Pick<ChatReference, "id" | "name" | "summary"> & { type: "chapter" | "character" }) => void;
   insertMentionWithText: (reference: Pick<ChatReference, "id" | "name" | "summary"> & { type: "chapter" | "character" }, text: string) => void;
+  insertQuoteMention: (reference: Pick<ChatReference, "id" | "name" | "summary"> & { type: "chapter" }, range: string) => void;
   setText: (value: string) => void;
 };
 
@@ -80,7 +81,7 @@ function textDoc(value: string) {
   };
 }
 
-function mentionContent(reference: Pick<ChatReference, "id" | "name" | "summary" | "type">) {
+function mentionContent(reference: Pick<ChatReference, "id" | "name" | "summary" | "type">, range?: string) {
   return [
     {
       type: "mention",
@@ -89,7 +90,8 @@ function mentionContent(reference: Pick<ChatReference, "id" | "name" | "summary"
         label: reference.name,
         name: reference.name,
         type: reference.type,
-        summary: reference.summary ?? ""
+        summary: reference.summary ?? "",
+        range: range ?? null
       }
     },
     { type: "text", text: " " }
@@ -111,11 +113,13 @@ function extractMentionText(editor: Editor): { text: string; mentions: ChatMenti
       const id = String(node.attrs.id ?? "");
       const type = node.attrs.type as ChatMention["type"];
       const label = String(node.attrs.name ?? node.attrs.label ?? "");
+      const range = node.attrs.range as string | null;
       if (!id || !label || !["chapter", "character", "setting"].includes(type)) return;
-      const mentionText = `@${label}`;
-      const start = text.length;
+      const mentionText = range
+        ? `[${label}](ref:${type}:${id}:${range})`
+        : `[${label}](ref:${type}:${id})`;
       text += mentionText;
-      mentions.push({ type, id, label, start, end: start + mentionText.length });
+      mentions.push({ type, id, label, range: range ?? undefined });
     });
   });
 
@@ -128,15 +132,26 @@ const StructuredMention = Mention.extend({
       ...(this.parent?.() ?? {}),
       name: { default: null },
       type: { default: "chapter" },
-      summary: { default: null }
+      summary: { default: null },
+      range: { default: null }
     };
   }
 }).configure({
   deleteTriggerWithBackspace: true,
   renderText({ node }) {
-    return `@${node.attrs.label ?? node.attrs.name ?? ""}`;
+    const id = node.attrs.id ?? "";
+    const type = node.attrs.type ?? "chapter";
+    const name = node.attrs.label ?? node.attrs.name ?? "";
+    const range = node.attrs.range;
+    if (range) {
+      return `[${name}](ref:${type}:${id}:${range})`;
+    }
+    return `[${name}](ref:${type}:${id})`;
   },
   renderHTML({ node }) {
+    const name = node.attrs.label ?? node.attrs.name ?? "";
+    const range = node.attrs.range;
+    const display = range ? `${name} [${range}]` : name;
     return [
       "span",
       {
@@ -144,7 +159,7 @@ const StructuredMention = Mention.extend({
           "inline-flex items-center rounded border border-border bg-muted px-1.5 py-0.5 text-xs font-medium text-foreground",
         "data-reference-type": node.attrs.type
       },
-      `@${node.attrs.label ?? node.attrs.name ?? ""}`
+      `@${display}`
     ];
   },
   suggestion: {
@@ -366,6 +381,17 @@ export const ChatMentionInput = forwardRef<ChatMentionInputHandle, ChatMentionIn
           editor
             .chain()
             .insertContentAt(endPos, [...mentionContent(reference), { type: "text", text }])
+            .focus("end")
+            .run();
+          setMention({ open: false, query: "", range: null, activeIndex: 0 });
+        },
+        insertQuoteMention(reference, range) {
+          if (!editor) return;
+          isInternalUpdateRef.current = true;
+          const endPos = editor.state.doc.content.size - 1;
+          editor
+            .chain()
+            .insertContentAt(endPos, mentionContent(reference, range))
             .focus("end")
             .run();
           setMention({ open: false, query: "", range: null, activeIndex: 0 });

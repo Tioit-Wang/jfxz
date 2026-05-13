@@ -21,7 +21,7 @@ CREATE TABLE chapter_versions (
     chapter_id VARCHAR(36) NOT NULL,
     version_number INTEGER NOT NULL,
     title VARCHAR(200) NOT NULL,
-    content TEXT NOT NULL DEFAULT '',
+    content TEXT NOT NULL,
     summary TEXT,
     source VARCHAR(20) NOT NULL,
     source_detail VARCHAR(200),
@@ -33,9 +33,9 @@ CREATE TABLE chapter_versions (
         UNIQUE (chapter_id, version_number),
     CONSTRAINT fk_chapter_versions_chapter_id__chapters
         FOREIGN KEY (chapter_id) REFERENCES chapters (id) ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE INDEX ix_chapter_versions_chapter_id ON chapter_versions (chapter_id, version_number DESC);
+ALTER TABLE chapter_versions ADD INDEX ix_chapter_versions_chapter_id (chapter_id, version_number DESC);
 
 -- Post-Checks:
 -- SELECT COUNT(*) FROM information_schema.tables

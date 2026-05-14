@@ -3,9 +3,7 @@
 import {
   BrainCircuit,
   Calendar,
-  ChevronDown,
   ChevronRight,
-  ChevronUp,
   Coins,
   CreditCard,
   FileClock,
@@ -23,12 +21,13 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { type AdminStats, type StatsTrend } from "@/api";
+import { type AdminStats } from "@/api";
 import { AdminHeading, AdminPage } from "./_components";
 import { adminClient } from "./admin-utils";
 import { formatToken } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const modules = [
   { title: "用户与权限", description: "查看用户资料、账户状态、订阅和积分", href: "/admin/users", icon: Users },
@@ -138,17 +137,14 @@ export default function AdminHome() {
     fetchStats();
   }, [fetchStats]);
 
-  function applyPreset(label: string) {
+  function selectRange(label: string, from: string, to: string) {
     setPreset(label);
-    setCustomFrom(""); setCustomTo("");
-    const p = presets.find((x) => x.label === label);
-    if (p) {
-      const r = p.getRange();
-      fetchStats(r.from, r.to);
-    }
+    setCustomFrom(from);
+    setCustomTo(to);
+    fetchStats(from, to);
   }
 
-  function applyCustom() {
+  function selectCustom() {
     if (!customFrom || !customTo) return;
     setPreset("");
     fetchStats(customFrom, customTo);
@@ -162,37 +158,38 @@ export default function AdminHome() {
       <AdminHeading title="后台概览" description="平台核心运营数据与功能入口。" />
 
       {/* Time Range Selector */}
-      <div className="flex flex-wrap items-center gap-2">
-        <Calendar className="size-4 text-muted-foreground" />
-        {presets.map((p) => (
-          <Button
-            key={p.label}
-            variant={preset === p.label ? "default" : "outline"}
-            size="sm"
-            className="h-8 text-xs"
-            onClick={() => applyPreset(p.label)}
-          >
-            {p.label}
-          </Button>
-        ))}
-        <Button variant={preset ? "outline" : "default"} size="sm" className="h-8 text-xs" onClick={() => { setPreset(""); fetchStats(); }}>
-          全部
-        </Button>
-        <span className="mx-1 h-4 w-px bg-border" />
+      <div className="flex flex-wrap items-center gap-3">
+        <Calendar className="size-4 text-muted-foreground shrink-0" />
+        <Tabs value={preset} onValueChange={(v) => {
+          const p = presets.find((x) => x.label === v);
+          if (p) { const r = p.getRange(); selectRange(v, r.from, r.to); }
+        }}>
+          <TabsList className="h-8">
+            <TabsTrigger value="" onClick={() => { setPreset(""); setCustomFrom(""); setCustomTo(""); fetchStats(); }} className="text-xs">
+              全部
+            </TabsTrigger>
+            {presets.map((p) => (
+              <TabsTrigger key={p.label} value={p.label} className="text-xs">
+                {p.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+        <span className="h-4 w-px bg-border" />
         <Input
           type="date"
           className="h-8 w-34 text-xs"
           value={customFrom}
-          onChange={(e) => setCustomFrom(e.target.value)}
+          onChange={(e) => { setCustomFrom(e.target.value); setPreset(""); }}
         />
         <span className="text-xs text-muted-foreground">至</span>
         <Input
           type="date"
           className="h-8 w-34 text-xs"
           value={customTo}
-          onChange={(e) => setCustomTo(e.target.value)}
+          onChange={(e) => { setCustomTo(e.target.value); setPreset(""); }}
         />
-        <Button variant="outline" size="sm" className="h-8 text-xs" onClick={applyCustom} disabled={!customFrom || !customTo}>
+        <Button variant="outline" size="sm" className="h-8 text-xs" onClick={selectCustom} disabled={!customFrom || !customTo}>
           应用
         </Button>
       </div>

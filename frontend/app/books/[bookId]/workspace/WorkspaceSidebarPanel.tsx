@@ -90,8 +90,9 @@ const characterAccents = [
   "from-amber-200 to-orange-100 text-amber-900",
 ];
 
-function chapterTitle(chapter: Chapter): string {
-  return chapter.title.startsWith("第") ? chapter.title : `第${chapter.order}章 ${chapter.title}`;
+function chapterTitle(chapter: Chapter, allChapters: Chapter[]): string {
+  const globalIndex = allChapters.indexOf(chapter) + 1;
+  return `第${globalIndex}章 ${chapter.title}`;
 }
 
 function progressPercent(progress: DailyWordProgress, goal: WritingGoal): number {
@@ -398,7 +399,7 @@ export function WorkspaceSidebarPanel({
                                   onDragEnd={() => setActiveDropZone(null)}
                                 >
                                   <span className="flex items-start justify-between gap-2">
-                                    <span className="truncate text-sm font-semibold">{chapterTitle(chapter)}</span>
+                                    <span className="truncate text-sm font-semibold">{chapterTitle(chapter, chapters)}</span>
                                     <span className={cn("shrink-0 text-[11px]", chapter.id === activeChapterId ? "text-white/60" : "text-neutral-400")}>
                                       {wordCount(chapter.content)}字
                                     </span>

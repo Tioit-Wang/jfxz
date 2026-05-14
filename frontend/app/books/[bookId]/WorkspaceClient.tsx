@@ -286,6 +286,10 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     () => chapters.find((chapter) => chapter.id === activeChapterId) ?? chapters[0],
     [activeChapterId, chapters]
   );
+  const chapterOrder = useMemo(
+    () => activeChapter ? chapters.indexOf(activeChapter) + 1 : 0,
+    [activeChapter, chapters]
+  );
   const currentChapterRef = useMemo(
     () =>
       activeChapter
@@ -2003,6 +2007,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
         >
           <WorkspaceEditorPanel
             activeChapter={activeChapter}
+            chapterOrder={chapterOrder}
             title={title}
             summary={summary}
             content={content}

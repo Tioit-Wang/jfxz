@@ -10,6 +10,7 @@ type SaveStatus = "loading" | "dirty" | "saving" | "saved" | "offline" | "error"
 
 type WorkspaceEditorPanelProps = {
   activeChapter?: Chapter;
+  chapterOrder: number;
   title: string;
   summary: string;
   content: string;
@@ -49,6 +50,7 @@ type WorkspaceEditorPanelProps = {
 
 export function WorkspaceEditorPanel({
   activeChapter,
+  chapterOrder,
   title,
   summary,
   content,
@@ -141,14 +143,19 @@ export function WorkspaceEditorPanel({
         <div className="flex min-h-full w-full max-w-3xl min-w-0 flex-col px-4 py-12 md:px-10">
           {activeChapter ? (
             <>
-              <input
-                aria-label="章节标题"
-                type="text"
-                value={title}
-                onChange={(event) => onTitleChange(event.target.value)}
-                className="mb-6 border-none bg-transparent text-3xl font-bold text-foreground outline-none placeholder:text-muted-foreground"
-                placeholder="无标题章节"
-              />
+              <div className="mb-6 flex items-baseline gap-2">
+                <span className="shrink-0 text-3xl font-bold text-muted-foreground select-none">
+                  第{chapterOrder}章
+                </span>
+                <input
+                  aria-label="章节标题"
+                  type="text"
+                  value={title}
+                  onChange={(event) => onTitleChange(event.target.value)}
+                  className="flex-1 border-none bg-transparent text-3xl font-bold text-foreground outline-none placeholder:text-muted-foreground"
+                  placeholder="请输入章节名称"
+                />
+              </div>
 
               <div className="group relative mb-10">
                 <div className="absolute -left-4 bottom-3 top-3 w-1 rounded-full bg-gray-200 transition-colors group-hover:bg-gray-300" />

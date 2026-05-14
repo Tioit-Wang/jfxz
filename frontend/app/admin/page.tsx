@@ -2,25 +2,33 @@
 
 import {
   BrainCircuit,
+  Calendar,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
   Coins,
   CreditCard,
   FileClock,
   MessageSquareText,
+  Minus,
   Package,
   PenLine,
   Receipt,
   Settings2,
   ShieldCheck,
+  TrendingDown,
+  TrendingUp,
   Users,
   Zap,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { type AdminStats } from "@/api";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { type AdminStats, type StatsTrend } from "@/api";
 import { AdminHeading, AdminPage } from "./_components";
 import { adminClient } from "./admin-utils";
 import { formatToken } from "@/lib/format";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 const modules = [
   { title: "用户与权限", description: "查看用户资料、账户状态、订阅和积分", href: "/admin/users", icon: Users },
@@ -33,11 +41,28 @@ const modules = [
   { title: "系统配置", description: "管理系统参数和配置项", href: "/admin/configs", icon: Settings2 },
 ];
 
+const presets = [
+  { label: "今天", getRange: () => { const d = today(); return { from: d, to: d }; } },
+  { label: "昨天", getRange: () => { const d = dayDelta(1); return { from: d, to: d }; } },
+  { label: "近 7 天", getRange: () => ({ from: dayDelta(6), to: today() }) },
+  { label: "近 30 天", getRange: () => ({ from: dayDelta(29), to: today() }) },
+] as const;
+
+function today(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+function dayDelta(n: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 10);
+}
+
 const zeroStats: AdminStats = {
   active_users: 0, total_tokens: 0, cache_hit_tokens: 0, cache_miss_tokens: 0,
   completion_tokens: 0, points_consumed: 0, total_words: 0, ai_words: 0,
   human_words: 0, ai_conversations: 0, total_revenue: 0,
-  active_subscriptions: 0, total_works: 0, new_users_today: 0,
+  active_subscriptions: 0, total_works: 0, new_users: 0,
+  period: { from: null, to: null }, previous: null, trend: null, daily: null,
 };
 
 function formatNum(n: number): string {
@@ -46,16 +71,32 @@ function formatNum(n: number): string {
   return n.toLocaleString();
 }
 
+function trendIcon(val: number | null | undefined) {
+  if (val == null) return <Minus className="size-3 text-muted-foreground/50" />;
+  if (val > 0) return <TrendingUp className="size-3 text-emerald-500" />;
+  if (val < 0) return <TrendingDown className="size-3 text-red-500" />;
+  return <Minus className="size-3 text-muted-foreground/50" />;
+}
+
+function trendColor(val: number | null | undefined) {
+  if (val == null) return "text-muted-foreground/50";
+  if (val > 0) return "text-emerald-500";
+  if (val < 0) return "text-red-500";
+  return "text-muted-foreground/50";
+}
+
 function StatCard({
   label,
   value,
   sub,
   icon: Icon,
+  trend,
 }: {
   label: string;
   value: string;
   sub?: string;
   icon: React.ComponentType<{ className?: string }>;
+  trend?: number | null;
 }) {
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-5 shadow-card">
@@ -63,7 +104,15 @@ function StatCard({
         <Icon className="size-4" />
       </span>
       <div className="space-y-1">
-        <p className="text-2xl font-semibold tabular-nums tracking-[-0.02em] text-foreground">{value}</p>
+        <div className="flex items-baseline gap-2">
+          <p className="text-2xl font-semibold tabular-nums tracking-[-0.02em] text-foreground">{value}</p>
+          {trend != null ? (
+            <span className={`flex items-center gap-0.5 text-xs font-medium ${trendColor(trend)}`}>
+              {trendIcon(trend)}
+              {Math.abs(trend)}%
+            </span>
+          ) : null}
+        </div>
         <p className="text-xs text-muted-foreground">{label}</p>
         {sub ? <p className="text-xs text-muted-foreground/70">{sub}</p> : null}
       </div>
@@ -74,40 +123,109 @@ function StatCard({
 export default function AdminHome() {
   const client = useMemo(() => adminClient(), []);
   const [stats, setStats] = useState<AdminStats>(zeroStats);
+  const [preset, setPreset] = useState<string>("");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+
+  const fetchStats = useCallback(
+    (from?: string, to?: string) => {
+      client.getAdminStats(from, to).then(setStats).catch(() => {});
+    },
+    [client],
+  );
 
   useEffect(() => {
-    client.getAdminStats().then(setStats).catch(() => {});
-  }, [client]);
+    fetchStats();
+  }, [fetchStats]);
+
+  function applyPreset(label: string) {
+    setPreset(label);
+    setCustomFrom(""); setCustomTo("");
+    const p = presets.find((x) => x.label === label);
+    if (p) {
+      const r = p.getRange();
+      fetchStats(r.from, r.to);
+    }
+  }
+
+  function applyCustom() {
+    if (!customFrom || !customTo) return;
+    setPreset("");
+    fetchStats(customFrom, customTo);
+  }
+
+  const showTimeRange = stats.period.from || stats.period.to;
+  const t = stats.trend;
 
   return (
     <AdminPage>
       <AdminHeading title="后台概览" description="平台核心运营数据与功能入口。" />
 
+      {/* Time Range Selector */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Calendar className="size-4 text-muted-foreground" />
+        {presets.map((p) => (
+          <Button
+            key={p.label}
+            variant={preset === p.label ? "default" : "outline"}
+            size="sm"
+            className="h-8 text-xs"
+            onClick={() => applyPreset(p.label)}
+          >
+            {p.label}
+          </Button>
+        ))}
+        <Button variant={preset ? "outline" : "default"} size="sm" className="h-8 text-xs" onClick={() => { setPreset(""); fetchStats(); }}>
+          全部
+        </Button>
+        <span className="mx-1 h-4 w-px bg-border" />
+        <Input
+          type="date"
+          className="h-8 w-34 text-xs"
+          value={customFrom}
+          onChange={(e) => setCustomFrom(e.target.value)}
+        />
+        <span className="text-xs text-muted-foreground">至</span>
+        <Input
+          type="date"
+          className="h-8 w-34 text-xs"
+          value={customTo}
+          onChange={(e) => setCustomTo(e.target.value)}
+        />
+        <Button variant="outline" size="sm" className="h-8 text-xs" onClick={applyCustom} disabled={!customFrom || !customTo}>
+          应用
+        </Button>
+      </div>
+
       {/* Stats Grid */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           icon={Users}
-          label="活跃用户"
-          value={formatNum(stats.active_users)}
-          sub={`今日新增 ${stats.new_users_today} 人`}
+          label={showTimeRange ? "新增用户" : "活跃用户"}
+          value={showTimeRange ? formatNum(stats.new_users) : formatNum(stats.active_users)}
+          sub={showTimeRange ? `总计活跃 ${formatNum(stats.active_users)} 人` : undefined}
+          trend={showTimeRange ? t?.new_users : undefined}
         />
         <StatCard
           icon={Zap}
           label="Token 消耗"
           value={stats.total_tokens > 0 ? formatToken(stats.total_tokens) : "0"}
           sub={`消耗 ${stats.points_consumed.toLocaleString()} 积分`}
+          trend={showTimeRange ? t?.total_tokens : undefined}
         />
         <StatCard
           icon={PenLine}
           label="写作字数"
           value={formatNum(stats.total_words)}
           sub={`AI 辅助 ${formatNum(stats.ai_words)} · 人工 ${formatNum(stats.human_words)}`}
+          trend={showTimeRange ? t?.total_words : undefined}
         />
         <StatCard
           icon={Coins}
           label="总收入"
           value={`¥${stats.total_revenue.toLocaleString()}`}
           sub={`${stats.active_subscriptions} 个活跃订阅`}
+          trend={showTimeRange ? t?.total_revenue : undefined}
         />
       </div>
 
@@ -116,6 +234,11 @@ export default function AdminHome() {
         <span>
           <MessageSquareText className="inline size-3 mr-1 align-[-2px]" />
           AI 对话 {formatNum(stats.ai_conversations)} 次
+          {showTimeRange && t?.ai_conversations != null ? (
+            <span className={`ml-1 inline-flex items-center gap-0.5 ${trendColor(t.ai_conversations)}`}>
+              {trendIcon(t.ai_conversations)}{Math.abs(t.ai_conversations)}%
+            </span>
+          ) : null}
         </span>
         <span className="text-border">·</span>
         <span>

@@ -523,8 +523,12 @@ export type AdminSession = {
   last_active_at: string;
 };
 
-export type AdminStats = {
-  active_users: number;
+export type StatsPeriod = {
+  from: string | null;
+  to: string | null;
+};
+
+export type TimeSeriesStats = {
   total_tokens: number;
   cache_hit_tokens: number;
   cache_miss_tokens: number;
@@ -535,9 +539,25 @@ export type AdminStats = {
   human_words: number;
   ai_conversations: number;
   total_revenue: number;
+  new_users: number;
+};
+
+export type StatsTrend = Record<string, number | null>;
+
+export type DailyPoint = {
+  date: string;
+  tokens: number;
+  points: number;
+};
+
+export type AdminStats = TimeSeriesStats & {
+  active_users: number;
   active_subscriptions: number;
   total_works: number;
-  new_users_today: number;
+  period: StatsPeriod;
+  previous: TimeSeriesStats | null;
+  trend: StatsTrend | null;
+  daily: DailyPoint[] | null;
 };
 
 export type WorkDraft = {
@@ -1554,8 +1574,12 @@ export class ApiClient {
     });
   }
 
-  async getAdminStats(): Promise<AdminStats> {
-    return this.request<AdminStats>("/admin/stats");
+  async getAdminStats(timeFrom?: string, timeTo?: string): Promise<AdminStats> {
+    const params = new URLSearchParams();
+    if (timeFrom) params.set("time_from", timeFrom);
+    if (timeTo) params.set("time_to", timeTo);
+    const qs = params.toString();
+    return this.request<AdminStats>(`/admin/stats${qs ? "?" + qs : ""}`);
   }
 
   async listChatSessions(workId: string, limit = 20): Promise<ChatSession[]> {

@@ -2651,58 +2651,116 @@ async def simulate_paid(
     return public(order)
 
 
-@router.get("/admin/stats")
-async def admin_stats(
-    _admin: User = Depends(current_admin),
-    session: AsyncSession = Depends(get_session),
-):
-    active_users = await session.scalar(
-        select(func.count()).select_from(User).where(User.status == "active")
-    )
+def _between(column, start: date | None, end: date | None):
+    clauses = []
+    if start:
+        clauses.append(func.date(column) >= start)
+    if end:
+        clauses.append(func.date(column) <= end)
+    return and_(*clauses) if clauses else True
 
-    token_stats = await session.execute(
+
+async def _token_aggregate(session: AsyncSession, start: date | None, end: date | None):
+    result = await session.execute(
         select(
             func.coalesce(func.sum(PointTransaction.prompt_cache_hit_tokens), 0),
             func.coalesce(func.sum(PointTransaction.prompt_cache_miss_tokens), 0),
             func.coalesce(func.sum(PointTransaction.completion_tokens), 0),
             func.coalesce(func.sum(PointTransaction.points_delta), 0),
-        ).where(PointTransaction.change_type == "consume")
+        ).where(
+            PointTransaction.change_type == "consume",
+            _between(PointTransaction.created_at, start, end),
+        )
     )
-    cache_hit, cache_miss, completion, points_delta = token_stats.one()
+    return result.one()
 
-    word_stats = await session.execute(
+
+async def _word_aggregate(session: AsyncSession, start: date | None, end: date | None):
+    result = await session.execute(
         select(
             func.coalesce(func.sum(ChapterVersion.word_count), 0),
             func.coalesce(func.sum(ChapterVersion.word_count), 0).filter(ChapterVersion.source == "ai"),
             func.coalesce(func.sum(ChapterVersion.word_count), 0).filter(ChapterVersion.source == "human"),
-        )
+        ).where(_between(ChapterVersion.created_at, start, end))
     )
-    total_words, ai_words, human_words = word_stats.one()
+    return result.one()
 
-    ai_conversations = await session.scalar(
-        select(func.count()).select_from(PointTransaction).where(PointTransaction.source_type == "ai_chat")
+
+def _trend(curr: float, prev: float) -> float | None:
+    if prev == 0:
+        return None if curr == 0 else 100.0
+    return round((curr - prev) / prev * 100, 1)
+
+
+@router.get("/admin/stats")
+async def admin_stats(
+    time_from: Annotated[str | None, Query(max_length=10)] = None,
+    time_to: Annotated[str | None, Query(max_length=10)] = None,
+    _admin: User = Depends(current_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    df = datetime.strptime(time_from, "%Y-%m-%d").date() if time_from else None
+    dt = datetime.strptime(time_to, "%Y-%m-%d").date() if time_to else None
+
+    # Previous period (same length, ending day before time_from)
+    pdf, pdt = None, None
+    if df and dt:
+        delta = (dt - df).days
+        pdt = df - timedelta(days=1)
+        pdf = pdt - timedelta(days=delta)
+
+    # ── snapshot stats (always current, not time-filtered) ──
+    active_users = await session.scalar(
+        select(func.count()).select_from(User).where(User.status == "active")
     )
-
-    revenue = await session.scalar(
-        select(func.coalesce(func.sum(BillingOrder.amount), 0)).where(BillingOrder.status == "paid")
-    )
-
     active_subs = await session.scalar(
         select(func.count()).select_from(UserSubscription).where(UserSubscription.status == "active")
     )
+    total_works = await session.scalar(select(func.count()).select_from(Work))
 
-    total_works = await session.scalar(
-        select(func.count()).select_from(Work)
+    # ── time-series stats (current period) ──
+    cache_hit, cache_miss, completion, points_delta = await _token_aggregate(session, df, dt)
+
+    total_words, ai_words, human_words = await _word_aggregate(session, df, dt)
+
+    new_users = await session.scalar(
+        select(func.count()).select_from(User).where(_between(User.created_at, df, dt))
     )
 
-    new_users_today = await session.scalar(
-        select(func.count()).select_from(User).where(
-            func.date(User.created_at) == func.current_date()
+    ai_conversations = await session.scalar(
+        select(func.count()).select_from(PointTransaction).where(
+            PointTransaction.source_type == "ai_chat",
+            _between(PointTransaction.created_at, df, dt),
         )
     )
 
-    return {
-        "active_users": active_users or 0,
+    revenue = await session.scalar(
+        select(func.coalesce(func.sum(BillingOrder.amount), 0)).where(
+            BillingOrder.status == "paid",
+            _between(BillingOrder.paid_at, df, dt),
+        )
+    )
+
+    # ── daily trend series (7/30 points) ──
+    daily = []
+    if df and dt:
+        days = (dt - df).days + 1
+        if days <= 90:
+            for i in range(days):
+                d = df + timedelta(days=i)
+                pts = await session.scalar(
+                    select(func.coalesce(func.sum(PointTransaction.points_delta), 0)).where(
+                        PointTransaction.change_type == "consume",
+                        func.date(PointTransaction.created_at) == d,
+                    )
+                )
+                daily.append({
+                    "date": d.isoformat(),
+                    "tokens": 0,  # filled client-side if needed
+                    "points": round(float(abs(pts or 0)), 2),
+                })
+
+    current = {
         "total_tokens": (cache_hit or 0) + (cache_miss or 0) + (completion or 0),
         "cache_hit_tokens": cache_hit or 0,
         "cache_miss_tokens": cache_miss or 0,
@@ -2713,9 +2771,69 @@ async def admin_stats(
         "human_words": human_words or 0,
         "ai_conversations": ai_conversations or 0,
         "total_revenue": round(float(revenue or 0), 2),
+        "new_users": new_users or 0,
+    }
+
+    # ── previous period ──
+    prev = None
+    trend = None
+    if pdf and pdt:
+        pc_hit, pc_miss, pc_comp, pc_pts = await _token_aggregate(session, pdf, pdt)
+        pw_total, pw_ai, pw_human = await _word_aggregate(session, pdf, pdt)
+
+        p_new_users = await session.scalar(
+            select(func.count()).select_from(User).where(_between(User.created_at, pdf, pdt))
+        )
+        p_convos = await session.scalar(
+            select(func.count()).select_from(PointTransaction).where(
+                PointTransaction.source_type == "ai_chat",
+                _between(PointTransaction.created_at, pdf, pdt),
+            )
+        )
+        p_revenue = await session.scalar(
+            select(func.coalesce(func.sum(BillingOrder.amount), 0)).where(
+                BillingOrder.status == "paid",
+                _between(BillingOrder.paid_at, pdf, pdt),
+            )
+        )
+
+        prev = {
+            "total_tokens": (pc_hit or 0) + (pc_miss or 0) + (pc_comp or 0),
+            "cache_hit_tokens": pc_hit or 0,
+            "cache_miss_tokens": pc_miss or 0,
+            "completion_tokens": pc_comp or 0,
+            "points_consumed": round(float(abs(pc_pts or 0)), 2),
+            "total_words": pw_total or 0,
+            "ai_words": pw_ai or 0,
+            "human_words": pw_human or 0,
+            "ai_conversations": p_convos or 0,
+            "total_revenue": round(float(p_revenue or 0), 2),
+            "new_users": p_new_users or 0,
+        }
+
+        trend = {
+            "total_tokens": _trend(current["total_tokens"], prev["total_tokens"]),
+            "points_consumed": _trend(current["points_consumed"], prev["points_consumed"]),
+            "total_words": _trend(current["total_words"], prev["total_words"]),
+            "ai_words": _trend(current["ai_words"], prev["ai_words"]),
+            "human_words": _trend(current["human_words"], prev["human_words"]),
+            "ai_conversations": _trend(current["ai_conversations"], prev["ai_conversations"]),
+            "total_revenue": _trend(current["total_revenue"], prev["total_revenue"]),
+            "new_users": _trend(current["new_users"], prev["new_users"]),
+        }
+
+    return {
+        **current,
+        "active_users": active_users or 0,
         "active_subscriptions": active_subs or 0,
         "total_works": total_works or 0,
-        "new_users_today": new_users_today or 0,
+        "period": {
+            "from": df.isoformat() if df else None,
+            "to": dt.isoformat() if dt else None,
+        },
+        "previous": prev,
+        "trend": trend,
+        "daily": daily if daily else None,
     }
 
 

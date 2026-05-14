@@ -15,7 +15,7 @@ import httpx
 from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, EmailStr, Field, ValidationError
-from sqlalchemy import Select, and_, func, or_, select, update
+from sqlalchemy import Select, and_, case, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -2679,8 +2679,8 @@ async def _word_aggregate(session: AsyncSession, start: date | None, end: date |
     result = await session.execute(
         select(
             func.coalesce(func.sum(ChapterVersion.word_count), 0),
-            func.coalesce(func.sum(ChapterVersion.word_count), 0).filter(ChapterVersion.source == "ai"),
-            func.coalesce(func.sum(ChapterVersion.word_count), 0).filter(ChapterVersion.source == "human"),
+            func.coalesce(func.sum(case((ChapterVersion.source == "ai", ChapterVersion.word_count), else_=0)), 0),
+            func.coalesce(func.sum(case((ChapterVersion.source == "human", ChapterVersion.word_count), else_=0)), 0),
         ).where(_between(ChapterVersion.created_at, start, end))
     )
     return result.one()

@@ -188,7 +188,7 @@ export default function AdminConfigsPage() {
       ) : (
         <Tabs value={activeGroup} onValueChange={requestGroupChange} className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <div className="overflow-x-auto shrink-0">
-            <TabsList>{groups.map((g) => (<TabsTrigger key={g} value={g}>{groupLabel(g)}</TabsTrigger>))}</TabsList>
+            <TabsList className="border border-border">{groups.map((g) => (<TabsTrigger key={g} value={g} className="data-active:bg-card">{groupLabel(g)}</TabsTrigger>))}</TabsList>
           </div>
           {groups.map((group) => (
             <TabsContent key={group} value={group} className="mt-4 flex-1 overflow-hidden data-[state=inactive]:hidden">

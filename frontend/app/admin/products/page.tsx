@@ -149,7 +149,7 @@ export default function AdminProductsPage() {
 
       <div className="flex shrink-0 items-center gap-3">
         <Tabs value={activeKind} onValueChange={(v) => setActiveKind(v as AdminProductKind)}>
-          <TabsList><TabsTrigger value="plans">套餐</TabsTrigger><TabsTrigger value="credit-packs">加油包</TabsTrigger></TabsList>
+          <TabsList className="border border-border"><TabsTrigger value="plans" className="data-active:bg-card">套餐</TabsTrigger><TabsTrigger value="credit-packs" className="data-active:bg-card">加油包</TabsTrigger></TabsList>
         </Tabs>
         <div className="relative flex-1 max-w-xs">
           <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />

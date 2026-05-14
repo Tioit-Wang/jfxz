@@ -1,13 +1,12 @@
 "use client";
 
-import { LockKeyhole, Loader2 } from "lucide-react";
+import { Loader2, ShieldCheck } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ApiClient } from "@/api";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 export default function AdminLoginPage() {
   const router = useRouter();
@@ -32,35 +31,48 @@ export default function AdminLoginPage() {
   }
 
   return (
-    <section className="grid min-h-screen place-items-center bg-background px-5">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <div className="mb-3 grid size-11 place-items-center rounded-lg bg-primary text-primary-foreground">
-            <LockKeyhole />
+    <main className="grid min-h-screen place-items-center bg-muted/30 px-5">
+      <div className="w-full max-w-sm rounded-lg border border-border bg-card p-8 shadow-card-float">
+        <div className="flex flex-col items-center gap-6 text-center">
+          <span className="flex size-12 items-center justify-center rounded-md bg-primary text-primary-foreground">
+            <ShieldCheck className="size-6" />
+          </span>
+          <div className="space-y-1">
+            <h1 className="text-2xl font-semibold tracking-[-0.02em] text-foreground">管理员登录</h1>
+            <p className="text-sm text-muted-foreground">进入妙蛙写作管理后台</p>
           </div>
-          <CardTitle className="text-2xl">管理员登录</CardTitle>
-          <CardDescription>进入妙蛙写作管理后台。</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form className="flex flex-col gap-4" onSubmit={(event) => void submit(event)}>
-            <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor="admin-email">邮箱</FieldLabel>
-                <Input id="admin-email" value={email} onChange={(event) => setEmail(event.target.value)} type="email" />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="admin-password">密码</FieldLabel>
-                <Input id="admin-password" value={password} onChange={(event) => setPassword(event.target.value)} type="password" />
-              </Field>
-            </FieldGroup>
-            {error ? <FieldError>{error}</FieldError> : null}
-            <Button className="w-full" disabled={loading} type="submit">
-              {loading ? <Loader2 data-icon="inline-start" className="animate-spin" /> : null}
-              登录
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-    </section>
+        </div>
+
+        <form className="mt-8 flex flex-col gap-4" onSubmit={(event) => void submit(event)}>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="admin-email" className="text-xs font-medium">邮箱</Label>
+            <Input
+              id="admin-email"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              className="h-10"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="admin-password" className="text-xs font-medium">密码</Label>
+            <Input
+              id="admin-password"
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              className="h-10"
+            />
+          </div>
+          {error ? (
+            <p className="rounded-md bg-destructive/5 px-3 py-2 text-xs text-destructive">{error}</p>
+          ) : null}
+          <Button className="h-10 w-full font-medium tracking-[-0.01em]" disabled={loading} type="submit">
+            {loading ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
+            登录
+          </Button>
+        </form>
+      </div>
+    </main>
   );
 }

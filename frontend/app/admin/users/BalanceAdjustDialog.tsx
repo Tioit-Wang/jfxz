@@ -61,9 +61,7 @@ export function BalanceAdjustDialog({ user, open, onOpenChange, onSubmit }: Prop
   if (!user) return null;
 
   const currentBalance =
-    bucketType === "vip_daily"
-      ? user.points.vipDailyPoints
-      : user.points.creditPackPoints;
+    bucketType === "vip_daily" ? user.points.vipDailyPoints : user.points.creditPackPoints;
 
   const parsedAmount = parseFloat(amount);
   const isValidAmount = amount !== "" && !isNaN(parsedAmount) && parsedAmount > 0 && /^\d+(\.\d{1,2})?$/.test(amount);
@@ -102,15 +100,17 @@ export function BalanceAdjustDialog({ user, open, onOpenChange, onSubmit }: Prop
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>余额操作</DialogTitle>
-            <DialogDescription>对「{user.user.email}」的积分余额进行充值或扣除。</DialogDescription>
+            <DialogTitle className="text-lg font-semibold tracking-[-0.01em]">余额操作</DialogTitle>
+            <DialogDescription>
+              对「{user.user.email}」的积分余额进行充值或扣除。
+            </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-4">
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-1.5">
-                <Label>操作类型</Label>
+                <Label className="text-xs">操作类型</Label>
                 <Select value={changeType} onValueChange={(v) => setChangeType(v as "grant" | "deduct")}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="grant">充值</SelectItem>
                     <SelectItem value="deduct">扣除</SelectItem>
@@ -118,9 +118,9 @@ export function BalanceAdjustDialog({ user, open, onOpenChange, onSubmit }: Prop
                 </Select>
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label>积分类型</Label>
+                <Label className="text-xs">积分类型</Label>
                 <Select value={bucketType} onValueChange={(v) => setBucketType(v as "vip_daily" | "credit_pack")}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="vip_daily">VIP 每日积分</SelectItem>
                     <SelectItem value="credit_pack">加油包积分</SelectItem>
@@ -129,10 +129,10 @@ export function BalanceAdjustDialog({ user, open, onOpenChange, onSubmit }: Prop
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              当前{bucketLabels[bucketType]}余额：<span className="font-medium">{currentBalance.toFixed(2)}</span>
+              当前{bucketLabels[bucketType]}余额：<span className="font-medium text-foreground">{currentBalance.toFixed(2)}</span>
             </p>
             <div className="flex flex-col gap-1.5">
-              <Label>金额</Label>
+              <Label className="text-xs">金额</Label>
               <Input
                 type="number"
                 min="0.01"
@@ -140,6 +140,7 @@ export function BalanceAdjustDialog({ user, open, onOpenChange, onSubmit }: Prop
                 placeholder="请输入金额"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
+                className="h-9"
               />
               {amount !== "" && !isValidAmount && (
                 <p className="text-xs text-destructive">请输入大于 0 的金额，最多两位小数</p>
@@ -149,7 +150,7 @@ export function BalanceAdjustDialog({ user, open, onOpenChange, onSubmit }: Prop
               )}
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label>备注（可选）</Label>
+              <Label className="text-xs">备注（可选）</Label>
               <Textarea
                 placeholder="操作原因"
                 value={reason}

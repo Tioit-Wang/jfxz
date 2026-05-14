@@ -23,6 +23,7 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -64,48 +65,63 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
 
   return (
     <Sidebar collapsible="icon" variant="inset" {...props}>
-      <SidebarHeader>
+      <SidebarHeader className="px-3 pt-4">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton asChild size="lg">
+            <SidebarMenuButton asChild size="lg" className="hover:bg-sidebar-accent/60">
               <Link href="/admin">
-                <span className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-                  <BookOpenText />
+                <span className="flex aspect-square size-8 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
+                  <BookOpenText className="size-4" />
                 </span>
                 <span className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-medium">妙蛙写作</span>
-                  <span className="truncate text-xs text-muted-foreground">管理后台</span>
+                  <span className="truncate font-semibold tracking-tight">妙蛙写作</span>
+                  <span className="truncate text-xs text-sidebar-foreground/50">管理后台</span>
                 </span>
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
-      <SidebarContent>
+      <SidebarContent className="px-3">
         {menu.map((group) => (
-          <SidebarGroup key={group.label}>
+          <SidebarGroup key={group.label} className="py-0">
+            <SidebarGroupLabel className="px-3 text-xs font-normal tracking-widest text-sidebar-foreground/55 uppercase">
+              {group.label}
+            </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {group.items.map((item) => (
-                  <SidebarMenuItem key={item.url}>
-                    <SidebarMenuButton asChild isActive={pathname === item.url} tooltip={item.title}>
-                      <Link href={item.url}>
-                        <item.icon />
-                        <span>{item.title}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
+                {group.items.map((item) => {
+                  const isActive = pathname === item.url;
+                  return (
+                    <SidebarMenuItem key={item.url}>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={isActive}
+                        tooltip={item.title}
+                        className="group relative font-medium tracking-[-0.01em]"
+                      >
+                        <Link href={item.url}>
+                          <item.icon className="size-4" />
+                          <span>{item.title}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
         ))}
       </SidebarContent>
-      <SidebarFooter>
+      <SidebarFooter className="px-3 pb-3">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton onClick={() => void logout()} tooltip="退出登录">
-              <LogOut />
+            <SidebarMenuButton
+              onClick={() => void logout()}
+              tooltip="退出登录"
+              className="font-medium tracking-[-0.01em] text-sidebar-foreground/60 hover:text-sidebar-foreground"
+            >
+              <LogOut className="size-4" />
               <span>退出登录</span>
             </SidebarMenuButton>
           </SidebarMenuItem>

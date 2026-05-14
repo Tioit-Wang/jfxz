@@ -65,9 +65,11 @@ const config: Config = {
         "2xl": "calc(var(--radius) * 1.8)"
       },
       boxShadow: {
-        xs: "0 1px 2px 0 rgb(0 0 0 / 0.05)",
-        card: "0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)",
-        soft: "0 18px 50px rgba(25, 32, 29, 0.08)"
+        xs: "0 1px 2px 0 rgb(0 0 0 / 0.02)",
+        card: "0 0 0 1px rgba(0,0,0,0.08), 0 1px 1px rgba(0,0,0,0.02), 0 2px 2px rgba(0,0,0,0.04)",
+        "card-float": "0 0 0 1px rgba(0,0,0,0.08), 0 2px 2px rgba(0,0,0,0.04), 0 8px 16px -4px rgba(0,0,0,0.04)",
+        "card-modal": "0 0 0 1px rgba(0,0,0,0.08), 0 1px 1px rgba(0,0,0,0.02), 0 8px 16px -4px rgba(0,0,0,0.04), 0 24px 32px -8px rgba(0,0,0,0.06)",
+        soft: "0 18px 50px rgba(25, 32, 29, 0.04)"
       },
       keyframes: {
         shimmer: {

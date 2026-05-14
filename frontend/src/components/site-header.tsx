@@ -29,12 +29,16 @@ export function SiteHeader() {
     "管理后台";
 
   return (
-    <header className="sticky top-0 z-10 flex h-[var(--header-height)] shrink-0 items-center gap-2 border-b bg-background px-4">
-      <SidebarTrigger aria-label="切换侧边栏" />
-      <Separator orientation="vertical" className="mr-2 h-4" />
+    <header className="sticky top-0 z-10 flex h-[var(--header-height)] shrink-0 items-center gap-3 border-b border-border bg-background px-4">
+      <SidebarTrigger aria-label="切换侧边栏" className="text-foreground/60 hover:text-foreground" />
+      <Separator orientation="vertical" className="h-4" />
       <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
-        <span className="text-sm font-medium">{title}</span>
-        {email ? <span className="hidden text-sm text-muted-foreground sm:inline-flex">{email}</span> : null}
+        <span className="text-sm font-medium tracking-[-0.01em] text-foreground">{title}</span>
+        {email ? (
+          <span className="hidden text-xs tracking-[-0.01em] text-muted-foreground sm:inline-flex">
+            {email}
+          </span>
+        ) : null}
       </div>
     </header>
   );

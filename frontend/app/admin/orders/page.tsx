@@ -4,12 +4,12 @@ import { AlertCircle, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { type AdminOrder } from "@/api";
-import { AdminPagination, StatusBadge } from "../_components";
+import { AdminHeading, AdminPage, AdminPagination, StatusBadge } from "../_components";
 import { adminClient, formatDate, money } from "../admin-utils";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
@@ -52,32 +52,32 @@ export default function AdminOrdersPage() {
     }
   }
 
-  useEffect(() => {
-    void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useEffect(() => { void load(); }, []);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      {/* ── Header bar ── */}
-      <div className="flex shrink-0 items-center justify-between px-6 py-4">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">订单管理</h1>
-          <p className="text-sm text-muted-foreground">查看订单、支付状态和权益发放来源。</p>
+    <AdminPage>
+      <AdminHeading title="订单管理" description="查看订单、支付状态和权益发放来源。" />
+
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+          <Input
+            className="h-9 pl-9"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => event.key === "Enter" && void load(1)}
+            placeholder="搜索订单号、用户或商品…"
+          />
         </div>
-        <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); void load(1); }}>
-          <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="订单号、用户或商品" className="h-9 w-56" />
-          <Button variant="outline" type="submit" size="sm"><Search />搜索</Button>
-        </form>
       </div>
 
       {loading ? (
-        <div className="shrink-0 space-y-2 px-6">
-          <Skeleton className="h-12 w-full" />
+        <div className="space-y-2">
+          <Skeleton className="h-9 w-full" />
           <Skeleton className="h-64 w-full" />
         </div>
       ) : loadError ? (
-        <div className="flex-1 px-6 pt-4">
+        <div className="rounded-lg border border-border bg-card p-12 shadow-card">
           <Empty>
             <EmptyHeader>
               <div className="mx-auto mb-2 flex size-9 items-center justify-center rounded-full bg-destructive/10 text-destructive">
@@ -86,13 +86,11 @@ export default function AdminOrdersPage() {
               <EmptyTitle>订单列表加载失败</EmptyTitle>
               <EmptyDescription>请检查登录状态或稍后重试。</EmptyDescription>
             </EmptyHeader>
-            <Button variant="outline" size="sm" className="mx-auto mt-3" onClick={() => void load(page)}>
-              重新加载
-            </Button>
+            <Button variant="outline" size="sm" className="mx-auto mt-3" onClick={() => void load(page)}>重新加载</Button>
           </Empty>
         </div>
       ) : !orders.length ? (
-        <div className="flex-1 px-6 pt-4">
+        <div className="rounded-lg border border-border bg-card p-12 shadow-card">
           <Empty>
             <EmptyHeader>
               <EmptyTitle>没有订单</EmptyTitle>
@@ -102,32 +100,31 @@ export default function AdminOrdersPage() {
         </div>
       ) : (
         <>
-          {/* ── Table ── */}
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border mx-6">
-            <div className="overflow-auto flex-1">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card shadow-card">
+            <div className="overflow-auto">
               <Table>
                 <TableHeader className="sticky top-0 z-10">
-                  <TableRow className="bg-muted/50">
-                    <TableHead>订单编号</TableHead>
-                    <TableHead>用户</TableHead>
-                    <TableHead>商品</TableHead>
-                    <TableHead>金额</TableHead>
-                    <TableHead>状态</TableHead>
-                    <TableHead>支付时间</TableHead>
-                    <TableHead className="text-right">操作</TableHead>
+                  <TableRow className="border-b border-border bg-muted/50 hover:bg-muted/50">
+                    <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">订单编号</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">用户</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">商品</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">金额</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">状态</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">支付时间</TableHead>
+                    <TableHead className="text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {orders.map((order) => (
-                    <TableRow key={order.id} className="group transition-colors hover:bg-muted/30">
+                    <TableRow key={order.id} className="border-b border-border transition-colors hover:bg-muted/30">
                       <TableCell className="font-mono text-xs">{order.order_no}</TableCell>
-                      <TableCell>{order.user_email ?? order.user_id}</TableCell>
-                      <TableCell>{order.product_name_snapshot}</TableCell>
-                      <TableCell>{money(order.amount, order.currency)}</TableCell>
+                      <TableCell className="text-sm">{order.user_email ?? order.user_id}</TableCell>
+                      <TableCell className="text-sm">{order.product_name_snapshot}</TableCell>
+                      <TableCell className="text-sm">{money(order.amount, order.currency)}</TableCell>
                       <TableCell><StatusBadge status={order.status} /></TableCell>
-                      <TableCell>{formatDate(order.paid_at)}</TableCell>
+                      <TableCell className="text-sm">{formatDate(order.paid_at)}</TableCell>
                       <TableCell className="text-right">
-                        <Button size="sm" variant="outline" onClick={() => void openDetail(order)}>详情</Button>
+                        <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={() => void openDetail(order)}>详情</Button>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -135,46 +132,53 @@ export default function AdminOrdersPage() {
               </Table>
             </div>
           </div>
-          {/* ── Pagination ── */}
-          <div className="shrink-0 px-6 py-2">
-            <AdminPagination page={page} pageSize={pageSize} total={total} onPageChange={(nextPage) => void load(nextPage)} />
-          </div>
+          <AdminPagination page={page} pageSize={pageSize} total={total} onPageChange={(nextPage) => void load(nextPage)} />
         </>
       )}
 
-      {/* ── Detail Sheet ── */}
-      <Sheet open={!!detail} onOpenChange={(open) => !open && setDetail(null)}>
-        <SheetContent>
-          <SheetHeader>
-            <SheetTitle>订单详情</SheetTitle>
-            <SheetDescription>订单基础信息、支付记录和积分发放来源。</SheetDescription>
-          </SheetHeader>
+      {/* Detail Sheet */}
+      <Dialog open={!!detail} onOpenChange={(open) => !open && setDetail(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-semibold tracking-[-0.01em]">订单详情</DialogTitle>
+            <DialogDescription>订单基础信息、支付记录和积分发放来源。</DialogDescription>
+          </DialogHeader>
           {detail ? (
-            <div className="flex flex-col gap-5 overflow-y-auto text-sm">
-              <div className="grid grid-cols-2 gap-3 rounded-lg bg-muted/30 p-4">
-                <span className="text-muted-foreground">订单号</span><span className="font-mono text-xs">{detail.order.order_no}</span>
-                <span className="text-muted-foreground">用户</span><span>{detail.order.user_email ?? detail.order.user_id}</span>
-                <span className="text-muted-foreground">商品</span><span>{detail.order.product_name_snapshot}</span>
-                <span className="text-muted-foreground">金额</span><span>{money(detail.order.amount, detail.order.currency)}</span>
-                <span className="text-muted-foreground">状态</span><StatusBadge status={detail.order.status} />
-                <span className="text-muted-foreground">支付时间</span><span>{formatDate(detail.order.paid_at)}</span>
+            <div className="flex flex-col gap-5 overflow-y-auto text-sm mt-6">
+              <div className="grid grid-cols-[120px_1fr] gap-x-4 gap-y-3 rounded-lg border border-border bg-muted/30 p-4">
+                <span className="text-xs text-muted-foreground">订单号</span>
+                <span className="font-mono text-xs">{detail.order.order_no}</span>
+                <span className="text-xs text-muted-foreground">用户</span>
+                <span>{detail.order.user_email ?? detail.order.user_id}</span>
+                <span className="text-xs text-muted-foreground">商品</span>
+                <span>{detail.order.product_name_snapshot}</span>
+                <span className="text-xs text-muted-foreground">金额</span>
+                <span>{money(detail.order.amount, detail.order.currency)}</span>
+                <span className="text-xs text-muted-foreground">状态</span>
+                <StatusBadge status={detail.order.status} />
+                <span className="text-xs text-muted-foreground">支付时间</span>
+                <span>{formatDate(detail.order.paid_at)}</span>
               </div>
               <section className="flex flex-col gap-2">
-                <h3 className="font-medium">支付记录</h3>
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">支付记录</h3>
                 {detail.payments.map((payment, index) => (
-                  <pre className="overflow-auto rounded-lg border bg-muted p-3 text-xs" key={index}>{JSON.stringify(payment, null, 2)}</pre>
+                  <pre className="overflow-auto rounded-md border border-border bg-muted p-3 text-xs font-mono" key={index}>
+                    {JSON.stringify(payment, null, 2)}
+                  </pre>
                 ))}
               </section>
               <section className="flex flex-col gap-2">
-                <h3 className="font-medium">积分发放记录</h3>
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">积分发放记录</h3>
                 {detail.grants.length ? detail.grants.map((grant, index) => (
-                  <pre className="overflow-auto rounded-lg border bg-muted p-3 text-xs" key={index}>{JSON.stringify(grant, null, 2)}</pre>
-                )) : <p className="text-muted-foreground">无积分发放记录</p>}
+                  <pre className="overflow-auto rounded-md border border-border bg-muted p-3 text-xs font-mono" key={index}>
+                    {JSON.stringify(grant, null, 2)}
+                  </pre>
+                )) : <p className="text-xs text-muted-foreground">无积分发放记录</p>}
               </section>
             </div>
           ) : null}
-        </SheetContent>
-      </Sheet>
-    </div>
+        </DialogContent>
+      </Dialog>
+    </AdminPage>
   );
 }

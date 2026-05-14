@@ -4,18 +4,9 @@ import { AlertCircle, Eye, EyeOff, Save } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { type AdminConfig, type AdminConfigValue, type AiModelOption } from "@/api";
-import { AdminPagination } from "../_components";
+import { AdminHeading, AdminPage, AdminPagination } from "../_components";
 import { adminClient } from "../admin-utils";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle
-} from "@/components/ui/alert-dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -29,21 +20,13 @@ import { Textarea } from "@/components/ui/textarea";
 type DraftValue = string | boolean;
 
 const labelMap: Record<string, string> = {
-  enabled: "启用支付",
-  app_id: "应用 ID",
-  app_private_key: "应用私钥",
-  alipay_public_key: "支付宝公钥",
-  notify_url: "支付回调地址",
-  seller_id: "商户 ID",
-  timeout_express: "订单超时时间",
-  extra_options: "扩展参数",
-  model_id: "编辑器检查模型"
+  enabled: "启用支付", app_id: "应用 ID", app_private_key: "应用私钥",
+  alipay_public_key: "支付宝公钥", notify_url: "支付回调地址",
+  seller_id: "商户 ID", timeout_express: "订单超时时间",
+  extra_options: "扩展参数", model_id: "编辑器检查模型"
 };
 
-function configLabel(config: AdminConfig) {
-  return labelMap[config.config_key] ?? config.config_key.replaceAll("_", " ");
-}
-
+function configLabel(config: AdminConfig) { return labelMap[config.config_key] ?? config.config_key.replaceAll("_", " "); }
 function groupLabel(group: string) {
   if (group === "all") return "全部";
   if (group === "payment.alipay_f2f") return "支付宝当面付";
@@ -64,9 +47,7 @@ function payloadFor(config: AdminConfig, value: DraftValue): AdminConfigValue {
   const text = String(value);
   if (config.value_type === "integer") return { integer_value: Number(text) };
   if (config.value_type === "decimal") return { decimal_value: text };
-  if (config.value_type === "json") {
-    return { json_value: JSON.parse(text || "{}") as Record<string, unknown> };
-  }
+  if (config.value_type === "json") return { json_value: JSON.parse(text || "{}") as Record<string, unknown> };
   return { string_value: text };
 }
 
@@ -84,16 +65,14 @@ export default function AdminConfigsPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1); const [total, setTotal] = useState(0);
   const pageSize = 10;
 
   const visibleDirtyIds = configs.filter((item) => dirtyIds.has(item.id) && !jsonErrors[item.id]).map((item) => item.id);
   const hasDirty = dirtyIds.size > 0;
 
   async function load(group = activeGroup, nextPage = page) {
-    setLoading(true);
-    setLoadError(false);
+    setLoading(true); setLoadError(false);
     try {
       const [allData, pageData] = await Promise.all([
         client.listAdminConfigs({ pageSize: 100 }),
@@ -102,86 +81,39 @@ export default function AdminConfigsPage() {
       const nextGroups = ["all", ...Array.from(new Set(allData.items.map((item) => item.config_group))).sort()];
       setGroups(nextGroups);
       setConfigs(pageData.items);
-      if (!models.length) {
-        try {
-          const activeModels = await client.listAiModels();
-          setModels(activeModels);
-        } catch { /* 模型列表加载失败不影响配置页面 */ }
-      }
-      setTotal(pageData.total);
-      setPage(pageData.page);
-      setDrafts((current) => {
-        const next = { ...current };
-        for (const item of pageData.items) {
-          if (!dirtyIds.has(item.id)) next[item.id] = configValue(item);
-        }
-        return next;
-      });
-    } catch {
-      setLoadError(true);
-      toast.error("配置加载失败");
-    } finally {
-      setLoading(false);
-    }
+      if (!models.length) { try { setModels(await client.listAiModels()); } catch {} }
+      setTotal(pageData.total); setPage(pageData.page);
+      setDrafts((current) => { const next = { ...current }; for (const item of pageData.items) { if (!dirtyIds.has(item.id)) next[item.id] = configValue(item); } return next; });
+    } catch { setLoadError(true); toast.error("配置加载失败"); }
+    finally { setLoading(false); }
   }
 
-  useEffect(() => {
-    void load(activeGroup, 1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeGroup]);
+  useEffect(() => { void load(activeGroup, 1); }, [activeGroup]);
 
   function updateDraft(config: AdminConfig, value: DraftValue) {
     if (config.value_type === "json") {
-      try {
-        JSON.parse(String(value) || "{}");
-        setJsonErrors((current) => {
-          const next = { ...current };
-          delete next[config.id];
-          return next;
-        });
-      } catch {
-        setJsonErrors((current) => ({ ...current, [config.id]: "JSON 格式错误" }));
-      }
+      try { JSON.parse(String(value) || "{}"); setJsonErrors((c) => { const next = { ...c }; delete next[config.id]; return next; }); }
+      catch { setJsonErrors((c) => ({ ...c, [config.id]: "JSON 格式错误" })); }
     }
-    setDrafts((current) => ({ ...current, [config.id]: value }));
-    setDirtyIds((current) => new Set(current).add(config.id));
+    setDrafts((c) => ({ ...c, [config.id]: value }));
+    setDirtyIds((c) => new Set(c).add(config.id));
   }
 
   async function saveDirty(ids = visibleDirtyIds) {
     if (ids.length === 0) return true;
-    if (ids.some((id) => jsonErrors[id])) {
-      toast.error("存在格式错误的字段，请修正后再保存");
-      return false;
-    }
+    if (ids.some((id) => jsonErrors[id])) { toast.error("存在格式错误的字段"); return false; }
     setSaving(true);
     try {
-      for (const id of ids) {
-        const config = configs.find((item) => item.id === id);
-        if (!config) continue;
-        await client.updateAdminConfig(id, payloadFor(config, drafts[id] ?? configValue(config)));
-      }
-      setDirtyIds((current) => {
-        const next = new Set(current);
-        ids.forEach((id) => next.delete(id));
-        return next;
-      });
-      toast.success("配置已保存");
-      await load(activeGroup, page);
-      return true;
-    } catch {
-      toast.error("配置保存失败，请检查字段格式");
-      return false;
-    } finally {
-      setSaving(false);
-    }
+      for (const id of ids) { const config = configs.find((item) => item.id === id); if (!config) continue; await client.updateAdminConfig(id, payloadFor(config, drafts[id] ?? configValue(config))); }
+      setDirtyIds((c) => { const next = new Set(c); ids.forEach((id) => next.delete(id)); return next; });
+      toast.success("配置已保存"); await load(activeGroup, page); return true;
+    } catch { toast.error("配置保存失败"); return false; }
+    finally { setSaving(false); }
   }
 
   function requestGroupChange(group: string) {
     if (group === activeGroup) return;
-    if (hasDirty) {
-      setPendingGroup(group);
-      return;
-    }
+    if (hasDirty) { setPendingGroup(group); return; }
     setActiveGroup(group);
   }
 
@@ -189,206 +121,117 @@ export default function AdminConfigsPage() {
     if (!pendingGroup) return;
     const saved = await saveDirty(Array.from(dirtyIds));
     if (!saved) return;
-    setActiveGroup(pendingGroup);
-    setPendingGroup(null);
+    setActiveGroup(pendingGroup); setPendingGroup(null);
   }
 
   function discardAndSwitch() {
     if (!pendingGroup) return;
-    setDirtyIds(new Set());
-    setJsonErrors({});
+    setDirtyIds(new Set()); setJsonErrors({});
     setDrafts(Object.fromEntries(configs.map((item) => [item.id, configValue(item)])));
-    setActiveGroup(pendingGroup);
-    setPendingGroup(null);
+    setActiveGroup(pendingGroup); setPendingGroup(null);
   }
 
   function renderControl(config: AdminConfig) {
     const value = drafts[config.id] ?? configValue(config);
     if (config.config_group === "ai.editor_check" && config.config_key === "model_id") {
       const selected = String(value || "__none");
-      const selectedMissing = selected !== "__none" && !models.some((model) => model.id === selected);
+      const selectedMissing = selected !== "__none" && !models.some((m) => m.id === selected);
       return (
-        <Select
-          value={selected}
-          onValueChange={(nextValue) => updateDraft(config, nextValue === "__none" ? "" : nextValue)}
-        >
-          <SelectTrigger aria-label={`${configLabel(config)}配置值`}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              <SelectItem value="__none">未选择</SelectItem>
-              {selectedMissing ? <SelectItem value={selected}>当前不可用模型</SelectItem> : null}
-              {models.map((model) => (
-                <SelectItem key={model.id} value={model.id}>
-                  {model.display_name}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
+        <Select value={selected} onValueChange={(v) => updateDraft(config, v === "__none" ? "" : v)}>
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent><SelectGroup>
+            <SelectItem value="__none">未选择</SelectItem>
+            {selectedMissing && <SelectItem value={selected}>当前不可用模型</SelectItem>}
+            {models.map((m) => (<SelectItem key={m.id} value={m.id}>{m.display_name}</SelectItem>))}
+          </SelectGroup></SelectContent>
         </Select>
       );
     }
-    if (config.value_type === "boolean") {
-      return (
-        <div className="flex items-center gap-3">
-          <Switch
-            aria-label={`${configLabel(config)}开关`}
-            checked={Boolean(value)}
-            onCheckedChange={(checked) => updateDraft(config, checked)}
-          />
-          <span className="text-sm text-muted-foreground">{value ? "已启用" : "已关闭"}</span>
-        </div>
-      );
-    }
-    if (config.value_type === "json") {
-      return (
-        <div className="flex flex-col gap-1">
-          <Textarea
-            aria-label={`${configLabel(config)}配置值`}
-            value={String(value)}
-            onChange={(event) => updateDraft(config, event.target.value)}
-          />
-          {jsonErrors[config.id] ? (
-            <span className="text-xs text-destructive">{jsonErrors[config.id]}</span>
-          ) : null}
-        </div>
-      );
-    }
+    if (config.value_type === "boolean") return (
+      <div className="flex items-center gap-3">
+        <Switch checked={Boolean(value)} onCheckedChange={(checked) => updateDraft(config, checked)} />
+        <span className="text-sm text-muted-foreground">{value ? "已启用" : "已关闭"}</span>
+      </div>
+    );
+    if (config.value_type === "json") return (
+      <div className="flex flex-col gap-1">
+        <Textarea value={String(value)} onChange={(e) => updateDraft(config, e.target.value)} />
+        {jsonErrors[config.id] && <span className="text-xs text-destructive">{jsonErrors[config.id]}</span>}
+      </div>
+    );
     return (
       <div className="flex gap-2">
-        <Input
-          aria-label={`${configLabel(config)}配置值`}
-          type={config.value_type === "secret" && !reveal[config.id] ? "password" : "text"}
-          value={String(value)}
-          onChange={(event) => updateDraft(config, event.target.value)}
-        />
-        {config.value_type === "secret" ? (
-          <Button
-            type="button"
-            size="icon-sm"
-            variant="ghost"
-            aria-label="显示或隐藏密文"
-            onClick={() => setReveal((current) => ({ ...current, [config.id]: !current[config.id] }))}
-          >
-            {reveal[config.id] ? <EyeOff /> : <Eye />}
+        <Input type={config.value_type === "secret" && !reveal[config.id] ? "password" : "text"} value={String(value)} onChange={(e) => updateDraft(config, e.target.value)} />
+        {config.value_type === "secret" && (
+          <Button type="button" size="icon-sm" variant="ghost" onClick={() => setReveal((c) => ({ ...c, [config.id]: !c[config.id] }))}>
+            {reveal[config.id] ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
           </Button>
-        ) : null}
+        )}
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      {/* ── Header ── */}
-      <div className="shrink-0 px-6 py-4">
-        <h1 className="text-xl font-semibold tracking-tight">系统配置</h1>
-        <p className="text-sm text-muted-foreground">按分组维护全局配置，支持在列表中直接编辑并统一保存。</p>
-      </div>
+    <AdminPage>
+      <AdminHeading title="系统配置" description="按分组维护全局配置，支持在列表中直接编辑并统一保存。" />
 
-      {/* ── Loading ── */}
       {loading ? (
-        <div className="shrink-0 space-y-2 px-6">
-          <Skeleton className="h-12 w-full" />
-          <Skeleton className="h-64 w-full" />
-        </div>
+        <div className="space-y-2"><Skeleton className="h-12 w-full" /><Skeleton className="h-64 w-full" /></div>
       ) : loadError ? (
-        /* ── Error ── */
-        <div className="flex-1 px-6 pt-4">
-          <Empty>
-            <EmptyHeader>
-              <div className="mx-auto mb-2 flex size-9 items-center justify-center rounded-full bg-destructive/10 text-destructive">
-                <AlertCircle className="size-4" />
-              </div>
-              <EmptyTitle>配置加载失败</EmptyTitle>
-              <EmptyDescription>请检查登录状态或稍后重试。</EmptyDescription>
-            </EmptyHeader>
-            <Button
-              variant="outline"
-              size="sm"
-              className="mx-auto mt-3"
-              onClick={() => void load(activeGroup, page)}
-            >
-              重新加载
-            </Button>
-          </Empty>
+        <div className="flex-1 rounded-lg border border-border bg-card p-12 shadow-card">
+          <Empty><EmptyHeader>
+            <div className="mx-auto mb-2 flex size-9 items-center justify-center rounded-full bg-destructive/10 text-destructive"><AlertCircle className="size-4" /></div>
+            <EmptyTitle>配置加载失败</EmptyTitle><EmptyDescription>请检查登录状态或稍后重试。</EmptyDescription>
+          </EmptyHeader>
+          <Button variant="outline" size="sm" className="mx-auto mt-3" onClick={() => void load(activeGroup, page)}>重新加载</Button></Empty>
         </div>
       ) : (
-        /* ── Content ── */
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-6">
-          <Tabs value={activeGroup} onValueChange={requestGroupChange} className="flex min-h-0 flex-1 flex-col">
-            <div className="overflow-x-auto shrink-0">
-              <TabsList>
-                {groups.map((group) => (
-                  <TabsTrigger key={group} value={group}>{groupLabel(group)}</TabsTrigger>
-                ))}
-              </TabsList>
-            </div>
-
-            {groups.map((group) => (
-              <TabsContent key={group} value={group} className="mt-0 flex-1">
-                {activeGroup === group ? (
-                  !configs.length ? (
-                    <div className="flex h-full items-center justify-center">
-                      <Empty>
-                        <EmptyHeader>
-                          <EmptyTitle>没有配置项</EmptyTitle>
-                          <EmptyDescription>当前分组下没有可编辑配置。</EmptyDescription>
-                        </EmptyHeader>
-                      </Empty>
-                    </div>
-                  ) : (
-                    <div className="flex h-full flex-col">
-                      <div className="flex flex-1 flex-col gap-3 overflow-auto pb-4">
+        <Tabs value={activeGroup} onValueChange={requestGroupChange} className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="overflow-x-auto shrink-0">
+            <TabsList>{groups.map((g) => (<TabsTrigger key={g} value={g}>{groupLabel(g)}</TabsTrigger>))}</TabsList>
+          </div>
+          {groups.map((group) => (
+            <TabsContent key={group} value={group} className="mt-4 flex-1 overflow-hidden data-[state=inactive]:hidden">
+              {activeGroup === group && (
+                !configs.length ? (
+                  <div className="flex h-full items-center justify-center">
+                    <Empty><EmptyHeader><EmptyTitle>没有配置项</EmptyTitle><EmptyDescription>当前分组下没有可编辑配置。</EmptyDescription></EmptyHeader></Empty>
+                  </div>
+                ) : (
+                  <div className="flex h-full flex-col overflow-hidden">
+                    <div className="flex-1 space-y-3 overflow-auto pr-1">
                       {configs.map((config) => (
-                        <div key={config.id} className="grid gap-3 rounded-md border p-4 lg:grid-cols-[minmax(220px,0.8fr)_minmax(320px,1fr)] lg:items-center">
-                          <div className="flex min-w-0 flex-col gap-2">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="font-medium">{configLabel(config)}</span>
-                              <Badge variant="outline">{config.value_type}</Badge>
-                              {config.is_required ? <Badge variant="secondary">必填</Badge> : null}
-                              {dirtyIds.has(config.id) ? <Badge>未保存</Badge> : null}
+                        <div key={config.id} className="grid gap-4 rounded-lg border border-border bg-card p-4 shadow-card lg:grid-cols-[minmax(220px,0.8fr)_minmax(320px,1fr)] lg:items-center">
+                          <div className="flex min-w-0 flex-col gap-1.5">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-sm font-medium">{configLabel(config)}</span>
+                              <Badge variant="outline" className="text-[10px]">{config.value_type}</Badge>
+                              {config.is_required && <Badge variant="secondary" className="text-[10px]">必填</Badge>}
+                              {dirtyIds.has(config.id) && <Badge className="text-[10px]">未保存</Badge>}
                             </div>
-                            <span className="text-xs text-muted-foreground">{config.config_group}.{config.config_key}</span>
-                            {config.description ? <span className="text-sm text-muted-foreground">{config.description}</span> : null}
+                            <span className="font-mono text-[11px] text-muted-foreground">{config.config_group}.{config.config_key}</span>
+                            {config.description && <span className="text-xs text-muted-foreground">{config.description}</span>}
                           </div>
                           {renderControl(config)}
                         </div>
                       ))}
                     </div>
-
-                    {/* ── Pagination + Save button (sticky bottom) ── */}
-                    <div className="sticky bottom-0 -mx-6 flex items-center justify-between gap-4 border-t bg-background/95 px-6 pt-4 backdrop-blur pb-2">
+                    <div className="sticky bottom-0 -mx-4 flex items-center justify-between gap-4 border-t border-border bg-background/95 px-4 pt-4 pb-2 backdrop-blur">
                       <AdminPagination page={page} pageSize={pageSize} total={total} onPageChange={(nextPage) => void load(activeGroup, nextPage)} />
-                      <Button disabled={saving || visibleDirtyIds.length === 0} onClick={() => void saveDirty()}>
-                        <Save /> 保存配置
-                      </Button>
+                      <Button disabled={saving || visibleDirtyIds.length === 0} onClick={() => void saveDirty()}><Save className="size-4" /> 保存配置</Button>
                     </div>
-                    </div>
-                  )
-                ) : null}
-              </TabsContent>
-            ))}
-          </Tabs>
-        </div>
+                  </div>
+                )
+              )}
+            </TabsContent>
+          ))}
+        </Tabs>
       )}
 
-      {/* ── Unsaved changes dialog ── */}
       <AlertDialog open={!!pendingGroup} onOpenChange={(open) => !open && setPendingGroup(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>当前配置尚未保存</AlertDialogTitle>
-            <AlertDialogDescription>
-              切换到 {pendingGroup ? groupLabel(pendingGroup) : ""} 前，可以先保存修改，也可以放弃本次编辑。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>继续编辑</AlertDialogCancel>
-            <Button variant="outline" onClick={discardAndSwitch}>放弃更改</Button>
-            <AlertDialogAction onClick={() => void saveAndSwitch()}>保存并切换</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
+        <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>当前配置尚未保存</AlertDialogTitle><AlertDialogDescription>切换到 {pendingGroup ? groupLabel(pendingGroup) : ""} 前，可以先保存修改。</AlertDialogDescription></AlertDialogHeader>
+          <AlertDialogFooter><AlertDialogCancel>继续编辑</AlertDialogCancel><Button variant="outline" onClick={discardAndSwitch}>放弃更改</Button><AlertDialogAction onClick={() => void saveAndSwitch()}>保存并切换</AlertDialogAction></AlertDialogFooter></AlertDialogContent>
       </AlertDialog>
-    </div>
+    </AdminPage>
   );
 }

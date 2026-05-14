@@ -34,6 +34,7 @@ from app.models import (
     AiModel,
     BillingOrder,
     Chapter,
+    ChapterVersion,
     Character,
     ChatSession,
     CreditPack,
@@ -2648,6 +2649,74 @@ async def simulate_paid(
     )
     await session.commit()
     return public(order)
+
+
+@router.get("/admin/stats")
+async def admin_stats(
+    _admin: User = Depends(current_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    active_users = await session.scalar(
+        select(func.count()).select_from(User).where(User.status == "active")
+    )
+
+    token_stats = await session.execute(
+        select(
+            func.coalesce(func.sum(PointTransaction.prompt_cache_hit_tokens), 0),
+            func.coalesce(func.sum(PointTransaction.prompt_cache_miss_tokens), 0),
+            func.coalesce(func.sum(PointTransaction.completion_tokens), 0),
+            func.coalesce(func.sum(PointTransaction.points_delta), 0),
+        ).where(PointTransaction.change_type == "consume")
+    )
+    cache_hit, cache_miss, completion, points_delta = token_stats.one()
+
+    word_stats = await session.execute(
+        select(
+            func.coalesce(func.sum(ChapterVersion.word_count), 0),
+            func.coalesce(func.sum(ChapterVersion.word_count), 0).filter(ChapterVersion.source == "ai"),
+            func.coalesce(func.sum(ChapterVersion.word_count), 0).filter(ChapterVersion.source == "human"),
+        )
+    )
+    total_words, ai_words, human_words = word_stats.one()
+
+    ai_conversations = await session.scalar(
+        select(func.count()).select_from(PointTransaction).where(PointTransaction.source_type == "ai_chat")
+    )
+
+    revenue = await session.scalar(
+        select(func.coalesce(func.sum(BillingOrder.amount), 0)).where(BillingOrder.status == "paid")
+    )
+
+    active_subs = await session.scalar(
+        select(func.count()).select_from(UserSubscription).where(UserSubscription.status == "active")
+    )
+
+    total_works = await session.scalar(
+        select(func.count()).select_from(Work)
+    )
+
+    new_users_today = await session.scalar(
+        select(func.count()).select_from(User).where(
+            func.date(User.created_at) == func.current_date()
+        )
+    )
+
+    return {
+        "active_users": active_users or 0,
+        "total_tokens": (cache_hit or 0) + (cache_miss or 0) + (completion or 0),
+        "cache_hit_tokens": cache_hit or 0,
+        "cache_miss_tokens": cache_miss or 0,
+        "completion_tokens": completion or 0,
+        "points_consumed": round(float(abs(points_delta or 0)), 2),
+        "total_words": total_words or 0,
+        "ai_words": ai_words or 0,
+        "human_words": human_words or 0,
+        "ai_conversations": ai_conversations or 0,
+        "total_revenue": round(float(revenue or 0), 2),
+        "active_subscriptions": active_subs or 0,
+        "total_works": total_works or 0,
+        "new_users_today": new_users_today or 0,
+    }
 
 
 @router.get("/admin/users")

@@ -4,13 +4,13 @@ import { Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { type AdminBalanceAdjustInput, type AdminUserListItem, type ApiUser, type UserProfile } from "@/api";
-import { AdminPagination, StatusBadge } from "../_components";
+import { AdminHeading, AdminPage, AdminPagination, StatusBadge } from "../_components";
 import { adminClient, formatDate } from "../admin-utils";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { BalanceAdjustDialog } from "./BalanceAdjustDialog";
@@ -71,135 +71,121 @@ export default function AdminUsersPage() {
     await load();
   }
 
-  useEffect(() => {
-    void load("", 1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useEffect(() => { void load("", 1); }, []);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      {/* ── Filter Bar ── */}
+    <AdminPage>
+      <AdminHeading title="用户管理" description="查看用户资料、账户状态、订阅和积分。" />
+
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+          <Input
+            className="h-9 pl-9"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => event.key === "Enter" && void load(query, 1)}
+            placeholder="搜索邮箱或昵称…"
+          />
+        </div>
+      </div>
+
       {loading ? (
-        <div className="shrink-0 space-y-2 px-6">
-          <Skeleton className="h-9 w-full" />
-          <Skeleton className="h-64 w-full" />
+        <div className="space-y-2"><Skeleton className="h-9 w-full" /><Skeleton className="h-64 w-full" /></div>
+      ) : !users.length ? (
+        <div className="rounded-lg border border-border bg-card p-12 shadow-card">
+          <Empty>
+            <EmptyHeader>
+              <EmptyTitle>没有匹配的用户</EmptyTitle>
+              <EmptyDescription>换一个关键词再试。</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         </div>
       ) : (
-        <div className="flex shrink-0 flex-col gap-3 px-6 py-4">
-          <div className="flex items-center gap-3">
-            <div className="relative flex-1">
-              <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-              <Input
-                className="h-9 pl-9"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                onKeyDown={(event) => event.key === "Enter" && void load(query, 1)}
-                placeholder="搜索邮箱或昵称…"
-              />
+        <>
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card shadow-card">
+            <div className="overflow-auto">
+              <Table>
+                <TableHeader className="sticky top-0 z-10">
+                  <TableRow className="border-b border-border bg-muted/50 hover:bg-muted/50">
+                    <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">邮箱</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">昵称</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">角色</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">状态</TableHead>
+                    <TableHead className="text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">余额</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">套餐</TableHead>
+                    <TableHead className="text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {users.map((user) => (
+                    <TableRow key={user.id} className="border-b border-border transition-colors hover:bg-muted/30">
+                      <TableCell className="text-sm font-medium">{user.email}</TableCell>
+                      <TableCell className="text-sm">{user.nickname}</TableCell>
+                      <TableCell className="text-sm">{user.role}</TableCell>
+                      <TableCell><StatusBadge status={user.status} /></TableCell>
+                      <TableCell className="text-right text-sm tabular-nums">
+                        {(user.points.vip_daily_points_balance + user.points.credit_pack_points_balance).toFixed(2)}
+                      </TableCell>
+                      <TableCell className="text-sm">{user.subscription ? user.subscription.plan_id : "—"}</TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={() => void openDetail(user)}>详情</Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className={`h-8 text-xs ${user.status === "active" ? "text-amber-600 hover:text-amber-700" : "text-emerald-600 hover:text-emerald-700"}`}
+                            onClick={() => setTarget(user)}
+                          >
+                            {user.status === "active" ? "禁用" : "启用"}
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
           </div>
-
-          {/* ── Table ── */}
-          {!users.length ? (
-            <Empty>
-              <EmptyHeader>
-                <EmptyTitle>没有匹配的用户</EmptyTitle>
-                <EmptyDescription>换一个关键词再试。</EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          ) : (
-            <>
-              <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border">
-                <div className="overflow-auto">
-                  <Table>
-                    <TableHeader className="sticky top-0 z-10">
-                      <TableRow className="bg-muted/50">
-                        <TableHead>邮箱</TableHead>
-                        <TableHead>昵称</TableHead>
-                        <TableHead>角色</TableHead>
-                        <TableHead>状态</TableHead>
-                        <TableHead className="text-right">余额</TableHead>
-                        <TableHead>套餐</TableHead>
-                        <TableHead className="text-right">操作</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {users.map((user) => (
-                        <TableRow key={user.id} className="group transition-colors hover:bg-muted/30">
-                          <TableCell className="font-medium">{user.email}</TableCell>
-                          <TableCell>{user.nickname}</TableCell>
-                          <TableCell>{user.role}</TableCell>
-                          <TableCell><StatusBadge status={user.status} /></TableCell>
-                          <TableCell className="text-right tabular-nums">
-                            {(user.points.vip_daily_points_balance + user.points.credit_pack_points_balance).toFixed(2)}
-                          </TableCell>
-                          <TableCell>{user.subscription ? user.subscription.plan_id : "—"}</TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex items-center justify-end gap-1">
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-8 px-2 text-xs"
-                                onClick={() => void openDetail(user)}
-                              >
-                                详情
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className={`h-8 px-2 text-xs ${user.status === "active" ? "text-amber-600 hover:text-amber-700" : "text-emerald-600 hover:text-emerald-700"}`}
-                                onClick={() => setTarget(user)}
-                              >
-                                {user.status === "active" ? "禁用" : "启用"}
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              </div>
-              <div className="shrink-0">
-                <AdminPagination page={page} pageSize={pageSize} total={total} onPageChange={(nextPage) => void load(query, nextPage)} />
-              </div>
-            </>
-          )}
-        </div>
+          <AdminPagination page={page} pageSize={pageSize} total={total} onPageChange={(nextPage) => void load(query, nextPage)} />
+        </>
       )}
 
-      {/* ── Detail Sheet ── */}
-      <Sheet open={!!detail} onOpenChange={(open) => !open && setDetail(null)}>
-        <SheetContent>
-          <SheetHeader>
-            <SheetTitle>{detail?.user.email ?? "用户详情"}</SheetTitle>
-          </SheetHeader>
+      {/* Detail Sheet */}
+      <Dialog open={!!detail} onOpenChange={(open) => !open && setDetail(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-semibold tracking-[-0.01em]">{detail?.user.email ?? "用户详情"}</DialogTitle>
+            <DialogDescription>用户基础信息和积分余额。</DialogDescription>
+          </DialogHeader>
           {detail ? (
-            <div className="flex flex-col gap-4 text-sm">
-              <div className="grid grid-cols-2 gap-3 rounded-lg bg-muted/30 p-4">
-                <span className="text-muted-foreground">邮箱</span><span>{detail.user.email}</span>
-                <span className="text-muted-foreground">昵称</span><span>{detail.user.nickname}</span>
-                <span className="text-muted-foreground">角色</span><span>{detail.user.role}</span>
-                <span className="text-muted-foreground">状态</span><StatusBadge status={detail.user.status} />
+            <div className="flex flex-col gap-4 text-sm mt-6">
+              <div className="grid grid-cols-[100px_1fr] gap-x-4 gap-y-3 rounded-lg border border-border bg-muted/30 p-4">
+                <span className="text-xs text-muted-foreground">邮箱</span><span>{detail.user.email}</span>
+                <span className="text-xs text-muted-foreground">昵称</span><span>{detail.user.nickname}</span>
+                <span className="text-xs text-muted-foreground">角色</span><span>{detail.user.role}</span>
+                <span className="text-xs text-muted-foreground">状态</span><StatusBadge status={detail.user.status} />
               </div>
-              <div className="grid grid-cols-2 gap-3 rounded-lg bg-muted/30 p-4">
-                <span className="text-muted-foreground">当前订阅</span><span>{detail.subscription ? (detail.subscription as { plan_name?: string }).plan_name || detail.subscription.id : "无订阅"}</span>
-                <span className="text-muted-foreground">VIP 每日积分</span><span>{detail.points.vipDailyPoints}</span>
-                <span className="text-muted-foreground">加油包积分</span><span>{detail.points.creditPackPoints}</span>
-                <span className="text-muted-foreground">总积分</span><span>{detail.points.totalPoints}</span>
+              <div className="grid grid-cols-[100px_1fr] gap-x-4 gap-y-3 rounded-lg border border-border bg-muted/30 p-4">
+                <span className="text-xs text-muted-foreground">当前订阅</span>
+                <span>{detail.subscription ? (detail.subscription as { plan_name?: string }).plan_name || detail.subscription.id : "无订阅"}</span>
+                <span className="text-xs text-muted-foreground">VIP 每日积分</span>
+                <span className="tabular-nums">{detail.points.vipDailyPoints}</span>
+                <span className="text-xs text-muted-foreground">加油包积分</span>
+                <span className="tabular-nums">{detail.points.creditPackPoints}</span>
+                <span className="text-xs text-muted-foreground">总积分</span>
+                <span className="tabular-nums">{detail.points.totalPoints}</span>
               </div>
-              <Button size="sm" className="w-fit" onClick={() => setAdjustTarget(detail)}>
-                余额操作
-              </Button>
+              <Button size="sm" className="h-9 w-fit" onClick={() => setAdjustTarget(detail)}>余额操作</Button>
               {detail.subscription ? (
                 <p className="text-xs text-muted-foreground">订阅结束：{formatDate(detail.subscription.end_at)}</p>
               ) : null}
             </div>
           ) : null}
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
 
-      {/* ── Status Toggle Confirmation ── */}
+      {/* Status Toggle */}
       <AlertDialog open={!!target} onOpenChange={(open) => !open && setTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -215,13 +201,13 @@ export default function AdminUsersPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* ── Balance Adjust Dialog ── */}
+      {/* Balance Adjust */}
       <BalanceAdjustDialog
         user={adjustTarget}
         open={!!adjustTarget}
         onOpenChange={(open) => !open && setAdjustTarget(null)}
         onSubmit={handleBalanceAdjust}
       />
-    </div>
+    </AdminPage>
   );
 }

@@ -20,7 +20,7 @@ export function AdminHeading({
   return (
     <header className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
       <div className="flex min-w-0 flex-col gap-1">
-        <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
+        <h1 className="text-2xl font-semibold tracking-[-0.02em] text-foreground">{title}</h1>
         <p className="max-w-3xl text-sm text-muted-foreground">{description}</p>
       </div>
       {action ? <div className="flex shrink-0 items-center gap-2">{action}</div> : null}
@@ -29,7 +29,7 @@ export function AdminHeading({
 }
 
 export function AdminPage({ children }: Readonly<{ children: ReactNode }>) {
-  return <div className="flex flex-col gap-6">{children}</div>;
+  return <div className="flex h-full min-h-0 flex-col gap-6 overflow-hidden">{children}</div>;
 }
 
 export function AdminPanel({
@@ -44,10 +44,10 @@ export function AdminPanel({
   children: ReactNode;
 }>) {
   return (
-    <section className="space-y-4 rounded-lg bg-card p-5 shadow-card">
+    <section className="space-y-4 rounded-lg border border-border bg-card p-6 shadow-card">
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-1">
-          <h2 className="text-sm font-medium">{title}</h2>
+          <h2 className="text-sm font-semibold tracking-[-0.01em] text-foreground">{title}</h2>
           {description ? <p className="text-xs text-muted-foreground">{description}</p> : null}
         </div>
         {action ? <div className="flex shrink-0 items-center gap-2">{action}</div> : null}
@@ -60,7 +60,7 @@ export function AdminPanel({
 export function StatusBadge({ status }: Readonly<{ status: string }>) {
   if (["active", "paid", "TRADE_SUCCESS"].includes(status)) {
     return (
-      <span className="inline-flex items-center gap-1.5 text-xs">
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-foreground">
         <span className="size-1.5 rounded-full bg-foreground" />
         {status}
       </span>
@@ -68,13 +68,17 @@ export function StatusBadge({ status }: Readonly<{ status: string }>) {
   }
   if (["inactive", "disabled", "closed"].includes(status)) {
     return (
-      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-        <span className="size-1.5 rounded-full bg-muted-foreground/50" />
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+        <span className="size-1.5 rounded-full bg-muted-foreground/40" />
         {status}
       </span>
     );
   }
-  return <span className="text-xs text-muted-foreground">{status}</span>;
+  return (
+    <span className="inline-flex items-center rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+      {status}
+    </span>
+  );
 }
 
 export function AdminPagination({
@@ -101,8 +105,8 @@ export function AdminPagination({
   }
 
   return (
-    <div className="flex flex-col gap-3 border-t pt-4 md:flex-row md:items-center md:justify-between">
-      <p className="text-sm text-muted-foreground">
+    <div className="flex flex-col gap-3 border-t border-border pt-4 md:flex-row md:items-center md:justify-between">
+      <p className="text-xs text-muted-foreground">
         第 {page} / {pageCount} 页，共 {total} 条
       </p>
       <Pagination className="mx-0 w-auto justify-start md:justify-end">
@@ -112,7 +116,7 @@ export function AdminPagination({
               href="#"
               text="上一页"
               aria-disabled={page <= 1}
-              className={page <= 1 ? "pointer-events-none opacity-50" : undefined}
+              className={page <= 1 ? "pointer-events-none opacity-40" : undefined}
               onClick={(event) => {
                 event.preventDefault();
                 go(page - 1);
@@ -123,7 +127,7 @@ export function AdminPagination({
             const previous = pages[index - 1];
             return (
               <PaginationItem key={item}>
-                {previous && item - previous > 1 ? <span className="px-2 text-muted-foreground">...</span> : null}
+                {previous && item - previous > 1 ? <span className="px-1 text-xs text-muted-foreground">...</span> : null}
                 <PaginationLink
                   href="#"
                   isActive={item === page}
@@ -142,7 +146,7 @@ export function AdminPagination({
               href="#"
               text="下一页"
               aria-disabled={page >= pageCount}
-              className={page >= pageCount ? "pointer-events-none opacity-50" : undefined}
+              className={page >= pageCount ? "pointer-events-none opacity-40" : undefined}
               onClick={(event) => {
                 event.preventDefault();
                 go(page + 1);

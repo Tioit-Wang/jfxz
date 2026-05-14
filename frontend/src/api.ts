@@ -523,6 +523,23 @@ export type AdminSession = {
   last_active_at: string;
 };
 
+export type AdminStats = {
+  active_users: number;
+  total_tokens: number;
+  cache_hit_tokens: number;
+  cache_miss_tokens: number;
+  completion_tokens: number;
+  points_consumed: number;
+  total_words: number;
+  ai_words: number;
+  human_words: number;
+  ai_conversations: number;
+  total_revenue: number;
+  active_subscriptions: number;
+  total_works: number;
+  new_users_today: number;
+};
+
 export type WorkDraft = {
   title: string;
   shortIntro: string;
@@ -1535,6 +1552,10 @@ export class ApiClient {
       method: "PATCH",
       body: JSON.stringify(input)
     });
+  }
+
+  async getAdminStats(): Promise<AdminStats> {
+    return this.request<AdminStats>("/admin/stats");
   }
 
   async listChatSessions(workId: string, limit = 20): Promise<ChatSession[]> {

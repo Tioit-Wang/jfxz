@@ -4,12 +4,12 @@ import { AlertCircle, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { type AdminSession } from "@/api";
-import { AdminPagination } from "../_components";
+import { AdminHeading, AdminPage, AdminPagination } from "../_components";
 import { adminClient, formatDate } from "../admin-utils";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
@@ -52,34 +52,31 @@ export default function AdminSessionsPage() {
     }
   }
 
-  useEffect(() => {
-    void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useEffect(() => { void load(); }, []);
 
   const runs = (detail?.agent?.runs ?? []) as Array<Record<string, unknown>>;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      {/* ── Header ── */}
-      <div className="flex shrink-0 items-center justify-between px-6 py-4">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">会话管理</h1>
-          <p className="text-sm text-muted-foreground">只读查看用户会话索引和 Agent Session 基础信息。</p>
+    <AdminPage>
+      <AdminHeading title="会话管理" description="只读查看用户会话索引和 Agent Session 基础信息。" />
+
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+          <Input
+            className="h-9 pl-9"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => event.key === "Enter" && void load(1)}
+            placeholder="搜索用户、作品或会话…"
+          />
         </div>
-        <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); void load(1); }}>
-          <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="用户、作品或会话标题" />
-          <Button variant="outline" type="submit"><Search className="size-4" />搜索</Button>
-        </form>
       </div>
 
       {loading ? (
-        <div className="shrink-0 space-y-2 px-6">
-          <Skeleton className="h-12 w-full" />
-          <Skeleton className="h-64 w-full" />
-        </div>
+        <div className="space-y-2"><Skeleton className="h-9 w-full" /><Skeleton className="h-64 w-full" /></div>
       ) : loadError ? (
-        <div className="flex-1 px-6 pt-4">
+        <div className="rounded-lg border border-border bg-card p-12 shadow-card">
           <Empty>
             <EmptyHeader>
               <div className="mx-auto mb-2 flex size-9 items-center justify-center rounded-full bg-destructive/10 text-destructive">
@@ -88,13 +85,11 @@ export default function AdminSessionsPage() {
               <EmptyTitle>会话列表加载失败</EmptyTitle>
               <EmptyDescription>请检查登录状态或稍后重试。</EmptyDescription>
             </EmptyHeader>
-            <Button variant="outline" size="sm" className="mx-auto mt-3" onClick={() => void load(page)}>
-              重新加载
-            </Button>
+            <Button variant="outline" size="sm" className="mx-auto mt-3" onClick={() => void load(page)}>重新加载</Button>
           </Empty>
         </div>
       ) : !items.length ? (
-        <div className="flex-1 px-6 pt-4">
+        <div className="rounded-lg border border-border bg-card p-12 shadow-card">
           <Empty>
             <EmptyHeader>
               <EmptyTitle>没有会话</EmptyTitle>
@@ -104,64 +99,67 @@ export default function AdminSessionsPage() {
         </div>
       ) : (
         <>
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border mx-6">
-            <div className="overflow-auto flex-1">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card shadow-card">
+            <div className="overflow-auto">
               <Table>
                 <TableHeader className="sticky top-0 z-10">
-                  <TableRow className="bg-muted/50">
-                    <TableHead>用户</TableHead>
-                    <TableHead>作品</TableHead>
-                    <TableHead>标题</TableHead>
-                    <TableHead>来源</TableHead>
-                    <TableHead>最近活跃</TableHead>
-                    <TableHead className="text-right">操作</TableHead>
+                  <TableRow className="border-b border-border bg-muted/50 hover:bg-muted/50">
+                    <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">用户</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">作品</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">标题</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">来源</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">最近活跃</TableHead>
+                    <TableHead className="text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {items.map((item) => (
-                    <TableRow key={item.id} className="group transition-colors hover:bg-muted/30">
-                      <TableCell>{item.user_email ?? item.user_id}</TableCell>
-                      <TableCell>{item.work_title ?? item.work_id}</TableCell>
-                      <TableCell>{item.title}</TableCell>
-                      <TableCell>{item.source_type}</TableCell>
-                      <TableCell>{formatDate(item.last_active_at)}</TableCell>
-                      <TableCell className="text-right"><Button size="sm" variant="outline" onClick={() => void openDetail(item)}>详情</Button></TableCell>
+                    <TableRow key={item.id} className="border-b border-border transition-colors hover:bg-muted/30">
+                      <TableCell className="text-sm">{item.user_email ?? item.user_id}</TableCell>
+                      <TableCell className="text-sm">{item.work_title ?? item.work_id}</TableCell>
+                      <TableCell className="text-sm">{item.title}</TableCell>
+                      <TableCell className="text-xs font-mono">{item.source_type}</TableCell>
+                      <TableCell className="text-sm">{formatDate(item.last_active_at)}</TableCell>
+                      <TableCell className="text-right">
+                        <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={() => void openDetail(item)}>详情</Button>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
             </div>
           </div>
-          <div className="shrink-0 px-6 py-2">
-            <AdminPagination page={page} pageSize={pageSize} total={total} onPageChange={(nextPage) => void load(nextPage)} />
-          </div>
+          <AdminPagination page={page} pageSize={pageSize} total={total} onPageChange={(nextPage) => void load(nextPage)} />
         </>
       )}
 
-      <Sheet open={!!detail} onOpenChange={(open) => !open && setDetail(null)}>
-        <SheetContent>
-          <SheetHeader>
-            <SheetTitle>会话详情</SheetTitle>
-            <SheetDescription>索引信息和只读历史消息。</SheetDescription>
-          </SheetHeader>
+      <Dialog open={!!detail} onOpenChange={(open) => !open && setDetail(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-semibold tracking-[-0.01em]">会话详情</DialogTitle>
+            <DialogDescription>索引信息和只读历史消息。</DialogDescription>
+          </DialogHeader>
           {detail ? (
-            <div className="flex flex-col gap-4 overflow-y-auto text-sm">
-              <div className="grid grid-cols-2 gap-3 rounded-lg bg-muted/30 p-4">
-                <span className="text-muted-foreground">标题</span><span>{detail.session.title}</span>
-                <span className="text-muted-foreground">Agent Session</span><span className="truncate whitespace-nowrap">{detail.session.agno_session_id}</span>
-                <span className="text-muted-foreground">来源</span><span>{detail.session.source_type}</span>
-                <span className="text-muted-foreground">最近活跃</span><span>{formatDate(detail.session.last_active_at)}</span>
+            <div className="flex flex-col gap-4 overflow-y-auto text-sm mt-6">
+              <div className="grid grid-cols-[120px_1fr] gap-x-4 gap-y-3 rounded-lg border border-border bg-muted/30 p-4">
+                <span className="text-xs text-muted-foreground">标题</span><span>{detail.session.title}</span>
+                <span className="text-xs text-muted-foreground">Agent Session</span>
+                <span className="truncate font-mono text-xs">{detail.session.agno_session_id}</span>
+                <span className="text-xs text-muted-foreground">来源</span><span className="text-xs font-mono">{detail.session.source_type}</span>
+                <span className="text-xs text-muted-foreground">最近活跃</span><span>{formatDate(detail.session.last_active_at)}</span>
               </div>
               <section className="flex flex-col gap-2">
-                <h3 className="font-medium">历史消息</h3>
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">历史消息</h3>
                 {runs.length ? runs.map((run, index) => (
-                  <pre className="overflow-auto rounded-lg border bg-muted p-3 text-xs" key={index}>{JSON.stringify(run, null, 2)}</pre>
-                )) : <p className="text-muted-foreground">暂无历史消息</p>}
+                  <pre className="overflow-auto rounded-md border border-border bg-muted p-3 text-xs font-mono" key={index}>
+                    {JSON.stringify(run, null, 2)}
+                  </pre>
+                )) : <p className="text-xs text-muted-foreground">暂无历史消息</p>}
               </section>
             </div>
           ) : null}
-        </SheetContent>
-      </Sheet>
-    </div>
+        </DialogContent>
+      </Dialog>
+    </AdminPage>
   );
 }

@@ -4,12 +4,12 @@ import { AlertCircle, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { type AdminSubscription } from "@/api";
-import { AdminPagination, StatusBadge } from "../_components";
+import { AdminHeading, AdminPage, AdminPagination, StatusBadge } from "../_components";
 import { adminClient, formatDate } from "../admin-utils";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
@@ -52,32 +52,29 @@ export default function AdminSubscriptionsPage() {
     }
   }
 
-  useEffect(() => {
-    void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useEffect(() => { void load(); }, []);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      {/* ── Header bar ── */}
-      <div className="flex shrink-0 items-center justify-between px-6 py-4">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">订阅管理</h1>
-          <p className="text-sm text-muted-foreground">查看用户当前套餐、周期和续费时间。</p>
+    <AdminPage>
+      <AdminHeading title="订阅管理" description="查看用户当前套餐、周期和续费时间。" />
+
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+          <Input
+            className="h-9 pl-9"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => event.key === "Enter" && void load(1)}
+            placeholder="搜索用户或套餐…"
+          />
         </div>
-        <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); void load(1); }}>
-          <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="用户或套餐" />
-          <Button variant="outline" type="submit"><Search className="size-4" />搜索</Button>
-        </form>
       </div>
 
       {loading ? (
-        <div className="shrink-0 space-y-2 px-6">
-          <Skeleton className="h-12 w-full" />
-          <Skeleton className="h-64 w-full" />
-        </div>
+        <div className="space-y-2"><Skeleton className="h-9 w-full" /><Skeleton className="h-64 w-full" /></div>
       ) : loadError ? (
-        <div className="flex-1 px-6 pt-4">
+        <div className="rounded-lg border border-border bg-card p-12 shadow-card">
           <Empty>
             <EmptyHeader>
               <div className="mx-auto mb-2 flex size-9 items-center justify-center rounded-full bg-destructive/10 text-destructive">
@@ -86,13 +83,11 @@ export default function AdminSubscriptionsPage() {
               <EmptyTitle>订阅列表加载失败</EmptyTitle>
               <EmptyDescription>请检查登录状态或稍后重试。</EmptyDescription>
             </EmptyHeader>
-            <Button variant="outline" size="sm" className="mx-auto mt-3" onClick={() => void load(page)}>
-              重新加载
-            </Button>
+            <Button variant="outline" size="sm" className="mx-auto mt-3" onClick={() => void load(page)}>重新加载</Button>
           </Empty>
         </div>
       ) : !items.length ? (
-        <div className="flex-1 px-6 pt-4">
+        <div className="rounded-lg border border-border bg-card p-12 shadow-card">
           <Empty>
             <EmptyHeader>
               <EmptyTitle>没有订阅</EmptyTitle>
@@ -102,36 +97,35 @@ export default function AdminSubscriptionsPage() {
         </div>
       ) : (
         <>
-          {/* ── Table ── */}
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border mx-6">
-            <div className="overflow-auto flex-1">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card shadow-card">
+            <div className="overflow-auto">
               <Table>
                 <TableHeader className="sticky top-0 z-10">
-                  <TableRow className="bg-muted/50">
-                    <TableHead>用户</TableHead>
-                    <TableHead>套餐</TableHead>
-                    <TableHead>状态</TableHead>
-                    <TableHead>开始</TableHead>
-                    <TableHead>结束</TableHead>
-                    <TableHead>下次续费</TableHead>
-                    <TableHead>每日积分</TableHead>
-                    <TableHead>时长(天)</TableHead>
-                    <TableHead className="text-right">操作</TableHead>
+                  <TableRow className="border-b border-border bg-muted/50 hover:bg-muted/50">
+                    <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">用户</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">套餐</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">状态</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">开始</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">结束</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">下次续费</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">每日积分</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">时长(天)</TableHead>
+                    <TableHead className="text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {items.map((item) => (
-                    <TableRow key={item.id} className="group transition-colors hover:bg-muted/30">
-                      <TableCell>{item.user_email ?? item.user_id}</TableCell>
-                      <TableCell>{item.plan_name ?? item.plan_id}</TableCell>
+                    <TableRow key={item.id} className="border-b border-border transition-colors hover:bg-muted/30">
+                      <TableCell className="text-sm">{item.user_email ?? item.user_id}</TableCell>
+                      <TableCell className="text-sm">{item.plan_name ?? item.plan_id}</TableCell>
                       <TableCell><StatusBadge status={item.status} /></TableCell>
-                      <TableCell>{formatDate(item.start_at)}</TableCell>
-                      <TableCell>{formatDate(item.end_at)}</TableCell>
-                      <TableCell>{formatDate(item.next_renew_at)}</TableCell>
-                      <TableCell>{item.daily_vip_points_snapshot}</TableCell>
-                      <TableCell>{item.duration_days_snapshot}</TableCell>
+                      <TableCell className="text-sm">{formatDate(item.start_at)}</TableCell>
+                      <TableCell className="text-sm">{formatDate(item.end_at)}</TableCell>
+                      <TableCell className="text-sm">{formatDate(item.next_renew_at)}</TableCell>
+                      <TableCell className="text-sm">{item.daily_vip_points_snapshot}</TableCell>
+                      <TableCell className="text-sm">{item.duration_days_snapshot}</TableCell>
                       <TableCell className="text-right">
-                        <Button size="sm" variant="outline" onClick={() => void openDetail(item)}>详情</Button>
+                        <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={() => void openDetail(item)}>详情</Button>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -139,35 +133,30 @@ export default function AdminSubscriptionsPage() {
               </Table>
             </div>
           </div>
-
-          {/* ── Pagination ── */}
-          <div className="shrink-0 px-6 py-2">
-            <AdminPagination page={page} pageSize={pageSize} total={total} onPageChange={(nextPage) => void load(nextPage)} />
-          </div>
+          <AdminPagination page={page} pageSize={pageSize} total={total} onPageChange={(nextPage) => void load(nextPage)} />
         </>
       )}
 
-      {/* ── Detail Sheet ── */}
-      <Sheet open={!!detail} onOpenChange={(open) => !open && setDetail(null)}>
-        <SheetContent>
-          <SheetHeader>
-            <SheetTitle>订阅详情</SheetTitle>
-            <SheetDescription>订阅基础信息和关联订单。</SheetDescription>
-          </SheetHeader>
+      <Dialog open={!!detail} onOpenChange={(open) => !open && setDetail(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-semibold tracking-[-0.01em]">订阅详情</DialogTitle>
+            <DialogDescription>订阅基础信息和关联订单。</DialogDescription>
+          </DialogHeader>
           {detail ? (
-            <div className="grid grid-cols-2 gap-3 rounded-lg bg-muted/30 p-4 text-sm">
-              <span className="text-muted-foreground">用户</span><span>{detail.user.email}</span>
-              <span className="text-muted-foreground">套餐</span><span>{String(detail.plan.name ?? detail.subscription.plan_id)}</span>
-              <span className="text-muted-foreground">状态</span><StatusBadge status={detail.subscription.status} />
-              <span className="text-muted-foreground">开始时间</span><span>{formatDate(detail.subscription.start_at)}</span>
-              <span className="text-muted-foreground">结束时间</span><span>{formatDate(detail.subscription.end_at)}</span>
-              <span className="text-muted-foreground">关联订单</span><span>{detail.order?.order_no ?? "无"}</span>
-              <span className="text-muted-foreground">每日积分快照</span><span>{detail.subscription.daily_vip_points_snapshot}</span>
-              <span className="text-muted-foreground">订阅时长(天)</span><span>{detail.subscription.duration_days_snapshot}</span>
+            <div className="grid grid-cols-[120px_1fr] gap-x-4 gap-y-3 rounded-lg border border-border bg-muted/30 p-4 text-sm mt-6">
+              <span className="text-xs text-muted-foreground">用户</span><span>{detail.user.email}</span>
+              <span className="text-xs text-muted-foreground">套餐</span><span>{String(detail.plan.name ?? detail.subscription.plan_id)}</span>
+              <span className="text-xs text-muted-foreground">状态</span><StatusBadge status={detail.subscription.status} />
+              <span className="text-xs text-muted-foreground">开始时间</span><span>{formatDate(detail.subscription.start_at)}</span>
+              <span className="text-xs text-muted-foreground">结束时间</span><span>{formatDate(detail.subscription.end_at)}</span>
+              <span className="text-xs text-muted-foreground">关联订单</span><span className="font-mono text-xs">{detail.order?.order_no ?? "无"}</span>
+              <span className="text-xs text-muted-foreground">每日积分快照</span><span>{detail.subscription.daily_vip_points_snapshot}</span>
+              <span className="text-xs text-muted-foreground">订阅时长(天)</span><span>{detail.subscription.duration_days_snapshot}</span>
             </div>
           ) : null}
-        </SheetContent>
-      </Sheet>
-    </div>
+        </DialogContent>
+      </Dialog>
+    </AdminPage>
   );
 }

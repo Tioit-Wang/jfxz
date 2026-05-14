@@ -165,11 +165,11 @@ export default function AdminHome() {
           if (p) { const r = p.getRange(); selectRange(v, r.from, r.to); }
         }}>
           <TabsList className="h-8 border border-border">
-            <TabsTrigger value="" onClick={() => { setPreset(""); setCustomFrom(""); setCustomTo(""); fetchStats(); }} className="text-xs data-active:bg-card">
+            <TabsTrigger value="" onClick={() => { setPreset(""); setCustomFrom(""); setCustomTo(""); fetchStats(); }} className="text-xs data-[state=active]:bg-card">
               全部
             </TabsTrigger>
             {presets.map((p) => (
-              <TabsTrigger key={p.label} value={p.label} className="text-xs data-active:bg-card">
+              <TabsTrigger key={p.label} value={p.label} className="text-xs data-[state=active]:bg-card">
                 {p.label}
               </TabsTrigger>
             ))}

@@ -108,43 +108,43 @@ export default function VersionHistoryDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[80vh] flex flex-col p-0 gap-0">
-        <DialogHeader className="px-6 pt-6 pb-2">
-          <DialogTitle>历史版本</DialogTitle>
-          <DialogDescription>
+      <DialogContent className="sm:max-w-6xl w-[90vw] max-w-6xl h-[82vh] flex flex-col p-0 gap-0 overflow-hidden rounded-xl bg-white shadow-[0px_1px_1px_rgba(0,0,0,0.02),0px_8px_16px_-4px_rgba(0,0,0,0.04),0px_24px_32px_-8px_rgba(0,0,0,0.06)] ring-1 ring-inset ring-[#00000014] [&_[data-slot=dialog-close]]:rounded-full [&_[data-slot=dialog-close]]:text-[#888888] [&_[data-slot=dialog-close]]:hover:bg-[#f5f5f5] [&_[data-slot=dialog-close]]:hover:text-[#171717]">
+        <DialogHeader className="border-b border-[#ebebeb] px-6 py-5">
+          <DialogTitle className="text-xl font-semibold tracking-[-0.6px] text-[#171717]">历史版本</DialogTitle>
+          <DialogDescription className="mt-1 text-sm leading-5 text-[#888888]">
             共 {total} 个版本。点击查看内容，可恢复到任意历史版本。
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-1 min-h-0 border-t">
+        <div className="flex flex-1 min-h-0 border-t border-[#ebebeb]">
           {/* Left: version list */}
-          <div className="w-[38%] border-r flex flex-col">
+          <div className="w-[25%] border-r border-[#ebebeb] flex flex-col">
             <ScrollArea className="flex-1">
               {loadingList && versions.length === 0 ? (
                 <div className="p-4 space-y-3">
                   {Array.from({ length: 5 }).map((_, i) => (
-                    <Skeleton key={i} className="h-16 w-full rounded-lg" />
+                    <Skeleton key={i} className="h-16 w-full rounded-md" />
                   ))}
                 </div>
               ) : versions.length === 0 ? (
-                <div className="p-4 text-sm text-muted-foreground text-center">暂无版本记录</div>
+                <div className="p-4 text-sm leading-5 text-[#888888] text-center">暂无版本记录</div>
               ) : (
                 <div className="p-2 space-y-1">
                   {versions.map((v) => (
                     <button
                       key={v.id}
                       onClick={() => setSelectedId(v.id)}
-                      className={`w-full text-left rounded-lg px-3 py-2.5 transition-colors ${
+                      className={`w-full text-left rounded-md px-3 py-2.5 transition-colors ${
                         selectedId === v.id
-                          ? "bg-primary/10 border border-primary/20"
-                          : "hover:bg-muted border border-transparent"
+                          ? "bg-[#f5f5f5] ring-1 ring-inset ring-[#00000014]"
+                          : "hover:bg-[#fafafa] border border-transparent"
                       }`}
                     >
                       <div className="flex items-center gap-2 mb-1">
                         <Badge
                           variant={v.source === "ai" ? "default" : "secondary"}
                           className={`text-[10px] px-1.5 py-0 ${
-                            v.source === "ai" ? "bg-purple-100 text-purple-700" : ""
+                            v.source === "ai" ? "bg-[#d8ccf1] text-[#4c2889]" : ""
                           }`}
                         >
                           {v.source === "ai" ? (
@@ -154,16 +154,16 @@ export default function VersionHistoryDialog({
                           )}
                           {v.source === "ai" ? "AI" : "人工"}
                         </Badge>
-                        <span className="text-xs text-muted-foreground">
+                        <span className="text-xs leading-4 text-[#888888]">
                           {formatTime(v.createdAt || v.updatedAt)}
                         </span>
                         {v.isCurrent && (
-                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-green-600 border-green-200">
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-[#0070f3] border-[#0070f3]/30">
                             当前
                           </Badge>
                         )}
                       </div>
-                      <div className="text-xs text-muted-foreground truncate">
+                      <div className="text-xs leading-4 text-[#888888] truncate">
                         v{v.versionNumber} · {v.wordCount} 字 · {v.title}
                       </div>
                     </button>
@@ -172,7 +172,7 @@ export default function VersionHistoryDialog({
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="w-full text-xs"
+                      className="w-full text-xs leading-4 text-[#888888]"
                       onClick={() => {
                         const last = versions[versions.length - 1];
                         if (last) loadVersions(last.versionNumber);
@@ -191,39 +191,40 @@ export default function VersionHistoryDialog({
           <div className="flex-1 flex flex-col min-w-0">
             {loadingContent ? (
               <div className="p-6 space-y-4">
-                <Skeleton className="h-6 w-48" />
-                <Skeleton className="h-4 w-full" />
-                <Skeleton className="h-4 w-full" />
-                <Skeleton className="h-4 w-3/4" />
+                <Skeleton className="h-6 w-48 rounded-md" />
+                <Skeleton className="h-4 w-full rounded-md" />
+                <Skeleton className="h-4 w-full rounded-md" />
+                <Skeleton className="h-4 w-3/4 rounded-md" />
               </div>
             ) : selectedVersion ? (
               <>
-                <div className="px-6 pt-4 pb-2 border-b">
-                  <h3 className="font-medium text-sm truncate">{selectedVersion.title}</h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">
+                <div className="px-6 pt-4 pb-2 border-b border-[#ebebeb]">
+                  <h3 className="font-medium text-sm leading-5 text-[#171717] truncate">{selectedVersion.title}</h3>
+                  <p className="text-xs leading-4 text-[#888888] mt-0.5">
                     版本 v{selectedVersion.versionNumber} · {selectedVersion.wordCount} 字
                     {selectedVersion.sourceDetail && ` · ${selectedVersion.sourceDetail}`}
                   </p>
                 </div>
                 <ScrollArea className="flex-1">
-                  <div className="px-6 py-4 whitespace-pre-wrap text-sm leading-relaxed font-[family-name:var(--font-serif,serif)]">
+                  <div className="px-6 py-4 whitespace-pre-wrap text-sm leading-relaxed font-[family-name:var(--font-serif,serif)] text-[#171717]">
                     {selectedVersion.content || "(空)"}
                   </div>
                 </ScrollArea>
               </>
             ) : (
-              <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
+              <div className="flex-1 flex items-center justify-center text-sm leading-5 text-[#888888]">
                 选择左侧版本查看内容
               </div>
             )}
           </div>
         </div>
 
-        <DialogFooter className="px-6 py-3 border-t">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+        <DialogFooter className="mx-0 mb-0 rounded-none bg-white flex items-center justify-end gap-4 border-t border-[#ebebeb] px-6 py-5">
+          <Button variant="outline" className="rounded-full border-[#ebebeb] bg-white text-[#171717] hover:bg-[#fafafa]" onClick={() => onOpenChange(false)}>
             关闭
           </Button>
           <Button
+            className="rounded-full bg-[#171717] text-white hover:bg-[#171717]/90"
             onClick={handleRestore}
             disabled={!selectedVersion || selectedVersion.isCurrent || restoring}
           >

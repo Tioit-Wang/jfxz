@@ -231,10 +231,10 @@ function formatUpdatedAt(value: string): string {
 const CHAT_MARKDOWN_PLUGINS = { code, cjk };
 
 function referenceTone(type: ChatReference["type"]): string {
-  if (type === "setting") return "border-border bg-muted text-foreground";
-  if (type === "character") return "border-border bg-muted text-foreground";
-  if (type === "suggestion") return "border-border bg-muted text-foreground";
-  return "border-border bg-muted text-muted-foreground";
+  if (type === "setting") return "border-[#ebebeb] bg-[#f5f5f5] text-[#171717]";
+  if (type === "character") return "border-[#ebebeb] bg-[#f5f5f5] text-[#171717]";
+  if (type === "suggestion") return "border-[#ebebeb] bg-[#f5f5f5] text-[#171717]";
+  return "border-[#ebebeb] bg-[#f5f5f5] text-[#888888]";
 }
 
 function apiErrorMessage(error: unknown): string {
@@ -835,7 +835,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       id: `local-${Date.now()}`,
       volumeId,
       order: volumeChapterCount + 1,
-      title: `第 ${volumeChapterCount + 1} 章 未命名章节`,
+      title: "未命名章节",
       summary: "",
       content: ""
     };
@@ -1899,7 +1899,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   }
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-white font-sans text-foreground">
+    <div className="flex h-screen w-screen overflow-hidden bg-white font-sans text-[#171717]">
       {workspaceLayoutLoaded ? (
       <ResizablePanelGroup
         defaultLayout={workspaceDefaultLayout}
@@ -2120,28 +2120,28 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       ) : null}
 
       <Dialog open={summaryModalOpen} onOpenChange={setSummaryModalOpen}>
-        <DialogContent className="overflow-hidden p-0 sm:max-w-lg [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:bg-white">
-          <DialogHeader className="border-b border-neutral-200 bg-white px-6 py-5">
-            <DialogTitle className="text-2xl font-black tracking-tight">编辑章节提要</DialogTitle>
-            <DialogDescription className="text-xs text-neutral-500">章节提要会作为列表预览和 AI 上下文的一部分。</DialogDescription>
+        <DialogContent className="overflow-hidden rounded-xl bg-white p-0 shadow-[0px_1px_1px_rgba(0,0,0,0.02),0px_8px_16px_-4px_rgba(0,0,0,0.04),0px_24px_32px_-8px_rgba(0,0,0,0.06)] ring-1 ring-inset ring-[#00000014] sm:max-w-lg [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:rounded-full [&_[data-slot=dialog-close]]:text-[#888888] [&_[data-slot=dialog-close]]:hover:bg-[#f5f5f5] [&_[data-slot=dialog-close]]:hover:text-[#171717]">
+          <DialogHeader className="border-b border-[#ebebeb] px-6 py-5">
+            <DialogTitle className="text-xl font-semibold tracking-[-0.6px] text-[#171717]">编辑章节提要</DialogTitle>
+            <DialogDescription className="mt-1 text-sm leading-5 text-[#888888]">章节提要会作为列表预览和 AI 上下文的一部分。</DialogDescription>
           </DialogHeader>
-          <FieldGroup className="bg-white p-6 outline outline-1 -outline-offset-8 outline-white">
+          <FieldGroup className="p-6">
             <Field>
               <FieldLabel>章节提要</FieldLabel>
               <Textarea
                 aria-label="章节提要"
                 value={summaryDraft}
                 onChange={(event) => setSummaryDraft(event.target.value)}
-                className="h-40 resize-none rounded-xl border-neutral-300 bg-white leading-6"
+                className="h-40 resize-none rounded-sm border-[#ebebeb] bg-white leading-6"
                 placeholder="写下这一章的核心事件、情绪转折或悬念..."
               />
             </Field>
           </FieldGroup>
-          <DialogFooter className="h-[72px] border-t border-neutral-200 bg-white p-0 sm:justify-center">
-            <Button variant="outline" className="rounded-xl border-neutral-300 bg-white" onClick={() => setSummaryModalOpen(false)}>
+          <DialogFooter className="mx-0 mb-0 rounded-none bg-white flex items-center justify-end gap-4 border-t border-[#ebebeb] px-6 py-5">
+            <Button variant="outline" className="rounded-full border-[#ebebeb] bg-white text-[#171717] hover:bg-[#fafafa]" onClick={() => setSummaryModalOpen(false)}>
               取消
             </Button>
-            <Button className="rounded-xl bg-neutral-950 text-white hover:bg-neutral-800" onClick={() => void saveSummary()}>
+            <Button className="rounded-full bg-[#171717] text-white hover:bg-[#171717]/90" onClick={() => void saveSummary()}>
               <Check data-icon="inline-start" />
               保存更改
             </Button>
@@ -2150,16 +2150,16 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       </Dialog>
 
       <AlertDialog open={chapterDeleteOpen} onOpenChange={setChapterDeleteOpen}>
-        <AlertDialogContent className="overflow-hidden rounded-2xl border-neutral-200 bg-white p-0 outline outline-1 -outline-offset-8 outline-white sm:max-w-sm">
-          <AlertDialogHeader className="border-b border-neutral-200 bg-white px-6 py-5 text-left">
-            <AlertDialogTitle className="text-2xl font-black tracking-tight">确认删除章节？</AlertDialogTitle>
-            <AlertDialogDescription className="text-sm leading-6 text-neutral-500">
+        <AlertDialogContent className="overflow-hidden rounded-xl bg-white p-0 shadow-[0px_1px_1px_rgba(0,0,0,0.02),0px_8px_16px_-4px_rgba(0,0,0,0.04),0px_24px_32px_-8px_rgba(0,0,0,0.06)] ring-1 ring-inset ring-[#00000014] sm:max-w-sm">
+          <AlertDialogHeader className="border-b border-[#ebebeb] px-6 py-5 text-left">
+            <AlertDialogTitle className="text-xl font-semibold tracking-[-0.6px] text-[#171717]">确认删除章节？</AlertDialogTitle>
+            <AlertDialogDescription className="mt-1 text-sm leading-5 text-[#888888]">
               将删除「{activeChapter?.title ?? "当前章节"}」的标题、正文和提要。删除后会自动切换到相邻章节。
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter className="m-0 h-[72px] justify-center rounded-none border-t border-neutral-200 bg-white p-0">
-            <AlertDialogCancel className="rounded-xl border-neutral-300 bg-white">取消</AlertDialogCancel>
-            <AlertDialogAction className="rounded-xl bg-red-700 text-white hover:bg-red-800" onClick={() => void deleteActiveChapter()}>确认删除</AlertDialogAction>
+          <AlertDialogFooter className="mx-0 mb-0 rounded-none bg-white flex items-center justify-end gap-4 border-t border-[#ebebeb] px-6 py-5">
+            <AlertDialogCancel className="rounded-full border-[#ebebeb] bg-white text-[#171717] hover:bg-[#fafafa]">取消</AlertDialogCancel>
+            <AlertDialogAction className="rounded-full bg-[#ee0000] text-white hover:bg-[#c50000]" onClick={() => void deleteActiveChapter()}>确认删除</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -2170,47 +2170,47 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
           if (!open) setCharacterMode("detail");
         }}
       >
-        <DialogContent className="w-[calc(100vw-2rem)] overflow-hidden p-0 sm:max-w-3xl lg:max-w-4xl [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:z-20 [&_[data-slot=dialog-close]]:bg-white">
+        <DialogContent className="w-[calc(100vw-2rem)] overflow-hidden rounded-xl bg-white p-0 shadow-[0px_1px_1px_rgba(0,0,0,0.02),0px_8px_16px_-4px_rgba(0,0,0,0.04),0px_24px_32px_-8px_rgba(0,0,0,0.06)] ring-1 ring-inset ring-[#00000014] sm:max-w-3xl lg:max-w-4xl [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:z-20 [&_[data-slot=dialog-close]]:rounded-full [&_[data-slot=dialog-close]]:text-[#888888] [&_[data-slot=dialog-close]]:hover:bg-[#f5f5f5] [&_[data-slot=dialog-close]]:hover:text-[#171717]">
           <DialogHeader className="sr-only">
             <DialogTitle>{characterMode === "create" ? "新建角色" : "编辑角色"}</DialogTitle>
             <DialogDescription>维护角色名称、简介和可供 AI 引用的详细设定。</DialogDescription>
           </DialogHeader>
-          <div className="bg-white text-neutral-950">
-            <div className="border-b border-neutral-200 bg-white px-6 py-5">
-              <div className="flex items-center gap-3">
-                <span className="grid size-10 place-items-center rounded-full border border-neutral-300 bg-white text-neutral-950"><UserRound size={18} /></span>
+          <div className="text-[#171717]">
+            <div className="border-b border-[#ebebeb] px-6 py-5">
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 grid size-10 place-items-center rounded-full border border-[#ebebeb] bg-white text-[#171717]"><UserRound size={18} /></span>
                 <div>
-                  <h2 className="text-xl font-black">{characterMode === "create" ? "新建角色" : "编辑角色"}</h2>
-                  <p className="mt-1 text-xs text-neutral-500">角色资料会进入 AI 可引用的作品上下文。</p>
+                  <h2 className="text-xl font-semibold tracking-[-0.6px]">{characterMode === "create" ? "新建角色" : "编辑角色"}</h2>
+                  <p className="mt-1 text-sm leading-5 text-[#888888]">角色资料会进入 AI 可引用的作品上下文。</p>
                 </div>
               </div>
             </div>
             <div className="grid gap-5 p-6 sm:grid-cols-[220px_minmax(0,1fr)]">
-              <aside className="rounded-2xl border border-neutral-950 bg-neutral-950 p-5 text-white">
-                <h3 className="line-clamp-2 text-2xl font-black tracking-tight">{characterDraft.name || "未命名角色"}</h3>
-                <p className="mt-3 line-clamp-5 text-xs leading-6 text-white/60">{characterDraft.summary || "用一句话写清角色身份、气质或当前处境。"}</p>
+              <aside className="rounded-xl border border-[#171717] bg-[#171717] p-5 text-white">
+                <h3 className="line-clamp-2 text-xl font-semibold tracking-[-0.6px]">{characterDraft.name || "未命名角色"}</h3>
+                <p className="mt-3 line-clamp-5 text-sm leading-5 text-white/60">{characterDraft.summary || "用一句话写清角色身份、气质或当前处境。"}</p>
               </aside>
               <FieldGroup>
                 <Field>
                   <FieldLabel>角色名称</FieldLabel>
-                  <Input aria-label="角色名称" value={characterDraft.name} onChange={(event) => setCharacterDraft((value) => ({ ...value, name: event.target.value }))} className="h-11 rounded-xl border-neutral-300 bg-white font-semibold" placeholder="例如：林雾" />
+                  <Input aria-label="角色名称" value={characterDraft.name} onChange={(event) => setCharacterDraft((value) => ({ ...value, name: event.target.value }))} className="h-11 rounded-sm border-[#ebebeb] bg-white font-semibold" placeholder="例如：林雾" />
                 </Field>
                 <Field>
                   <FieldLabel>角色简介</FieldLabel>
-                  <Textarea aria-label="角色简介" value={characterDraft.summary} onChange={(event) => setCharacterDraft((value) => ({ ...value, summary: event.target.value }))} className="min-h-24 resize-none rounded-xl border-neutral-300 bg-white leading-6" placeholder="一句话说明身份、气质或当前处境。" />
+                  <Textarea aria-label="角色简介" value={characterDraft.summary} onChange={(event) => setCharacterDraft((value) => ({ ...value, summary: event.target.value }))} className="min-h-24 resize-none rounded-sm border-[#ebebeb] bg-white leading-6" placeholder="一句话说明身份、气质或当前处境。" />
                 </Field>
                 <Field>
                   <FieldLabel>角色详情</FieldLabel>
-                  <Textarea aria-label="角色详情" value={characterDraft.detail} onChange={(event) => setCharacterDraft((value) => ({ ...value, detail: event.target.value }))} className="min-h-40 resize-none rounded-xl border-neutral-300 bg-white leading-6" placeholder="经历、关系、能力、秘密、人物弧光。" />
+                  <Textarea aria-label="角色详情" value={characterDraft.detail} onChange={(event) => setCharacterDraft((value) => ({ ...value, detail: event.target.value }))} className="min-h-40 resize-none rounded-sm border-[#ebebeb] bg-white leading-6" placeholder="经历、关系、能力、秘密、人物弧光。" />
                 </Field>
                 {characterStatus === "error" && characterError ? <FieldError>{characterError}</FieldError> : null}
               </FieldGroup>
             </div>
-            <DialogFooter className="h-[72px] border-t border-neutral-200 bg-white p-0 sm:justify-center">
-              <Button variant="outline" className="rounded-xl border-neutral-300 bg-white" onClick={() => setCharacterMode("detail")}>
+            <DialogFooter className="mx-0 mb-0 rounded-none bg-white flex items-center justify-end gap-4 border-t border-[#ebebeb] px-6 py-5">
+              <Button variant="outline" className="rounded-full border-[#ebebeb] bg-white text-[#171717] hover:bg-[#fafafa]" onClick={() => setCharacterMode("detail")}>
                 取消
               </Button>
-              <Button className="rounded-xl bg-neutral-950 text-white hover:bg-neutral-800" onClick={() => void saveCharacter()} disabled={characterStatus === "saving"}>
+              <Button className="rounded-full bg-[#171717] text-white hover:bg-[#171717]/90" onClick={() => void saveCharacter()} disabled={characterStatus === "saving"}>
                 {characterStatus === "saving" ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Save data-icon="inline-start" />}
                 保存角色
               </Button>
@@ -2220,16 +2220,16 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       </Dialog>
 
       <AlertDialog open={characterDeleteConfirm} onOpenChange={setCharacterDeleteConfirm}>
-        <AlertDialogContent className="overflow-hidden rounded-2xl border-neutral-200 bg-white p-0 outline outline-1 -outline-offset-8 outline-white sm:max-w-sm">
-          <AlertDialogHeader className="border-b border-neutral-200 bg-white px-6 py-5 text-left">
-            <AlertDialogTitle className="text-2xl font-black tracking-tight">确认删除角色？</AlertDialogTitle>
-            <AlertDialogDescription className="text-sm leading-6 text-neutral-500">
+        <AlertDialogContent className="overflow-hidden rounded-xl bg-white p-0 shadow-[0px_1px_1px_rgba(0,0,0,0.02),0px_8px_16px_-4px_rgba(0,0,0,0.04),0px_24px_32px_-8px_rgba(0,0,0,0.06)] ring-1 ring-inset ring-[#00000014] sm:max-w-sm">
+          <AlertDialogHeader className="border-b border-[#ebebeb] px-6 py-5 text-left">
+            <AlertDialogTitle className="text-xl font-semibold tracking-[-0.6px] text-[#171717]">确认删除角色？</AlertDialogTitle>
+            <AlertDialogDescription className="mt-1 text-sm leading-5 text-[#888888]">
               将删除角色「{activeCharacter?.name ?? "选中角色"}」的所有信息。此操作不可撤销。
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter className="m-0 h-[72px] justify-center rounded-none border-t border-neutral-200 bg-white p-0">
-            <AlertDialogCancel className="rounded-xl border-neutral-300 bg-white">取消</AlertDialogCancel>
-            <AlertDialogAction className="rounded-xl bg-red-700 text-white hover:bg-red-800" onClick={() => void deleteCharacterConfirm()}>确认删除</AlertDialogAction>
+          <AlertDialogFooter className="mx-0 mb-0 rounded-none bg-white flex items-center justify-end gap-4 border-t border-[#ebebeb] px-6 py-5">
+            <AlertDialogCancel className="rounded-full border-[#ebebeb] bg-white text-[#171717] hover:bg-[#fafafa]">取消</AlertDialogCancel>
+            <AlertDialogAction className="rounded-full bg-[#ee0000] text-white hover:bg-[#c50000]" onClick={() => void deleteCharacterConfirm()}>确认删除</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -2240,56 +2240,56 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
           if (!open) setSettingMode("detail");
         }}
       >
-        <DialogContent className="w-[calc(100vw-2rem)] overflow-hidden p-0 sm:max-w-3xl lg:max-w-4xl [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:z-20 [&_[data-slot=dialog-close]]:bg-white">
+        <DialogContent className="w-[calc(100vw-2rem)] overflow-hidden rounded-xl bg-white p-0 shadow-[0px_1px_1px_rgba(0,0,0,0.02),0px_8px_16px_-4px_rgba(0,0,0,0.04),0px_24px_32px_-8px_rgba(0,0,0,0.06)] ring-1 ring-inset ring-[#00000014] sm:max-w-3xl lg:max-w-4xl [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:z-20 [&_[data-slot=dialog-close]]:rounded-full [&_[data-slot=dialog-close]]:text-[#888888] [&_[data-slot=dialog-close]]:hover:bg-[#f5f5f5] [&_[data-slot=dialog-close]]:hover:text-[#171717]">
           <DialogHeader className="sr-only">
             <DialogTitle>{settingMode === "create" ? "新建设定" : "编辑设定"}</DialogTitle>
             <DialogDescription>维护设定类型、简介和可供 AI 引用的详细内容。</DialogDescription>
           </DialogHeader>
-          <div className="bg-white text-neutral-950">
-            <div className="border-b border-neutral-200 bg-white px-6 py-5">
-              <div className="flex items-center gap-3">
-                <span className="grid size-10 place-items-center rounded-full border border-neutral-300 bg-white text-neutral-950"><Database size={18} /></span>
+          <div className="text-[#171717]">
+            <div className="border-b border-[#ebebeb] px-6 py-5">
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 grid size-10 place-items-center rounded-full border border-[#ebebeb] bg-white text-[#171717]"><Database size={18} /></span>
                 <div>
-                  <h2 className="text-xl font-black">{settingMode === "create" ? "新建设定" : "编辑设定"}</h2>
-                  <p className="mt-1 text-xs text-neutral-500">地点、规则、组织和物品都可以作为设定保存。</p>
+                  <h2 className="text-xl font-semibold tracking-[-0.6px]">{settingMode === "create" ? "新建设定" : "编辑设定"}</h2>
+                  <p className="mt-1 text-sm leading-5 text-[#888888]">地点、规则、组织和物品都可以作为设定保存。</p>
                 </div>
               </div>
             </div>
             <div className="grid gap-5 p-6 sm:grid-cols-[220px_minmax(0,1fr)]">
-              <aside className="rounded-2xl border border-neutral-950 bg-white p-5">
-                <h3 className="line-clamp-2 text-2xl font-black tracking-tight">{settingDraft.name || "未命名设定"}</h3>
-                <p className="mt-3 line-clamp-5 text-xs leading-6 text-neutral-500">{settingDraft.summary || "用一句话说明这个设定的作用。"}</p>
+              <aside className="rounded-xl border border-[#ebebeb] bg-[#fafafa] p-5">
+                <h3 className="line-clamp-2 text-xl font-semibold tracking-[-0.6px]">{settingDraft.name || "未命名设定"}</h3>
+                <p className="mt-3 line-clamp-5 text-sm leading-5 text-[#888888]">{settingDraft.summary || "用一句话说明这个设定的作用。"}</p>
               </aside>
               <FieldGroup>
                 <div className="grid gap-4 sm:grid-cols-[180px_minmax(0,1fr)]">
                   <Field>
                     <FieldLabel>设定类型</FieldLabel>
                     <Select value={settingDraft.type} onValueChange={(value) => setSettingDraft((draft) => ({ ...draft, type: value }))}>
-                      <SelectTrigger className="h-11 w-full rounded-xl border-neutral-300 bg-white" aria-label="设定类型"><SelectValue /></SelectTrigger>
+                      <SelectTrigger className="h-11 w-full rounded-sm border-[#ebebeb] bg-white data-[size=default]:h-11" aria-label="设定类型"><SelectValue /></SelectTrigger>
                       <SelectContent><SelectGroup>{settingTypes.filter((item) => item.value !== "all").map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectGroup></SelectContent>
                     </Select>
                   </Field>
                   <Field>
                     <FieldLabel>设定名称</FieldLabel>
-                    <Input aria-label="设定名称" value={settingDraft.name} onChange={(event) => setSettingDraft((value) => ({ ...value, name: event.target.value }))} className="h-11 rounded-xl border-neutral-300 bg-white font-semibold" placeholder="例如：雾港学院" />
+                    <Input aria-label="设定名称" value={settingDraft.name} onChange={(event) => setSettingDraft((value) => ({ ...value, name: event.target.value }))} className="h-11 rounded-sm border-[#ebebeb] bg-white font-semibold" placeholder="例如：雾港学院" />
                   </Field>
                 </div>
                 <Field>
                   <FieldLabel>设定简介</FieldLabel>
-                  <Textarea aria-label="设定简介" value={settingDraft.summary} onChange={(event) => setSettingDraft((value) => ({ ...value, summary: event.target.value }))} className="min-h-24 resize-none rounded-xl border-neutral-300 bg-white leading-6" placeholder="一句话说明这个设定的作用。" />
+                  <Textarea aria-label="设定简介" value={settingDraft.summary} onChange={(event) => setSettingDraft((value) => ({ ...value, summary: event.target.value }))} className="min-h-24 resize-none rounded-sm border-[#ebebeb] bg-white leading-6" placeholder="一句话说明这个设定的作用。" />
                 </Field>
                 <Field>
                   <FieldLabel>设定详情</FieldLabel>
-                  <Textarea aria-label="设定详情" className="min-h-40 resize-none rounded-xl border-neutral-300 bg-white leading-6" value={settingDraft.detail} onChange={(event) => setSettingDraft((value) => ({ ...value, detail: event.target.value }))} placeholder="规则、限制、历史、和角色或章节的关联。" />
+                  <Textarea aria-label="设定详情" className="min-h-40 resize-none rounded-sm border-[#ebebeb] bg-white leading-6" value={settingDraft.detail} onChange={(event) => setSettingDraft((value) => ({ ...value, detail: event.target.value }))} placeholder="规则、限制、历史、和角色或章节的关联。" />
                 </Field>
                 {settingStatus === "error" && settingError ? <FieldError>{settingError}</FieldError> : null}
               </FieldGroup>
             </div>
-            <DialogFooter className="h-[72px] border-t border-neutral-200 bg-white p-0 sm:justify-center">
-              <Button variant="outline" className="rounded-xl border-neutral-300 bg-white" onClick={() => setSettingMode("detail")}>
+            <DialogFooter className="mx-0 mb-0 rounded-none bg-white flex items-center justify-end gap-4 border-t border-[#ebebeb] px-6 py-5">
+              <Button variant="outline" className="rounded-full border-[#ebebeb] bg-white text-[#171717] hover:bg-[#fafafa]" onClick={() => setSettingMode("detail")}>
                 取消
               </Button>
-              <Button className="rounded-xl bg-neutral-950 text-white hover:bg-neutral-800" onClick={() => void saveSetting()} disabled={settingStatus === "saving"}>
+              <Button className="rounded-full bg-[#171717] text-white hover:bg-[#171717]/90" onClick={() => void saveSetting()} disabled={settingStatus === "saving"}>
                 {settingStatus === "saving" ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Save data-icon="inline-start" />}
                 保存设定
               </Button>
@@ -2299,46 +2299,45 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       </Dialog>
 
       <AlertDialog open={settingDeleteConfirm} onOpenChange={setSettingDeleteConfirm}>
-        <AlertDialogContent className="overflow-hidden rounded-2xl border-neutral-200 bg-white p-0 outline outline-1 -outline-offset-8 outline-white sm:max-w-sm">
-          <AlertDialogHeader className="border-b border-neutral-200 bg-white px-6 py-5 text-left">
-            <AlertDialogTitle className="text-2xl font-black tracking-tight">确认删除设定？</AlertDialogTitle>
-            <AlertDialogDescription className="text-sm leading-6 text-neutral-500">
+        <AlertDialogContent className="overflow-hidden rounded-xl bg-white p-0 shadow-[0px_1px_1px_rgba(0,0,0,0.02),0px_8px_16px_-4px_rgba(0,0,0,0.04),0px_24px_32px_-8px_rgba(0,0,0,0.06)] ring-1 ring-inset ring-[#00000014] sm:max-w-sm">
+          <AlertDialogHeader className="border-b border-[#ebebeb] px-6 py-5 text-left">
+            <AlertDialogTitle className="text-xl font-semibold tracking-[-0.6px] text-[#171717]">确认删除设定？</AlertDialogTitle>
+            <AlertDialogDescription className="mt-1 text-sm leading-5 text-[#888888]">
               将删除设定「{activeSetting?.name ?? "选中设定"}」的所有信息。此操作不可撤销。
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter className="m-0 h-[72px] justify-center rounded-none border-t border-neutral-200 bg-white p-0">
-            <AlertDialogCancel className="rounded-xl border-neutral-300 bg-white">取消</AlertDialogCancel>
-            <AlertDialogAction className="rounded-xl bg-red-700 text-white hover:bg-red-800" onClick={() => void deleteSettingConfirm()}>确认删除</AlertDialogAction>
+          <AlertDialogFooter className="mx-0 mb-0 rounded-none bg-white flex items-center justify-end gap-4 border-t border-[#ebebeb] px-6 py-5">
+            <AlertDialogCancel className="rounded-full border-[#ebebeb] bg-white text-[#171717] hover:bg-[#fafafa]">取消</AlertDialogCancel>
+            <AlertDialogAction className="rounded-full bg-[#ee0000] text-white hover:bg-[#c50000]" onClick={() => void deleteSettingConfirm()}>确认删除</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
       <Dialog open={volumeCreateOpen} onOpenChange={setVolumeCreateOpen}>
-        <DialogContent className="overflow-hidden p-0 sm:max-w-md [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:bg-white">
-          <DialogHeader className="border-b border-neutral-200 bg-white px-6 py-5">
-            <DialogTitle className="text-2xl font-black tracking-tight">新建卷</DialogTitle>
-            <DialogDescription className="text-xs text-neutral-500">卷会绑定当前作品，新章节可以按卷归档。</DialogDescription>
+        <DialogContent className="overflow-hidden rounded-xl bg-white p-0 shadow-[0px_1px_1px_rgba(0,0,0,0.02),0px_8px_16px_-4px_rgba(0,0,0,0.04),0px_24px_32px_-8px_rgba(0,0,0,0.06)] ring-1 ring-inset ring-[#00000014] sm:max-w-md [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:rounded-full [&_[data-slot=dialog-close]]:text-[#888888] [&_[data-slot=dialog-close]]:hover:bg-[#f5f5f5] [&_[data-slot=dialog-close]]:hover:text-[#171717]">
+          <DialogHeader className="border-b border-[#ebebeb] px-6 py-5">
+            <DialogTitle className="text-xl font-semibold tracking-[-0.6px] text-[#171717]">新建卷</DialogTitle>
+            <DialogDescription className="mt-1 text-sm leading-5 text-[#888888]">卷会绑定当前作品，新章节可以按卷归档。</DialogDescription>
           </DialogHeader>
           <FieldGroup className="p-6">
-            <div className="rounded-2xl border border-neutral-950 bg-white p-4">
-              <h3 className="text-xl font-black">卷目录</h3>
-              <p className="mt-2 text-xs leading-6 text-neutral-500">建议用阶段、地点或主线变化命名。</p>
-            </div>
             <Field>
               <FieldLabel>卷名</FieldLabel>
               <Input
                 aria-label="卷名"
                 value={volumeDraft}
                 onChange={(event) => setVolumeDraft(event.target.value)}
-                className="h-11 rounded-xl border-neutral-300 bg-white font-semibold"
+                className="h-11 rounded-sm border-[#ebebeb] bg-white font-semibold"
                 placeholder="例如：第一卷 雾港"
               />
             </Field>
+            <p className="mt-2 text-xs leading-4 text-[#888888]">
+              建议用阶段、地点或主线变化命名。创建后可在侧栏中管理章节排序。
+            </p>
             {volumeStatus === "error" ? <FieldError>新建卷失败，请稍后重试</FieldError> : null}
           </FieldGroup>
-          <DialogFooter className="h-[72px] border-t border-neutral-200 bg-white p-0 sm:justify-center">
-            <Button variant="outline" className="rounded-xl border-neutral-300 bg-white" onClick={() => setVolumeCreateOpen(false)}>取消</Button>
-            <Button className="rounded-xl bg-neutral-950 text-white hover:bg-neutral-800" onClick={() => void saveVolume()} disabled={volumeStatus === "saving"}>
+          <DialogFooter className="mx-0 mb-0 rounded-none bg-white flex items-center justify-end gap-4 border-t border-[#ebebeb] px-6 py-5">
+            <Button variant="outline" className="rounded-full border-[#ebebeb] bg-white text-[#171717] hover:bg-[#fafafa]" onClick={() => setVolumeCreateOpen(false)}>取消</Button>
+            <Button className="rounded-full bg-[#171717] text-white hover:bg-[#171717]/90" onClick={() => void saveVolume()} disabled={volumeStatus === "saving"}>
               {volumeStatus === "saving" ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Save data-icon="inline-start" />}
               创建卷
             </Button>
@@ -2347,25 +2346,30 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       </Dialog>
 
       <Dialog open={volumeEditOpen} onOpenChange={setVolumeEditOpen}>
-        <DialogContent className="overflow-hidden p-0 sm:max-w-md [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:bg-white">
-          <DialogHeader className="border-b border-neutral-200 bg-white px-6 py-5">
-            <DialogTitle className="text-2xl font-black tracking-tight">重命名卷</DialogTitle>
-            <DialogDescription className="text-xs text-neutral-500">修改当前卷的名称。</DialogDescription>
+        <DialogContent className="overflow-hidden rounded-xl bg-white p-0 shadow-[0px_1px_1px_rgba(0,0,0,0.02),0px_8px_16px_-4px_rgba(0,0,0,0.04),0px_24px_32px_-8px_rgba(0,0,0,0.06)] ring-1 ring-inset ring-[#00000014] sm:max-w-md [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:rounded-full [&_[data-slot=dialog-close]]:text-[#888888] [&_[data-slot=dialog-close]]:hover:bg-[#f5f5f5] [&_[data-slot=dialog-close]]:hover:text-[#171717]">
+          <DialogHeader className="border-b border-[#ebebeb] px-6 py-5">
+            <DialogTitle className="text-xl font-semibold tracking-[-0.6px] text-[#171717]">重命名卷</DialogTitle>
+            <DialogDescription className="mt-1 text-sm leading-5 text-[#888888]">修改当前卷的名称。</DialogDescription>
           </DialogHeader>
           <FieldGroup className="p-6">
+            <div className="mb-5 rounded-md border border-[#ebebeb] bg-[#fafafa] px-4 py-3">
+              <p className="text-xs leading-4 text-[#888888]">当前名称</p>
+              <p className="mt-1 text-sm font-medium text-[#171717]">{volumes.find((v) => v.id === editingVolumeId)?.title ?? "未命名"}</p>
+            </div>
             <Field>
-              <FieldLabel>卷名</FieldLabel>
+              <FieldLabel>新卷名</FieldLabel>
               <Input
-                aria-label="卷名"
+                aria-label="新卷名"
                 value={volumeEditDraft}
                 onChange={(event) => setVolumeEditDraft(event.target.value)}
-                className="h-11 rounded-xl border-neutral-300 bg-white font-semibold"
+                className="h-11 rounded-sm border-[#ebebeb] bg-white font-semibold"
+                placeholder="输入新的卷名称"
               />
             </Field>
           </FieldGroup>
-          <DialogFooter className="h-[72px] border-t border-neutral-200 bg-white p-0 sm:justify-center">
-            <Button variant="outline" className="rounded-xl border-neutral-300 bg-white" onClick={() => setVolumeEditOpen(false)}>取消</Button>
-            <Button className="rounded-xl bg-neutral-950 text-white hover:bg-neutral-800" onClick={() => void saveVolumeEdit()}>
+          <DialogFooter className="mx-0 mb-0 rounded-none bg-white flex items-center justify-end gap-4 border-t border-[#ebebeb] px-6 py-5">
+            <Button variant="outline" className="rounded-full border-[#ebebeb] bg-white text-[#171717] hover:bg-[#fafafa]" onClick={() => setVolumeEditOpen(false)}>取消</Button>
+            <Button className="rounded-full bg-[#171717] text-white hover:bg-[#171717]/90" onClick={() => void saveVolumeEdit()}>
               保存
             </Button>
           </DialogFooter>
@@ -2376,16 +2380,16 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
         open={volumeDeleteConfirm !== null}
         onOpenChange={(open) => { if (!open) setVolumeDeleteConfirm(null); }}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>确认删除卷</AlertDialogTitle>
-            <AlertDialogDescription>
+        <AlertDialogContent className="overflow-hidden rounded-xl bg-white p-0 shadow-[0px_1px_1px_rgba(0,0,0,0.02),0px_8px_16px_-4px_rgba(0,0,0,0.04),0px_24px_32px_-8px_rgba(0,0,0,0.06)] ring-1 ring-inset ring-[#00000014] sm:max-w-sm">
+          <AlertDialogHeader className="border-b border-[#ebebeb] px-6 py-5 text-left">
+            <AlertDialogTitle className="text-xl font-semibold tracking-[-0.6px] text-[#171717]">确认删除卷</AlertDialogTitle>
+            <AlertDialogDescription className="mt-1 text-sm leading-5 text-[#888888]">
               确认删除卷「{volumeDeleteConfirm?.title}」？此操作不可撤销。
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void confirmDeleteVolume()}>删除</AlertDialogAction>
+          <AlertDialogFooter className="mx-0 mb-0 rounded-none bg-white flex items-center justify-end gap-4 border-t border-[#ebebeb] px-6 py-5">
+            <AlertDialogCancel className="rounded-full border-[#ebebeb] bg-white text-[#171717] hover:bg-[#fafafa]">取消</AlertDialogCancel>
+            <AlertDialogAction className="rounded-full bg-[#ee0000] text-white hover:bg-[#c50000]" onClick={() => void confirmDeleteVolume()}>删除</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -2396,18 +2400,18 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
           if (!open) setNoteMode("idle");
         }}
       >
-        <DialogContent className="w-[calc(100vw-2rem)] overflow-hidden p-0 sm:max-w-3xl [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:z-20 [&_[data-slot=dialog-close]]:bg-white">
+        <DialogContent className="w-[calc(100vw-2rem)] overflow-hidden rounded-xl bg-white p-0 shadow-[0px_1px_1px_rgba(0,0,0,0.02),0px_8px_16px_-4px_rgba(0,0,0,0.04),0px_24px_32px_-8px_rgba(0,0,0,0.06)] ring-1 ring-inset ring-[#00000014] sm:max-w-3xl [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:z-20 [&_[data-slot=dialog-close]]:rounded-full [&_[data-slot=dialog-close]]:text-[#888888] [&_[data-slot=dialog-close]]:hover:bg-[#f5f5f5] [&_[data-slot=dialog-close]]:hover:text-[#171717]">
           <DialogHeader className="sr-only">
             <DialogTitle>{noteMode === "create" ? "新建灵感便签" : "编辑灵感便签"}</DialogTitle>
             <DialogDescription>记录绑定当前作品的伏笔、剧情灵感或临时想法。</DialogDescription>
           </DialogHeader>
-          <div className="bg-white text-neutral-950">
-            <div className="border-b border-neutral-200 bg-white px-6 py-5">
-              <div className="flex items-center gap-3">
-                <span className="grid size-10 place-items-center rounded-full border border-neutral-300 bg-white text-neutral-950"><Lightbulb size={18} /></span>
+          <div className="text-[#171717]">
+            <div className="border-b border-[#ebebeb] px-6 py-5">
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 grid size-10 place-items-center rounded-full border border-[#ebebeb] bg-white text-[#171717]"><Lightbulb size={18} /></span>
                 <div>
-                  <h2 className="text-xl font-black">{noteMode === "create" ? "新建灵感便签" : "编辑灵感便签"}</h2>
-                  <p className="mt-1 text-xs text-neutral-500">便签绑定当前作品，用来暂存伏笔、桥段和灵感。</p>
+                  <h2 className="text-xl font-semibold tracking-[-0.6px]">{noteMode === "create" ? "新建灵感便签" : "编辑灵感便签"}</h2>
+                  <p className="mt-1 text-sm leading-5 text-[#888888]">便签绑定当前作品，用来暂存伏笔、桥段和灵感。</p>
                 </div>
               </div>
             </div>
@@ -2419,7 +2423,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                     aria-label="便签标题"
                     value={noteDraft.title}
                     onChange={(event) => setNoteDraft((draft) => ({ ...draft, title: event.target.value }))}
-                    className="h-11 rounded-xl border-neutral-300 bg-white font-semibold"
+                    className="h-11 rounded-sm border-[#ebebeb] bg-white font-semibold"
                     placeholder="例如：学院入学考转折"
                   />
                 </Field>
@@ -2429,7 +2433,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                     aria-label="便签分类"
                     value={noteDraft.category}
                     onChange={(event) => setNoteDraft((draft) => ({ ...draft, category: event.target.value }))}
-                    className="h-11 rounded-xl border-neutral-300 bg-white"
+                    className="h-11 rounded-sm border-[#ebebeb] bg-white"
                     placeholder="灵感 / 伏笔"
                   />
                 </Field>
@@ -2443,9 +2447,9 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
               </Field>
               {noteStatus === "error" && noteError ? <FieldError>{noteError}</FieldError> : null}
             </FieldGroup>
-            <DialogFooter className="h-[72px] border-t border-neutral-200 bg-white p-0 sm:justify-center">
-              <Button variant="outline" className="rounded-xl border-neutral-300 bg-white" onClick={() => setNoteMode("idle")}>取消</Button>
-              <Button className="rounded-xl bg-neutral-950 text-white hover:bg-neutral-800" onClick={() => void saveNote()} disabled={noteStatus === "saving"}>
+            <DialogFooter className="mx-0 mb-0 rounded-none bg-white flex items-center justify-end gap-4 border-t border-[#ebebeb] px-6 py-5">
+              <Button variant="outline" className="rounded-full border-[#ebebeb] bg-white text-[#171717] hover:bg-[#fafafa]" onClick={() => setNoteMode("idle")}>取消</Button>
+              <Button className="rounded-full bg-[#171717] text-white hover:bg-[#171717]/90" onClick={() => void saveNote()} disabled={noteStatus === "saving"}>
                 {noteStatus === "saving" ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Save data-icon="inline-start" />}
                 保存便签
               </Button>
@@ -2455,24 +2459,24 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       </Dialog>
 
       <Dialog open={goalEditOpen} onOpenChange={setGoalEditOpen}>
-        <DialogContent className="overflow-hidden p-0 sm:max-w-md [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:bg-white">
-          <DialogHeader className="border-b border-neutral-200 bg-white px-6 py-5">
-            <DialogTitle className="text-2xl font-black tracking-tight">今日创作目标</DialogTitle>
-            <DialogDescription className="text-xs text-neutral-500">目标绑定当前作品，今日新增字数按保存时正向增量累计。</DialogDescription>
+        <DialogContent className="overflow-hidden rounded-xl bg-white p-0 shadow-[0px_1px_1px_rgba(0,0,0,0.02),0px_8px_16px_-4px_rgba(0,0,0,0.04),0px_24px_32px_-8px_rgba(0,0,0,0.06)] ring-1 ring-inset ring-[#00000014] sm:max-w-md [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:rounded-full [&_[data-slot=dialog-close]]:text-[#888888] [&_[data-slot=dialog-close]]:hover:bg-[#f5f5f5] [&_[data-slot=dialog-close]]:hover:text-[#171717]">
+          <DialogHeader className="border-b border-[#ebebeb] px-6 py-5">
+            <DialogTitle className="text-xl font-semibold tracking-[-0.6px] text-[#171717]">今日创作目标</DialogTitle>
+            <DialogDescription className="mt-1 text-sm leading-5 text-[#888888]">目标绑定当前作品，今日新增字数按保存时正向增量累计。</DialogDescription>
           </DialogHeader>
           <FieldGroup className="p-6">
             <div className="grid grid-cols-3 gap-2">
-              <div className="rounded-xl border border-neutral-200 bg-white p-3 text-center">
-                <p className="text-lg font-black">{dailyWordProgress.wordsAdded}</p>
-                <p className="mt-1 text-[11px] text-neutral-500">今日新增</p>
+              <div className="rounded-md border border-[#ebebeb] bg-white p-3 text-center">
+                <p className="text-lg font-semibold tracking-[-0.6px]">{dailyWordProgress.wordsAdded}</p>
+                <p className="mt-1 text-xs leading-4 text-[#888888]">今日新增</p>
               </div>
-              <div className="rounded-xl border border-neutral-200 bg-white p-3 text-center">
-                <p className="text-lg font-black">{writingGoal.targetWords}</p>
-                <p className="mt-1 text-[11px] text-neutral-500">当前目标</p>
+              <div className="rounded-md border border-[#ebebeb] bg-white p-3 text-center">
+                <p className="text-lg font-semibold tracking-[-0.6px]">{writingGoal.targetWords}</p>
+                <p className="mt-1 text-xs leading-4 text-[#888888]">当前目标</p>
               </div>
-              <div className="rounded-xl border border-neutral-200 bg-white p-3 text-center">
-                <p className="text-lg font-black">{writingGoal.targetWords ? Math.min(100, Math.round((dailyWordProgress.wordsAdded / writingGoal.targetWords) * 100)) : 0}%</p>
-                <p className="mt-1 text-[11px] text-neutral-500">完成度</p>
+              <div className="rounded-md border border-[#ebebeb] bg-white p-3 text-center">
+                <p className="text-lg font-semibold tracking-[-0.6px]">{writingGoal.targetWords ? Math.min(100, Math.round((dailyWordProgress.wordsAdded / writingGoal.targetWords) * 100)) : 0}%</p>
+                <p className="mt-1 text-xs leading-4 text-[#888888]">完成度</p>
               </div>
             </div>
             <Field>
@@ -2482,14 +2486,14 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                 inputMode="numeric"
                 value={goalDraft.targetWords}
                 onChange={(event) => setGoalDraft((draft) => ({ ...draft, targetWords: event.target.value }))}
-                className="h-11 rounded-xl border-neutral-300 bg-white font-semibold"
+                className="h-11 rounded-sm border-[#ebebeb] bg-white font-semibold"
               />
             </Field>
             {goalStatus === "error" ? <FieldError>目标字数需要大于 0，请稍后重试</FieldError> : null}
           </FieldGroup>
-          <DialogFooter className="h-[72px] border-t border-neutral-200 bg-white p-0 sm:justify-center">
-            <Button variant="outline" className="rounded-xl border-neutral-300 bg-white" onClick={() => setGoalEditOpen(false)}>取消</Button>
-            <Button className="rounded-xl bg-neutral-950 text-white hover:bg-neutral-800" onClick={() => void saveGoal()} disabled={goalStatus === "saving"}>
+          <DialogFooter className="mx-0 mb-0 rounded-none bg-white flex items-center justify-end gap-4 border-t border-[#ebebeb] px-6 py-5">
+            <Button variant="outline" className="rounded-full border-[#ebebeb] bg-white text-[#171717] hover:bg-[#fafafa]" onClick={() => setGoalEditOpen(false)}>取消</Button>
+            <Button className="rounded-full bg-[#171717] text-white hover:bg-[#171717]/90" onClick={() => void saveGoal()} disabled={goalStatus === "saving"}>
               {goalStatus === "saving" ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Save data-icon="inline-start" />}
               保存目标
             </Button>
@@ -2498,26 +2502,26 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       </Dialog>
 
       <Dialog open={accountOpen} onOpenChange={setAccountOpen}>
-        <DialogContent className="overflow-hidden p-0 sm:max-w-5xl xl:max-w-6xl [&_[data-slot=dialog-close]]:right-5 [&_[data-slot=dialog-close]]:top-5 [&_[data-slot=dialog-close]]:z-20 [&_[data-slot=dialog-close]]:bg-white/85 [&_[data-slot=dialog-close]]:backdrop-blur">
+        <DialogContent className="overflow-hidden rounded-xl bg-white p-0 shadow-[0px_1px_1px_rgba(0,0,0,0.02),0px_8px_16px_-4px_rgba(0,0,0,0.04),0px_24px_32px_-8px_rgba(0,0,0,0.06)] ring-1 ring-inset ring-[#00000014] sm:max-w-5xl xl:max-w-6xl [&_[data-slot=dialog-close]]:right-5 [&_[data-slot=dialog-close]]:top-5 [&_[data-slot=dialog-close]]:z-20 [&_[data-slot=dialog-close]]:rounded-full [&_[data-slot=dialog-close]]:text-[#888888] [&_[data-slot=dialog-close]]:hover:bg-[#f5f5f5] [&_[data-slot=dialog-close]]:hover:text-[#171717]">
           <DialogHeader className="sr-only">
             <DialogTitle>账户中心</DialogTitle>
             <DialogDescription>查看会员状态、积分余额并选择创作套餐。</DialogDescription>
           </DialogHeader>
-          <div className="relative bg-[#f7f3ea] text-neutral-950">
+          <div className="relative bg-[#f7f3ea] text-[#171717]">
             <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_12%,rgba(202,138,4,0.18),transparent_28%),linear-gradient(135deg,rgba(23,23,23,0.05)_0_1px,transparent_1px_12px)]" />
             <div className="relative grid max-h-[82vh] gap-5 overflow-y-auto p-6 pt-14 lg:grid-cols-[360px_minmax(0,1fr)]">
-              <section className="rounded-[1.6rem] border border-neutral-900 bg-neutral-950 p-5 text-white shadow-[12px_12px_0_rgba(23,23,23,0.12)]">
+              <section className="rounded-xl border border-[#171717]/90 bg-[#171717] p-5 text-white shadow-[0px_1px_1px_rgba(0,0,0,0.02),0px_8px_16px_-4px_rgba(0,0,0,0.04),0px_24px_32px_-8px_rgba(0,0,0,0.06)] ring-1 ring-inset ring-[#ffffff14]">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-[11px] font-semibold text-white/45">账户卡片</p>
-                    <h3 className="mt-3 max-w-64 truncate text-2xl font-black tracking-tight">{profile?.user.nickname || "创作者"}</h3>
-                    <p className="mt-1 flex items-center gap-1.5 text-xs text-white/55">
+                    <h3 className="mt-3 max-w-64 truncate text-xl font-semibold tracking-[-0.6px]">{profile?.user.nickname || "创作者"}</h3>
+                    <p className="mt-1 flex items-center gap-1.5 text-xs leading-4 text-white/55">
                       <Mail size={12} />
                       {profile?.user.email || "账户信息加载中"}
                     </p>
                   </div>
                   <button
-                    className="grid size-10 place-items-center rounded-full border border-white/15 bg-white/10 text-white/65 transition-colors hover:bg-white hover:text-neutral-950"
+                    className="grid size-10 place-items-center rounded-full border border-white/15 bg-white/10 text-white/65 transition-colors hover:bg-white hover:text-[#171717]"
                     onClick={() => {
                       setNicknameDraft(profile?.user.nickname ?? "");
                       setNicknameEditOpen(true);
@@ -2528,24 +2532,24 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                   </button>
                 </div>
 
-                <div className="mt-7 rounded-2xl border border-white/10 bg-white/5 p-4">
+                <div className="mt-7 rounded-md border border-white/10 bg-white/5 p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="text-[11px] text-white/45">当前身份</p>
-                      <p className="mt-1 text-lg font-bold">{profile?.subscription ? "VIP 创作会员" : "免费创作版"}</p>
+                      <p className="mt-1 text-base font-semibold">{profile?.subscription ? "VIP 创作会员" : "免费创作版"}</p>
                     </div>
                     <span className="grid size-11 place-items-center rounded-full border border-white/15 bg-white/10">
                       <Crown size={20} className={profile?.subscription ? "text-amber-200" : "text-white/45"} />
                     </span>
                   </div>
-                  <div className="mt-5 grid grid-cols-2 gap-3 text-xs">
+                  <div className="mt-5 grid grid-cols-2 gap-3 text-xs leading-4">
                     <div>
                       <p className="text-white/40">会员周期</p>
-                      <p className="mt-1 font-semibold text-white/80">31 天</p>
+                      <p className="mt-1 font-medium text-white/80">31 天</p>
                     </div>
                     <div>
                       <p className="text-white/40">有效期至</p>
-                      <p className="mt-1 font-semibold text-white/80">
+                      <p className="mt-1 font-medium text-white/80">
                         {profile?.subscription ? formatUpdatedAt(profile.subscription.end_at) : "未开通"}
                       </p>
                     </div>
@@ -2558,38 +2562,38 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                     { label: "今日 VIP 积分", value: profile?.points.vipDailyPoints ?? 0, hint: "每日额度，适合持续创作" },
                     { label: "加油包积分", value: profile?.points.creditPackPoints ?? 0, hint: "一次到账，长期有效" },
                   ].map((item) => (
-                    <div key={item.label} className="rounded-2xl border border-white/10 bg-white/90 px-4 py-3 text-neutral-950">
+                    <div key={item.label} className="rounded-md border border-white/10 bg-white/90 px-4 py-3 text-[#171717]">
                       <div className="flex items-baseline justify-between gap-3">
-                        <p className="text-[11px] font-bold text-neutral-500">{item.label}</p>
-                        <p className="text-xl font-black tabular-nums tracking-tight">{item.value.toLocaleString()}</p>
+                        <p className="text-[11px] font-semibold text-[#4d4d4d]">{item.label}</p>
+                        <p className="text-xl font-semibold tabular-nums tracking-[-0.6px]">{item.value.toLocaleString()}</p>
                       </div>
-                      <p className="mt-1 text-[10px] text-neutral-400">{item.hint}</p>
+                      <p className="mt-1 text-[10px] text-[#888888]">{item.hint}</p>
                     </div>
                   ))}
                 </div>
 
                 {accountStatus === "loading" ? (
-                  <p className="mt-4 flex items-center gap-2 text-xs text-white/55">
+                  <p className="mt-4 flex items-center gap-2 text-xs leading-4 text-white/55">
                     <Loader2 size={13} className="animate-spin" />
                     正在读取账户信息...
                   </p>
                 ) : null}
-                {accountStatus === "error" ? <p className="mt-4 text-xs text-rose-200">账户信息保存失败，请稍后重试</p> : null}
+                {accountStatus === "error" ? <p className="mt-4 text-xs leading-4 text-rose-200">账户信息保存失败，请稍后重试</p> : null}
               </section>
 
-              <section className="min-w-0 rounded-[1.6rem] border border-neutral-200 bg-white/86 p-5 shadow-sm backdrop-blur">
+              <section className="min-w-0 rounded-xl border border-[#ebebeb] bg-white/86 p-5 shadow-[0px_1px_1px_rgba(0,0,0,0.02),0px_2px_2px_rgba(0,0,0,0.04)] backdrop-blur">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <p className="text-[11px] font-black text-neutral-400">套餐升级</p>
-                    <h3 className="mt-2 text-2xl font-black tracking-tight text-neutral-950">选择适合本书节奏的创作额度</h3>
-                    <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-500">
+                    <p className="text-[11px] font-semibold text-[#888888]">套餐升级</p>
+                    <h3 className="mt-2 text-xl font-semibold tracking-[-0.6px] text-[#171717]">选择适合本书节奏的创作额度</h3>
+                    <p className="mt-2 max-w-2xl text-sm leading-5 text-[#888888]">
                       月卡提供每日 VIP 积分和一笔加油包积分，适合稳定写作、AI 对话和章节分析；加油包一次到账、长期有效，适合临时加速。
                     </p>
                   </div>
                 </div>
 
                 {billingStatus === "loading" ? (
-                  <div className="mt-6 grid min-h-56 place-items-center rounded-2xl border border-dashed border-neutral-200 text-sm text-neutral-400">
+                  <div className="mt-6 grid min-h-56 place-items-center rounded-md border border-dashed border-[#ebebeb] text-sm leading-5 text-[#888888]">
                     <span className="flex items-center gap-2">
                       <Loader2 size={15} className="animate-spin" />
                       正在读取套餐配置...
@@ -2598,7 +2602,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                 ) : null}
 
                 {billingStatus === "error" ? (
-                  <div className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                  <div className="mt-6 rounded-md border border-[#f7d4d6] bg-[#f7d4d6] px-4 py-3 text-sm leading-5 text-[#ee0000]">
                     套餐信息加载失败。
                     <button className="ml-2 font-bold underline underline-offset-2" onClick={() => void loadBillingProducts()}>
                       重试
@@ -2615,25 +2619,25 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                           <article
                             key={plan.id}
                             className={cn(
-                              "relative flex min-h-64 flex-col overflow-hidden rounded-2xl border p-4 transition-transform hover:-translate-y-0.5",
-                              featured ? "border-neutral-950 bg-neutral-950 text-white shadow-[8px_8px_0_rgba(23,23,23,0.12)]" : "border-neutral-200 bg-[#fbfaf6] text-neutral-950"
+                              "relative flex min-h-64 flex-col overflow-hidden rounded-xl border p-4 transition-transform hover:-translate-y-0.5",
+                              featured ? "border-[#171717] bg-[#171717] text-white shadow-[0px_1px_1px_rgba(0,0,0,0.02),0px_8px_16px_-4px_rgba(0,0,0,0.04),0px_24px_32px_-8px_rgba(0,0,0,0.06)]" : "border-[#ebebeb] bg-[#fbfaf6] text-[#171717]"
                             )}
                           >
-                            {featured ? <span className="absolute right-3 top-3 rounded-full bg-amber-200 px-2 py-0.5 text-[10px] font-black text-neutral-950">推荐</span> : null}
-                            <p className={cn("text-[10px] font-black", featured ? "text-white/55" : "text-neutral-400")}>31 天月卡</p>
-                            <h4 className="mt-2 text-lg font-black">{plan.name}</h4>
+                            {featured ? <span className="absolute right-3 top-3 rounded-full bg-amber-200 px-2 py-0.5 text-[10px] font-semibold text-[#171717]">推荐</span> : null}
+                            <p className={cn("text-[10px] font-semibold", featured ? "text-white/55" : "text-[#888888]")}>31 天月卡</p>
+                            <h4 className="mt-2 text-base font-semibold">{plan.name}</h4>
                             <div className="mt-4 flex items-end gap-1">
-                              <span className={cn("mb-1 text-xs font-bold", featured ? "text-white/45" : "text-neutral-500")}>¥</span>
-                              <span className="text-3xl font-black tracking-[-0.08em]">{plan.priceAmount}</span>
-                              <span className={cn("mb-1 text-xs", featured ? "text-white/45" : "text-neutral-500")}>/31天</span>
+                              <span className={cn("mb-1 text-xs leading-4 font-semibold", featured ? "text-white/45" : "text-[#888888]")}>¥</span>
+                              <span className="text-2xl font-semibold tracking-[-0.08em]">{plan.priceAmount}</span>
+                              <span className={cn("mb-1 text-xs leading-4", featured ? "text-white/45" : "text-[#888888]")}>/31天</span>
                             </div>
-                            <div className={cn("mt-4 space-y-2 rounded-xl border p-3 text-xs", featured ? "border-white/10 bg-white/5 text-white/72" : "border-neutral-200 bg-white text-neutral-600")}>
+                            <div className={cn("mt-4 space-y-2 rounded-md border p-3 text-xs leading-4", featured ? "border-white/10 bg-white/5 text-white/72" : "border-[#ebebeb] bg-white text-[#4d4d4d]")}>
                               <p>每日发放 {plan.vipDailyPoints.toLocaleString()} VIP 积分</p>
                               <p>附带 {plan.bundledCreditPackPoints.toLocaleString()} 加油包积分</p>
                               <p>用于 AI 对话、章节分析与续写辅助</p>
                             </div>
                             <Button
-                              className={cn("mt-auto h-10 rounded-xl font-bold", featured ? "bg-amber-200 text-neutral-950 hover:bg-amber-100" : "bg-neutral-950 text-white hover:bg-neutral-800")}
+                              className={cn("mt-auto h-10 rounded-full font-semibold", featured ? "bg-amber-200 text-[#171717] hover:bg-amber-100" : "bg-[#171717] text-white hover:bg-[#171717]/90")}
                               onClick={() => void createOrder("plan", plan.id)}
                               disabled={billingStatus === "creating"}
                             >
@@ -2648,23 +2652,23 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                     {billingProducts.creditPacks.length ? (
                       <div>
                         <div className="mb-3 flex items-center gap-2">
-                          <Zap size={15} className="fill-neutral-950" />
-                          <h4 className="text-sm font-black text-neutral-950">灵感加油包</h4>
-                          <span className="text-xs text-neutral-400">长期有效，适合临时补充</span>
+                          <Zap size={15} className="fill-[#171717]" />
+                          <h4 className="text-sm leading-5 font-semibold text-[#171717]">灵感加油包</h4>
+                          <span className="text-xs leading-4 text-[#888888]">长期有效，适合临时补充</span>
                         </div>
                         <div className="grid gap-2 md:grid-cols-3">
                           {billingProducts.creditPacks.map((pack) => (
                             <button
                               key={pack.id}
-                              className="group flex items-center justify-between gap-3 rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-left transition-all hover:-translate-y-0.5 hover:border-neutral-950 disabled:opacity-60"
+                              className="group flex items-center justify-between gap-3 rounded-full border border-[#ebebeb] bg-white px-4 py-3 text-left transition-all hover:bg-[#fafafa] disabled:opacity-60"
                               onClick={() => void createOrder("credit_pack", pack.id)}
                               disabled={billingStatus === "creating"}
                             >
                               <span className="min-w-0">
-                                <span className="block truncate text-sm font-black text-neutral-950">{pack.name}</span>
-                                <span className="mt-1 block text-xs text-neutral-500">{pack.points.toLocaleString()} 积分 · ¥{pack.priceAmount}</span>
+                                <span className="block truncate text-sm leading-5 font-semibold text-[#171717]">{pack.name}</span>
+                                <span className="mt-1 block text-xs leading-4 text-[#888888]">{pack.points.toLocaleString()} 积分 · ¥{pack.priceAmount}</span>
                               </span>
-                              {billingStatus === "creating" ? <Loader2 size={14} className="animate-spin text-neutral-400" /> : <ArrowRight size={14} className="text-neutral-300 transition-colors group-hover:text-neutral-950" />}
+                              {billingStatus === "creating" ? <Loader2 size={14} className="animate-spin text-[#888888]" /> : <ArrowRight size={14} className="text-[#a1a1a1] transition-colors group-hover:text-[#171717]" />}
                             </button>
                           ))}
                         </div>
@@ -2679,10 +2683,10 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       </Dialog>
 
       <Dialog open={nicknameEditOpen} onOpenChange={setNicknameEditOpen}>
-        <DialogContent className="overflow-hidden p-0 sm:max-w-sm [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:bg-white">
-          <DialogHeader className="border-b border-neutral-200 bg-white px-6 py-5">
-            <DialogTitle className="text-2xl font-black tracking-tight">修改昵称</DialogTitle>
-            <DialogDescription className="text-xs text-neutral-500">昵称只影响账户展示，不会改变登录邮箱。</DialogDescription>
+        <DialogContent className="overflow-hidden rounded-xl bg-white p-0 shadow-[0px_1px_1px_rgba(0,0,0,0.02),0px_8px_16px_-4px_rgba(0,0,0,0.04),0px_24px_32px_-8px_rgba(0,0,0,0.06)] ring-1 ring-inset ring-[#00000014] sm:max-w-sm [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:rounded-full [&_[data-slot=dialog-close]]:text-[#888888] [&_[data-slot=dialog-close]]:hover:bg-[#f5f5f5] [&_[data-slot=dialog-close]]:hover:text-[#171717]">
+          <DialogHeader className="border-b border-[#ebebeb] px-6 py-5">
+            <DialogTitle className="text-xl font-semibold tracking-[-0.6px] text-[#171717]">修改昵称</DialogTitle>
+            <DialogDescription className="mt-1 text-sm leading-5 text-[#888888]">昵称只影响账户展示，不会改变登录邮箱。</DialogDescription>
           </DialogHeader>
           <FieldGroup className="p-6">
             <Field>
@@ -2691,15 +2695,15 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                 value={nicknameDraft}
                 onChange={(event) => setNicknameDraft(event.target.value)}
                 aria-label="昵称"
-                className="h-11 rounded-xl border-neutral-300 bg-white font-semibold"
+                className="h-11 rounded-sm border-[#ebebeb] bg-white font-semibold"
                 placeholder="输入创作者昵称"
               />
             </Field>
             {accountStatus === "error" ? <FieldError>昵称保存失败，请稍后重试</FieldError> : null}
           </FieldGroup>
-          <DialogFooter className="h-[72px] border-t border-neutral-200 bg-white p-0 sm:justify-center">
-            <Button variant="outline" className="rounded-xl border-neutral-300 bg-white" onClick={() => setNicknameEditOpen(false)}>取消</Button>
-            <Button className="rounded-xl bg-neutral-950 text-white hover:bg-neutral-800" onClick={() => void saveNickname()} disabled={accountStatus === "saving"}>
+          <DialogFooter className="mx-0 mb-0 rounded-none bg-white flex items-center justify-end gap-4 border-t border-[#ebebeb] px-6 py-5">
+            <Button variant="outline" className="rounded-full border-[#ebebeb] bg-white text-[#171717] hover:bg-[#fafafa]" onClick={() => setNicknameEditOpen(false)}>取消</Button>
+            <Button className="rounded-full bg-[#171717] text-white hover:bg-[#171717]/90" onClick={() => void saveNickname()} disabled={accountStatus === "saving"}>
               {accountStatus === "saving" ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Save data-icon="inline-start" />}
               保存昵称
             </Button>
@@ -2732,16 +2736,16 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       />
 
       <Dialog open={editorSettingsOpen} onOpenChange={setEditorSettingsOpen}>
-        <DialogContent className="w-[calc(100vw-2rem)] overflow-hidden p-0 sm:max-w-2xl [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:bg-white">
-          <DialogHeader className="border-b border-neutral-200 bg-white px-6 py-5">
-            <DialogTitle className="text-2xl font-black tracking-tight">编辑器排版设置</DialogTitle>
-            <DialogDescription className="text-xs text-neutral-500">自定义字体和排版，设置仅保存在本地浏览器。</DialogDescription>
+        <DialogContent className="w-[calc(100vw-2rem)] overflow-hidden rounded-xl bg-white p-0 shadow-[0px_1px_1px_rgba(0,0,0,0.02),0px_8px_16px_-4px_rgba(0,0,0,0.04),0px_24px_32px_-8px_rgba(0,0,0,0.06)] ring-1 ring-inset ring-[#00000014] sm:max-w-2xl [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:rounded-full [&_[data-slot=dialog-close]]:text-[#888888] [&_[data-slot=dialog-close]]:hover:bg-[#f5f5f5] [&_[data-slot=dialog-close]]:hover:text-[#171717]">
+          <DialogHeader className="border-b border-[#ebebeb] px-6 py-5">
+            <DialogTitle className="text-xl font-semibold tracking-[-0.6px] text-[#171717]">编辑器排版设置</DialogTitle>
+            <DialogDescription className="mt-1 text-sm leading-5 text-[#888888]">自定义字体和排版，设置仅保存在本地浏览器。</DialogDescription>
           </DialogHeader>
           <div className="max-h-[58vh] space-y-5 overflow-y-auto p-6">
             <Field>
               <FieldLabel>字体</FieldLabel>
               <Select value={editorSettings.fontFamily} onValueChange={(v) => updateEditorSetting("fontFamily", v)}>
-                <SelectTrigger className="h-11 w-full rounded-xl border-neutral-300 bg-white">
+                <SelectTrigger className="h-11 w-full rounded-sm border-[#ebebeb] bg-white">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -2754,86 +2758,94 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                   </SelectGroup>
                 </SelectContent>
               </Select>
-              <p
-                className="mt-2 rounded-xl border border-neutral-300 bg-white p-4 text-sm leading-relaxed text-neutral-950"
-                style={{ fontFamily: editorFontStack, fontSize: `${Math.min(editorSettings.fontSize, 16)}px`, lineHeight: editorSettings.lineHeight, letterSpacing: `${editorSettings.letterSpacing}px` }}
+              <div
+                className="mt-2 rounded-sm border border-[#ebebeb] bg-white p-4 text-[#171717]"
+                style={{ fontSize: `${editorSettings.fontSize}px`, lineHeight: editorSettings.lineHeight, letterSpacing: `${editorSettings.letterSpacing}px` }}
               >
-                天地玄黄，宇宙洪荒。日月盈昃，辰宿列张。寒来暑往，秋收冬藏。
-              </p>
+                <p style={{ fontFamily: editorFontStack, marginBottom: `${editorSettings.paragraphSpacing}px` }}>
+                  晨曦初露，薄雾轻笼远山。林间小径上，露珠沿着草叶缓缓滑落，在初升的阳光中闪烁着细碎的光芒。
+                </p>
+                <p style={{ fontFamily: editorFontStack, marginBottom: `${editorSettings.paragraphSpacing}px` }}>
+                  溪水潺潺，绕过青石蜿蜒而下。偶有飞鸟掠过头顶，留下几声清脆的鸣叫，随即消失在茂密的树冠之间。
+                </p>
+                <p style={{ fontFamily: editorFontStack, marginBottom: 0 }}>
+                  远处传来隐隐的钟声，穿过层层叠叠的枝叶，在这静谧的清晨里显得格外悠远而安详。
+                </p>
+              </div>
             </Field>
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-medium leading-none">字号</span>
-                <span className="tabular-nums text-xs text-muted-foreground">{editorSettings.fontSize}px</span>
+                <span className="text-sm font-medium leading-none text-[#171717]">字号</span>
+                <span className="tabular-nums text-xs leading-4 text-[#888888]">{editorSettings.fontSize}px</span>
               </div>
               <input
                 type="range" min={14} max={28} step={1}
                 value={editorSettings.fontSize}
                 onChange={(e) => updateEditorSetting("fontSize", Number(e.target.value))}
-                className="w-full cursor-pointer accent-primary"
+                className="w-full cursor-pointer accent-[#171717]"
               />
-              <div className="flex justify-between text-[10px] text-muted-foreground/60">
+              <div className="flex justify-between text-[10px] text-[#888888]/60">
                 <span>14</span><span>28</span>
               </div>
             </div>
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-medium leading-none">行高</span>
-                <span className="tabular-nums text-xs text-muted-foreground">{editorSettings.lineHeight.toFixed(1)}</span>
+                <span className="text-sm font-medium leading-none text-[#171717]">行高</span>
+                <span className="tabular-nums text-xs leading-4 text-[#888888]">{editorSettings.lineHeight.toFixed(1)}</span>
               </div>
               <input
                 type="range" min={1.2} max={3.0} step={0.1}
                 value={editorSettings.lineHeight}
                 onChange={(e) => updateEditorSetting("lineHeight", Number(e.target.value))}
-                className="w-full cursor-pointer accent-primary"
+                className="w-full cursor-pointer accent-[#171717]"
               />
-              <div className="flex justify-between text-[10px] text-muted-foreground/60">
+              <div className="flex justify-between text-[10px] text-[#888888]/60">
                 <span>1.2</span><span>3.0</span>
               </div>
             </div>
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-medium leading-none">字间距</span>
-                <span className="tabular-nums text-xs text-muted-foreground">{editorSettings.letterSpacing}px</span>
+                <span className="text-sm font-medium leading-none text-[#171717]">字间距</span>
+                <span className="tabular-nums text-xs leading-4 text-[#888888]">{editorSettings.letterSpacing}px</span>
               </div>
               <input
                 type="range" min={0} max={4} step={0.5}
                 value={editorSettings.letterSpacing}
                 onChange={(e) => updateEditorSetting("letterSpacing", Number(e.target.value))}
-                className="w-full cursor-pointer accent-primary"
+                className="w-full cursor-pointer accent-[#171717]"
               />
-              <div className="flex justify-between text-[10px] text-muted-foreground/60">
+              <div className="flex justify-between text-[10px] text-[#888888]/60">
                 <span>0</span><span>4</span>
               </div>
             </div>
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-medium leading-none">段落间距</span>
-                <span className="tabular-nums text-xs text-muted-foreground">{editorSettings.paragraphSpacing}px</span>
+                <span className="text-sm font-medium leading-none text-[#171717]">段落间距</span>
+                <span className="tabular-nums text-xs leading-4 text-[#888888]">{editorSettings.paragraphSpacing}px</span>
               </div>
               <input
                 type="range" min={0} max={32} step={4}
                 value={editorSettings.paragraphSpacing}
                 onChange={(e) => updateEditorSetting("paragraphSpacing", Number(e.target.value))}
-                className="w-full cursor-pointer accent-primary"
+                className="w-full cursor-pointer accent-[#171717]"
               />
-              <div className="flex justify-between text-[10px] text-muted-foreground/60">
+              <div className="flex justify-between text-[10px] text-[#888888]/60">
                 <span>0</span><span>32</span>
               </div>
             </div>
           </div>
-          <DialogFooter className="h-[72px] border-t border-neutral-200 bg-white p-0 sm:justify-center">
-            <Button variant="outline" className="rounded-xl border-neutral-300 bg-white" onClick={() => {
+          <DialogFooter className="mx-0 mb-0 rounded-none bg-white flex items-center justify-end gap-4 border-t border-[#ebebeb] px-6 py-5">
+            <Button variant="outline" className="rounded-full border-[#ebebeb] bg-white text-[#171717] hover:bg-[#fafafa]" onClick={() => {
               setEditorSettings(DEFAULT_EDITOR_SETTINGS);
               window.localStorage.setItem(EDITOR_SETTINGS_KEY, JSON.stringify(DEFAULT_EDITOR_SETTINGS));
             }}>
               恢复默认
             </Button>
-            <Button className="rounded-xl bg-neutral-950 text-white hover:bg-neutral-800" onClick={() => setEditorSettingsOpen(false)}>
+            <Button className="rounded-full bg-[#171717] text-white hover:bg-[#171717]/90" onClick={() => setEditorSettingsOpen(false)}>
               完成
             </Button>
           </DialogFooter>
@@ -2864,26 +2876,26 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       />
 
       <Dialog open={workEditOpen} onOpenChange={setWorkEditOpen}>
-        <DialogContent className="overflow-hidden p-0 sm:max-w-5xl xl:max-w-6xl [&_[data-slot=dialog-close]]:right-5 [&_[data-slot=dialog-close]]:top-5 [&_[data-slot=dialog-close]]:z-20 [&_[data-slot=dialog-close]]:bg-white/85 [&_[data-slot=dialog-close]]:backdrop-blur">
+        <DialogContent className="overflow-hidden rounded-xl bg-white p-0 shadow-[0px_1px_1px_rgba(0,0,0,0.02),0px_8px_16px_-4px_rgba(0,0,0,0.04),0px_24px_32px_-8px_rgba(0,0,0,0.06)] ring-1 ring-inset ring-[#00000014] sm:max-w-5xl xl:max-w-6xl [&_[data-slot=dialog-close]]:right-5 [&_[data-slot=dialog-close]]:top-5 [&_[data-slot=dialog-close]]:z-20 [&_[data-slot=dialog-close]]:rounded-full [&_[data-slot=dialog-close]]:text-[#888888] [&_[data-slot=dialog-close]]:hover:bg-[#f5f5f5] [&_[data-slot=dialog-close]]:hover:text-[#171717]">
           <DialogHeader className="sr-only">
             <DialogTitle>编辑作品信息</DialogTitle>
             <DialogDescription>修改作品的基本设定、大纲和创作规则。</DialogDescription>
           </DialogHeader>
 
-          <div className="relative flex max-h-[84vh] flex-col overflow-hidden bg-white text-neutral-950">
+          <div className="relative flex max-h-[84vh] flex-col overflow-hidden bg-white text-[#171717]">
             <div className="relative min-h-0 flex-1 overflow-y-auto">
               <div className="grid gap-5 p-6 pt-14 lg:grid-cols-[320px_minmax(0,1fr)]">
-              <aside className="flex flex-col rounded-[1.6rem] border border-neutral-950 bg-neutral-950 p-5 text-white shadow-[12px_12px_0_rgba(23,23,23,0.12)]">
-                <span className="inline-flex w-fit items-center gap-2 rounded-full bg-white px-3 py-1 text-[11px] font-black text-neutral-950">
+              <aside className="flex flex-col rounded-xl border border-[#171717] bg-[#171717] p-5 text-white shadow-[0px_1px_1px_rgba(0,0,0,0.02),0px_8px_16px_-4px_rgba(0,0,0,0.04),0px_24px_32px_-8px_rgba(0,0,0,0.06)] ring-1 ring-inset ring-[#ffffff14]">
+                <span className="inline-flex w-fit items-center gap-2 rounded-full bg-white px-3 py-1 text-[11px] font-semibold text-[#171717]">
                   <BookMarked size={13} />
                   作品档案
                 </span>
                 <div className="mt-8">
-                  <p className="text-xs font-semibold text-white/40">作品标题</p>
-                  <h2 className="mt-2 line-clamp-3 text-3xl font-black leading-tight tracking-tight">
+                  <p className="text-xs leading-4 font-medium text-white/40">作品标题</p>
+                  <h2 className="mt-2 line-clamp-3 text-2xl font-semibold leading-tight tracking-[-0.6px]">
                     {workDraft.title || "未命名作品"}
                   </h2>
-                  <p className="mt-4 line-clamp-5 text-sm leading-6 text-white/58">
+                  <p className="mt-4 line-clamp-5 text-sm leading-5 text-white/58">
                     {workDraft.shortIntro || "给作品留下一句清晰的入口介绍，方便你和 AI 快速回到这本书的语气与方向。"}
                   </p>
                 </div>
@@ -2896,8 +2908,8 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                   ].map((item) => {
                     const Icon = item.icon;
                     return (
-                      <div key={item.label} className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-3 py-2">
-                        <span className="inline-flex items-center gap-2 text-xs text-white/55">
+                      <div key={item.label} className="flex items-center justify-between rounded-md border border-white/10 bg-white/5 px-3 py-2">
+                        <span className="inline-flex items-center gap-2 text-xs leading-4 text-white/55">
                           <Icon size={13} />
                           {item.label}
                         </span>
@@ -2908,23 +2920,23 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                 </div>
 
                 <div className="mt-auto pt-8">
-                  <div className="rounded-2xl border border-white/10 bg-white/90 p-4 text-neutral-950">
-                    <p className="flex items-center gap-2 text-xs font-black text-neutral-500">
+                  <div className="rounded-md border border-white/10 bg-white/90 p-4 text-[#171717]">
+                    <p className="flex items-center gap-2 text-xs leading-4 font-semibold text-[#4d4d4d]">
                       <Tags size={13} />
                       类型标签
                     </p>
-                    <p className="mt-2 line-clamp-2 text-sm font-semibold">
+                    <p className="mt-2 line-clamp-2 text-sm leading-5 font-medium">
                       {workDraft.tags || "奇幻, 冒险, 群像"}
                     </p>
                   </div>
                 </div>
               </aside>
 
-              <section className="min-w-0 rounded-[1.6rem] border border-neutral-200 bg-white shadow-sm">
-                <div className="border-b border-neutral-200 px-5 py-4">
-                  <p className="text-[11px] font-black text-neutral-400">作品信息</p>
-                  <h3 className="mt-1 text-2xl font-black tracking-tight text-neutral-950">编辑作品档案</h3>
-                  <p className="mt-1 text-sm text-neutral-500">这些信息会影响作品展示，也会作为 AI 理解作品时的重要上下文。</p>
+              <section className="min-w-0 rounded-xl border border-[#ebebeb] bg-white shadow-[0px_1px_1px_rgba(0,0,0,0.02),0px_2px_2px_rgba(0,0,0,0.04)]">
+                <div className="border-b border-[#ebebeb] px-5 py-4">
+                  <p className="text-[11px] font-semibold text-[#888888]">作品信息</p>
+                  <h3 className="mt-1 text-xl font-semibold tracking-[-0.6px] text-[#171717]">编辑作品档案</h3>
+                  <p className="mt-1 text-sm leading-5 text-[#888888]">这些信息会影响作品展示，也会作为 AI 理解作品时的重要上下文。</p>
                 </div>
 
                 <div className="grid gap-5 p-5">
@@ -2935,7 +2947,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                         aria-label="作品标题"
                         value={workDraft.title}
                         onChange={(e) => setWorkDraft((d) => ({ ...d, title: e.target.value }))}
-                        className="h-12 rounded-2xl border-neutral-200 bg-neutral-50 text-base font-bold"
+                        className="h-12 rounded-sm border-[#ebebeb] bg-[#fafafa] text-base font-bold"
                         placeholder="例如：雾港学院"
                       />
                     </Field>
@@ -2945,7 +2957,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                         aria-label="类型标签"
                         value={workDraft.tags}
                         onChange={(e) => setWorkDraft((d) => ({ ...d, tags: e.target.value }))}
-                        className="h-12 rounded-2xl border-neutral-200 bg-neutral-50"
+                        className="h-12 rounded-sm border-[#ebebeb] bg-[#fafafa]"
                         placeholder="奇幻, 冒险, 群像"
                       />
                     </Field>
@@ -2957,7 +2969,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                       aria-label="简介"
                       value={workDraft.shortIntro}
                       onChange={(e) => setWorkDraft((d) => ({ ...d, shortIntro: e.target.value }))}
-                      className="min-h-24 resize-none rounded-2xl border-neutral-200 bg-neutral-50 leading-6"
+                      className="min-h-24 resize-none rounded-sm border-[#ebebeb] bg-[#fafafa] leading-6"
                       placeholder="这本书最想让读者记住的钩子。"
                     />
                   </Field>
@@ -2969,7 +2981,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                         aria-label="大纲"
                         value={workDraft.synopsis}
                         onChange={(e) => setWorkDraft((d) => ({ ...d, synopsis: e.target.value }))}
-                        className="min-h-44 resize-none rounded-2xl border-neutral-200 bg-white leading-6"
+                        className="min-h-44 resize-none rounded-sm border-[#ebebeb] bg-white leading-6"
                         placeholder="主线、阶段目标、关键反转。"
                       />
                     </Field>
@@ -2979,7 +2991,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                         aria-label="背景规则"
                         value={workDraft.backgroundRules}
                         onChange={(e) => setWorkDraft((d) => ({ ...d, backgroundRules: e.target.value }))}
-                        className="min-h-44 resize-none rounded-2xl border-neutral-200 bg-white leading-6"
+                        className="min-h-44 resize-none rounded-sm border-[#ebebeb] bg-white leading-6"
                         placeholder="世界运行规则、能力限制、组织秩序。"
                       />
                     </Field>
@@ -2992,7 +3004,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                         aria-label="创作重点"
                         value={workDraft.focusRequirements}
                         onChange={(e) => setWorkDraft((d) => ({ ...d, focusRequirements: e.target.value }))}
-                        className="min-h-36 resize-none rounded-2xl border-neutral-200 bg-white leading-6"
+                        className="min-h-36 resize-none rounded-sm border-[#ebebeb] bg-white leading-6"
                         placeholder="希望 AI 和作者始终优先照顾的风格、节奏、人物关系。"
                       />
                     </Field>
@@ -3002,7 +3014,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                         aria-label="禁忌要求"
                         value={workDraft.forbiddenRequirements}
                         onChange={(e) => setWorkDraft((d) => ({ ...d, forbiddenRequirements: e.target.value }))}
-                        className="min-h-36 resize-none rounded-2xl border-neutral-200 bg-white leading-6"
+                        className="min-h-36 resize-none rounded-sm border-[#ebebeb] bg-white leading-6"
                         placeholder="不要出现的桥段、语气、设定冲突或风格偏差。"
                       />
                     </Field>
@@ -3014,16 +3026,14 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
               </section>
               </div>
             </div>
-            <DialogFooter className="relative h-[72px] border-t border-neutral-200 bg-white p-0 sm:items-center sm:justify-center">
-              <div className="flex w-full gap-2 px-6 sm:w-auto sm:px-0">
-                <Button variant="outline" className="flex-1 rounded-xl border-neutral-300 bg-white text-neutral-950 hover:bg-neutral-100 sm:flex-none" onClick={() => setWorkEditOpen(false)}>
-                  取消
-                </Button>
-                <Button className="flex-1 rounded-xl bg-neutral-950 text-white hover:bg-neutral-800 sm:flex-none" onClick={() => void saveWorkEdit()} disabled={workSaveStatus === "saving"}>
-                  {workSaveStatus === "saving" ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Save data-icon="inline-start" />}
-                  保存作品档案
-                </Button>
-              </div>
+            <DialogFooter className="mx-0 mb-0 rounded-none bg-white flex items-center justify-end gap-4 border-t border-[#ebebeb] px-6 py-5">
+              <Button variant="outline" className="rounded-full border-[#ebebeb] bg-white text-[#171717] hover:bg-[#fafafa]" onClick={() => setWorkEditOpen(false)}>
+                取消
+              </Button>
+              <Button className="rounded-full bg-[#171717] text-white hover:bg-[#171717]/90" onClick={() => void saveWorkEdit()} disabled={workSaveStatus === "saving"}>
+                {workSaveStatus === "saving" ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Save data-icon="inline-start" />}
+                保存作品档案
+              </Button>
             </DialogFooter>
           </div>
         </DialogContent>
@@ -3051,15 +3061,15 @@ function NoteRichTextEditor({ value, onChange }: { value: string; onChange: (val
 
   if (!editor) {
     return (
-      <div className="flex min-h-[380px] items-center justify-center rounded-xl border border-neutral-300 bg-white text-sm text-neutral-400">
+      <div className="flex min-h-[380px] items-center justify-center rounded-sm border border-[#ebebeb] bg-white text-sm leading-5 text-[#888888]">
         编辑器加载中...
       </div>
     );
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border border-neutral-300 bg-white">
-      <div className="flex items-center gap-0.5 border-b border-neutral-200 bg-neutral-50 px-3 py-1.5">
+    <div className="overflow-hidden rounded-sm border border-[#ebebeb] bg-white">
+      <div className="flex items-center gap-0.5 border-b border-[#ebebeb] bg-[#fafafa] px-3 py-1.5">
         <ToolbarBtn
           active={editor.isActive("bold")}
           onClick={() => editor.chain().focus().toggleBold().run()}
@@ -3104,7 +3114,7 @@ function NoteRichTextEditor({ value, onChange }: { value: string; onChange: (val
         >
           <LinkIcon size={15} />
         </ToolbarBtn>
-        <span className="mx-1 h-4 w-px bg-neutral-200" />
+        <span className="mx-1 h-4 w-px bg-[#ebebeb]" />
         <ToolbarBtn
           active={editor.isActive("heading")}
           onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
@@ -3140,7 +3150,7 @@ function NoteRichTextEditor({ value, onChange }: { value: string; onChange: (val
         >
           <Quote size={15} />
         </ToolbarBtn>
-        <span className="mx-1 h-4 w-px bg-neutral-200" />
+        <span className="mx-1 h-4 w-px bg-[#ebebeb]" />
         <ToolbarBtn
           active={false}
           onClick={() => editor.chain().focus().setHorizontalRule().run()}
@@ -3171,8 +3181,8 @@ function ToolbarBtn({
     <button
       type="button"
       className={cn(
-        "grid size-8 place-items-center rounded-lg transition-colors",
-        active ? "bg-neutral-200 text-neutral-950" : "text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800"
+        "grid size-8 place-items-center rounded-full transition-colors",
+        active ? "bg-[#f5f5f5] text-[#171717]" : "text-[#888888] hover:bg-[#f5f5f5] hover:text-[#171717]"
       )}
       onClick={onClick}
       aria-label={label}

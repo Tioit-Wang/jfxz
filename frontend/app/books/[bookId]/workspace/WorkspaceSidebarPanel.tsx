@@ -168,7 +168,7 @@ export function WorkspaceSidebarPanel({
     >
       <section className="shrink-0 border-b border-neutral-200 px-3 py-3">
         <div className="grid grid-cols-[2rem_minmax(0,1fr)_2rem] items-center gap-2">
-          <Button asChild variant="ghost" size="icon" className="size-8 rounded-full" aria-label="返回作品列表">
+          <Button asChild variant="ghost" size="icon" className="size-8 rounded-full text-[#888888] hover:bg-[#f5f5f5] hover:text-[#171717]" aria-label="返回作品列表">
             <Link href="/books">
               <ChevronLeft size={18} />
             </Link>
@@ -177,7 +177,7 @@ export function WorkspaceSidebarPanel({
             <p className="truncate text-base font-bold leading-6">{work?.title ?? "作品加载中"}</p>
           </div>
           <button
-            className="grid size-8 place-items-center rounded-full text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
+            className="grid size-8 place-items-center rounded-full text-[#888888] transition-colors hover:bg-[#f5f5f5] hover:text-[#171717]"
             onClick={onOpenWorkEdit}
             aria-label="编辑作品信息"
           >
@@ -203,12 +203,12 @@ export function WorkspaceSidebarPanel({
                     onClick={() => onActiveTabChange(item.key)}
                     className={cn(
                       "relative flex items-center justify-center gap-1.5 py-2 text-xs font-semibold transition-colors",
-                      selected ? "text-neutral-950" : "text-neutral-400 hover:text-neutral-800"
+                      selected ? "text-[#171717]" : "text-[#888888] hover:text-[#171717]"
                     )}
                   >
                     <Icon size={14} />
                     {item.label}
-                    {selected ? <span className="absolute bottom-0 h-0.5 w-full rounded-full bg-neutral-950" /> : null}
+                    {selected ? <span className="absolute bottom-0 h-0.5 w-full rounded-full bg-[#171717]" /> : null}
                   </button>
                 );
               })}
@@ -222,14 +222,14 @@ export function WorkspaceSidebarPanel({
               <div className="flex items-center gap-1.5">
                 {activeTab === "chapters" ? (
                   <button
-                    className="rounded-full border border-neutral-200 px-2.5 py-1.5 text-xs font-semibold hover:bg-neutral-50"
+                    className="rounded-full border border-[#ebebeb] px-2.5 py-1.5 text-xs font-semibold text-[#171717] hover:bg-[#fafafa]"
                     onClick={onCreateVolume}
                   >
                     新卷
                   </button>
                 ) : null}
                 <button
-                  className="inline-flex items-center gap-1 rounded-full bg-neutral-950 px-3 py-1.5 text-xs font-semibold text-white hover:bg-neutral-800"
+                  className="inline-flex items-center gap-1 rounded-full bg-[#171717] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#171717]/90"
                   onClick={
                     activeTab === "chapters"
                       ? () => onCreateChapter(firstVolumeId)
@@ -341,7 +341,7 @@ export function WorkspaceSidebarPanel({
                           <span className="text-neutral-400">{volumeWords}字</span>
                           <span className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                             <button
-                              className="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-900"
+                              className="rounded-full p-1 text-[#888888] hover:bg-[#f5f5f5] hover:text-[#171717]"
                               onClick={() => onEditVolume(volume)}
                               aria-label="编辑卷"
                             >
@@ -349,7 +349,7 @@ export function WorkspaceSidebarPanel({
                             </button>
                             {volumeChapters.length === 0 ? (
                               <button
-                                className="rounded p-1 text-neutral-400 hover:bg-red-50 hover:text-red-600"
+                                className="rounded-full p-1 text-[#888888] hover:bg-[#f7d4d6] hover:text-[#ee0000]"
                                 onClick={() => onDeleteVolume(volume)}
                                 aria-label="删除卷"
                               >
@@ -382,7 +382,7 @@ export function WorkspaceSidebarPanel({
                                   className={cn(
                                     "group relative w-full cursor-grab rounded-xl px-3 py-2.5 text-left transition-colors active:cursor-grabbing",
                                     chapter.id === activeChapterId
-                                      ? "bg-neutral-950 text-white"
+                                      ? "bg-[#171717] text-white"
                                       : "text-neutral-600 hover:bg-neutral-100"
                                   )}
                                   onClick={() => onSelectChapter(chapter.id)}
@@ -423,7 +423,7 @@ export function WorkspaceSidebarPanel({
                             onDrop={(e) => handleDropChapterZone(e, `${volumeKey}-end`, volumeChapters.length)}
                           />
                           <button
-                            className="w-full rounded-xl border border-dashed border-neutral-200 py-2 text-xs text-neutral-500 hover:border-neutral-400 hover:text-neutral-900"
+                            className="w-full rounded-xl border border-dashed border-[#ebebeb] py-2 text-xs text-[#888888] hover:border-[#a1a1a1] hover:text-[#171717]"
                             onClick={() => onCreateChapter(volume.id || firstVolumeId)}
                           >
                             + 在本卷新建章节
@@ -504,7 +504,7 @@ export function WorkspaceSidebarPanel({
                       <EmptyDescription>点击右上角新建设定，也可以从 AI 对话保存设定草稿。</EmptyDescription>
                     </EmptyHeader>
                     <EmptyContent>
-                      <Button size="sm" onClick={onStartCreateSetting}><Plus data-icon="inline-start" />新建设定</Button>
+                      <Button size="sm" className="rounded-full bg-[#171717] text-white hover:bg-[#171717]/90" onClick={onStartCreateSetting}><Plus data-icon="inline-start" />新建设定</Button>
                     </EmptyContent>
                   </Empty>
                 ) : null}
@@ -544,7 +544,7 @@ export function WorkspaceSidebarPanel({
               灵感便签 ({inspirationNotes.length})
             </span>
             <span className="inline-flex items-center gap-2 text-neutral-400">
-              {!notesCollapsed ? <Plus size={15} onClick={(event) => { event.stopPropagation(); onStartCreateNote(); }} /> : null}
+              {!notesCollapsed ? <button className="rounded-full p-1 text-[#888888] hover:bg-[#f5f5f5] hover:text-[#171717]" onClick={(event) => { event.stopPropagation(); onStartCreateNote(); }} aria-label="新建灵感便签"><Plus size={15} /></button> : null}
               {notesCollapsed ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
             </span>
           </button>
@@ -563,10 +563,10 @@ export function WorkspaceSidebarPanel({
                       <span className="block truncate text-xs font-semibold">{note.title}</span>
                       <span className="block truncate text-[10px] text-neutral-400">{note.category} · {formatUpdatedAt(note.updatedAt)}</span>
                     </span>
-                    <button className="rounded p-1 text-neutral-300 opacity-0 hover:bg-red-50 hover:text-red-600 group-hover:opacity-100" onClick={(event) => { event.stopPropagation(); onDeleteNote(note); }} aria-label="删除便签"><Trash2 size={12} /></button>
+                    <button className="rounded-full p-1 text-[#888888] opacity-0 hover:bg-[#f7d4d6] hover:text-[#ee0000] group-hover:opacity-100" onClick={(event) => { event.stopPropagation(); onDeleteNote(note); }} aria-label="删除便签"><Trash2 size={12} /></button>
                   </button>
                 ))}
-                {!inspirationNotes.length ? <button className="w-full rounded-xl border border-dashed border-neutral-200 py-3 text-xs text-neutral-500" onClick={onStartCreateNote}>+ 新建灵感便签</button> : null}
+                {!inspirationNotes.length ? <button className="w-full rounded-xl border border-dashed border-[#ebebeb] py-3 text-xs text-[#888888] hover:border-[#a1a1a1] hover:text-[#171717]" onClick={onStartCreateNote}>+ 新建灵感便签</button> : null}
               </div>
             </div>
           </div>
@@ -575,13 +575,13 @@ export function WorkspaceSidebarPanel({
 
       <section className="h-20 shrink-0 px-3 py-2">
         <div className="flex h-full items-center gap-2.5 rounded-xl border border-neutral-200 bg-white px-3 py-2">
-          <div className="grid size-8 shrink-0 place-items-center rounded-full bg-neutral-950 text-[10px] font-bold text-white">
+          <div className="grid size-8 shrink-0 place-items-center rounded-full bg-[#171717] text-[10px] font-bold text-white">
             {percent}%
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center justify-between gap-2">
               <h3 className="inline-flex items-center gap-1.5 text-xs font-bold"><Target size={13} />今日目标</h3>
-              <button className="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-900" onClick={onOpenGoalEdit} aria-label="编辑创作目标"><Edit3 size={13} /></button>
+              <button className="rounded-full p-1 text-[#888888] hover:bg-[#f5f5f5] hover:text-[#171717]" onClick={onOpenGoalEdit} aria-label="编辑创作目标"><Edit3 size={13} /></button>
             </div>
             <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-neutral-100">
               <div className="h-full rounded-full bg-neutral-950 transition-[width] duration-300" style={{ width: `${percent}%` }} />
@@ -632,10 +632,10 @@ function ItemActions({
 }) {
   return (
     <div className="absolute right-2 top-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-      <button className="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-900" onClick={(event) => { event.stopPropagation(); onEdit(); }} aria-label={editLabel}>
+      <button className="rounded-full p-1 text-[#888888] hover:bg-[#f5f5f5] hover:text-[#171717]" onClick={(event) => { event.stopPropagation(); onEdit(); }} aria-label={editLabel}>
         <Edit3 size={13} />
       </button>
-      <button className="rounded p-1 text-neutral-400 hover:bg-red-50 hover:text-red-600" onClick={(event) => { event.stopPropagation(); onDelete(); }} aria-label={deleteLabel}>
+      <button className="rounded-full p-1 text-[#888888] hover:bg-[#f7d4d6] hover:text-[#ee0000]" onClick={(event) => { event.stopPropagation(); onDelete(); }} aria-label={deleteLabel}>
         <Trash2 size={13} />
       </button>
     </div>

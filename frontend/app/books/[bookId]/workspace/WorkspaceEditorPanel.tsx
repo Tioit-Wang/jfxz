@@ -85,10 +85,10 @@ export function WorkspaceEditorPanel({
 
   return (
     <main data-testid="workspace-editor-panel" className="relative z-0 flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-white">
-      <div className="z-10 flex h-14 shrink-0 items-center justify-between border-b border-border bg-white px-6">
+      <div className="z-10 flex h-14 shrink-0 items-center justify-between border-b border-[#ebebeb] bg-white px-6">
         <div className="flex items-center gap-4">
           <button
-            className="rounded p-1.5 text-gray-400 transition-colors hover:bg-accent hover:text-accent-foreground"
+            className="rounded-full p-1.5 text-[#888888] transition-colors hover:bg-[#f5f5f5] hover:text-[#171717]"
             onClick={onOpenShare}
             aria-label="分享与预览"
             title="分享与预览"
@@ -96,21 +96,21 @@ export function WorkspaceEditorPanel({
             <Eye size={16} />
           </button>
           <button
-            className="rounded p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600"
+            className="rounded-full p-1.5 text-[#888888] transition-colors hover:bg-[#f7d4d6] hover:text-[#ee0000]"
             onClick={onDeleteChapter}
             aria-label="删除当前章节"
           >
             <Trash2 size={16} />
           </button>
           <button
-            className="rounded p-1.5 text-gray-400 transition-colors hover:bg-accent hover:text-accent-foreground"
+            className="rounded-full p-1.5 text-[#888888] transition-colors hover:bg-[#f5f5f5] hover:text-[#171717]"
             onClick={onOpenEditorSettings}
             aria-label="编辑器设置"
           >
             <Settings size={16} />
           </button>
           <button
-            className="rounded p-1.5 text-gray-400 transition-colors hover:bg-accent hover:text-accent-foreground"
+            className="rounded-full p-1.5 text-[#888888] transition-colors hover:bg-[#f5f5f5] hover:text-[#171717]"
             onClick={onOpenVersionHistory}
             aria-label="历史版本"
             title="历史版本"
@@ -120,16 +120,16 @@ export function WorkspaceEditorPanel({
         </div>
         <div className="flex items-center gap-2">
           <button
-            className="hidden items-center gap-2 rounded-full border border-neutral-200 bg-[#f7f3ea] px-3 py-1.5 text-left shadow-sm transition-all hover:-translate-y-px hover:border-neutral-950 sm:flex"
+            className="hidden items-center gap-2 rounded-full border border-[#ebebeb] bg-[#f7f3ea] px-3 py-1.5 text-left shadow-sm transition-all hover:-translate-y-px hover:border-[#171717] sm:flex"
             onClick={onOpenAccount}
             aria-label="账户中心"
           >
-            <UserCircle size={17} className="text-neutral-950" />
-            <span className="max-w-28 truncate text-xs font-bold text-neutral-950">{accountLabel}</span>
-            <span className="max-w-20 truncate rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-neutral-500">{accountSubtitle}</span>
+            <UserCircle size={17} className="text-[#171717]" />
+            <span className="max-w-28 truncate text-xs font-bold text-[#171717]">{accountLabel}</span>
+            <span className="max-w-20 truncate rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-[#888888]">{accountSubtitle}</span>
           </button>
           <button
-            className="flex items-center gap-1.5 rounded-full bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-60"
+            className="inline-flex items-center gap-1.5 rounded-full bg-[#171717] px-4 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#171717]/90 disabled:opacity-60"
             onClick={onAnalyze}
             disabled={status === "analyzing"}
           >
@@ -144,7 +144,7 @@ export function WorkspaceEditorPanel({
           {activeChapter ? (
             <>
               <div className="mb-6 flex items-baseline gap-2">
-                <span className="shrink-0 text-3xl font-bold text-muted-foreground select-none">
+                <span className="shrink-0 text-3xl font-bold text-[#888888] select-none">
                   第{chapterOrder}章
                 </span>
                 <input
@@ -152,20 +152,20 @@ export function WorkspaceEditorPanel({
                   type="text"
                   value={title}
                   onChange={(event) => onTitleChange(event.target.value)}
-                  className="flex-1 border-none bg-transparent text-3xl font-bold text-foreground outline-none placeholder:text-muted-foreground"
+                  className="flex-1 border-none bg-transparent text-3xl font-bold text-[#171717] outline-none placeholder:text-[#888888]"
                   placeholder="请输入章节名称"
                 />
               </div>
 
               <div className="group relative mb-10">
                 <div className="absolute -left-4 bottom-3 top-3 w-1 rounded-full bg-gray-200 transition-colors group-hover:bg-gray-300" />
-                <div className="relative min-h-[60px] rounded-xl border border-transparent bg-muted p-4 text-sm text-muted-foreground transition-all group-hover:border-border">
+                <div className="relative min-h-[60px] rounded-xl border border-transparent bg-[#f5f5f5] p-4 text-sm text-[#888888] transition-all group-hover:border-[#ebebeb]">
                   <div className="whitespace-pre-wrap pr-10 leading-relaxed line-clamp-3 break-words">
                     {summary || <span className="text-gray-400">尚未填写章节提要，点击右侧编辑...</span>}
                   </div>
                   <button
                     onClick={onOpenSummaryModal}
-                    className="absolute right-3 top-3 rounded-lg border border-gray-200 bg-white p-1.5 text-gray-400 opacity-0 shadow-sm transition-all duration-200 hover:bg-gray-100 hover:text-gray-900 group-hover:opacity-100"
+                    className="absolute right-3 top-3 rounded-full border border-[#ebebeb] bg-white p-1.5 text-[#888888] opacity-0 shadow-sm transition-all duration-200 hover:bg-[#fafafa] hover:text-[#171717] group-hover:opacity-100"
                     title="编辑章节提要"
                     aria-label="编辑章节提要"
                   >
@@ -175,7 +175,7 @@ export function WorkspaceEditorPanel({
               </div>
 
               {analysisNotice ? (
-                <div className="mb-5 rounded-lg border border-border bg-muted px-4 py-3 text-sm leading-6 text-foreground">
+                <div className="mb-5 rounded-lg border border-[#ebebeb] bg-[#f5f5f5] px-4 py-3 text-sm leading-6 text-[#171717]">
                   <span className="flex items-center font-medium">
                     <AlertCircle size={15} className="mr-1.5" />
                     {analysisNotice}
@@ -188,7 +188,7 @@ export function WorkspaceEditorPanel({
                   <AlertCircle size={15} className="shrink-0" />
                   <span className="flex-1">{remoteUpdateNotice}</span>
                   <button
-                    className="inline-flex shrink-0 items-center gap-1 rounded-md bg-amber-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-amber-700"
+                    className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#171717] px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-[#171717]/90"
                     onClick={onAcceptRemoteUpdate}
                   >
                     <RefreshCw size={12} />
@@ -214,7 +214,7 @@ export function WorkspaceEditorPanel({
         </div>
       </div>
 
-      <div className="flex h-10 shrink-0 items-center justify-between border-t border-border bg-white px-6 text-[12px] font-medium text-muted-foreground">
+      <div className="flex h-10 shrink-0 items-center justify-between border-t border-[#ebebeb] bg-white px-6 text-[12px] font-medium text-[#888888]">
         <div className="flex min-w-0 items-center gap-4">
           <span className="flex select-none items-center gap-1.5">
             <StatusIcon

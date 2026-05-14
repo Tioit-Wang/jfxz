@@ -11,7 +11,7 @@ test("workspace supports creating, editing, saving, and switching chapters", asy
   await expect(page.getByText("已保存到云端")).toBeVisible({ timeout: 5000 });
 
   await page.getByLabel("新建章节").click();
-  await expect(page.getByLabel("章节标题")).toHaveValue(/第 2 章 未命名章节/);
+  await expect(page.getByLabel("章节标题")).toHaveValue("未命名章节");
   await page.getByLabel("章节标题").fill("第二章 追踪");
   await chapterEditor(page).fill("第二章正文：主角沿着线索继续追踪。");
   await expect(page.getByText("已保存到云端")).toBeVisible({ timeout: 5000 });

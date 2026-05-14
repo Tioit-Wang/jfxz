@@ -172,18 +172,18 @@ export function WorkspaceChatPanel({
   }
 
   return (
-    <aside data-testid="workspace-chat-panel" className="relative z-20 flex h-full min-h-0 min-w-0 flex-col border-l border-border bg-white shadow-[-2px_0_12px_rgba(0,0,0,0.03)]">
-      <div className="flex h-14 items-center justify-between border-b border-border p-4">
+    <aside data-testid="workspace-chat-panel" className="relative z-20 flex h-full min-h-0 min-w-0 flex-col border-l border-[#ebebeb] bg-white shadow-[-2px_0_12px_rgba(0,0,0,0.03)]">
+      <div className="flex h-14 items-center justify-between border-b border-[#ebebeb] p-4">
         <div className="flex min-w-0 items-center gap-2">
           <span
             className={cn(
               "h-2.5 w-2.5 shrink-0 rounded-full shadow-[0_0_10px_rgba(52,211,153,0.6)]",
-              chatStatus === "streaming" ? "animate-pulse bg-emerald-400" : "bg-muted-foreground/40"
+              chatStatus === "streaming" ? "animate-pulse bg-emerald-400" : "bg-[#888888]/40"
             )}
           />
           <div className="min-w-0">
-            <h2 className="truncate text-sm font-semibold text-foreground">{activeSession?.title || "新的对话"}</h2>
-            <p className="truncate text-xs text-muted-foreground">
+            <h2 className="truncate text-sm font-semibold text-[#171717]">{activeSession?.title || "新的对话"}</h2>
+            <p className="truncate text-xs text-[#888888]">
               {chatStatus === "streaming" ? "AI 回复中" : "当前会话 · 已读取作品上下文"}
             </p>
           </div>
@@ -191,39 +191,39 @@ export function WorkspaceChatPanel({
         <div className="flex gap-1">
           <DropdownMenu open={showHistory} onOpenChange={onHistoryOpenChange}>
             <DropdownMenuTrigger asChild>
-              <button className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground" title="历史会话" aria-label="历史会话">
+              <button className="rounded-full p-1.5 text-[#888888] transition-colors hover:bg-[#f5f5f5] hover:text-[#171717]" title="历史会话" aria-label="历史会话">
                 <Clock3 size={16} />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-80 p-2">
               <div className="space-y-2">
-                <div className="px-1 py-1 text-xs font-medium text-muted-foreground">最近会话</div>
+                <div className="px-1 py-1 text-xs font-medium text-[#888888]">最近会话</div>
                 <div className="max-h-64 space-y-2 overflow-y-auto">
                   {sessions.length ? (
                     sessions.map((session) => (
                       <button
                         key={session.id}
                         className={cn(
-                          "w-full rounded-lg border px-3 py-2 text-left text-xs transition-colors",
+                          "w-full rounded-md border px-3 py-2 text-left text-xs transition-colors",
                           session.id === activeSessionId
-                            ? "border-primary bg-card text-foreground"
-                            : "border-transparent bg-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                            ? "border-[#171717] bg-[#f5f5f5] text-[#171717]"
+                            : "border-transparent bg-transparent text-[#888888] hover:bg-[#f5f5f5] hover:text-[#171717]"
                         )}
                         onClick={() => onSwitchSession(session.id)}
                       >
                         <span className="block truncate font-medium">{session.title}</span>
-                        <span className="mt-1 block truncate text-muted-foreground">{session.lastMessagePreview || "暂无消息"}</span>
+                        <span className="mt-1 block truncate text-[#888888]">{session.lastMessagePreview || "暂无消息"}</span>
                       </button>
                     ))
                   ) : (
-                    <p className="px-2 py-3 text-xs text-muted-foreground">暂无历史会话</p>
+                    <p className="px-2 py-3 text-xs text-[#888888]">暂无历史会话</p>
                   )}
                 </div>
               </div>
             </DropdownMenuContent>
           </DropdownMenu>
           <button
-            className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+            className="rounded-full p-1.5 text-[#888888] transition-colors hover:bg-[#f5f5f5] hover:text-[#171717]"
             onClick={onCreateSession}
             title="新建会话"
             aria-label="新建会话"
@@ -237,25 +237,25 @@ export function WorkspaceChatPanel({
         <div className="flex flex-1 flex-col overflow-hidden">
           <div className="chat-scroll flex-1 space-y-5 overflow-y-auto p-4">
             <div className="flex justify-center">
-              <span className="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">当前会话 · 已读取作品上下文</span>
+              <span className="rounded-full bg-[#f5f5f5] px-3 py-1 text-xs text-[#888888]">当前会话 · 已读取作品上下文</span>
             </div>
             {hasMoreMessages ? (
-              <Button variant="secondary" size="sm" className="w-full rounded-full" onClick={onLoadOlderMessages}>
-                <History size={14} />
+              <button className="w-full rounded-full border border-[#ebebeb] bg-white px-4 py-2 text-sm font-medium text-[#171717] transition-colors hover:bg-[#fafafa]" onClick={onLoadOlderMessages}>
+                <History size={14} className="inline mr-1.5" />
                 加载更早消息
-              </Button>
+              </button>
             ) : null}
             {chatStatus === "loading" ? <p className="text-sm text-muted-foreground">消息加载中...</p> : null}
 
             {messages.length === 0 && chatStatus === "ready" ? (
               <div className="flex flex-col items-center justify-center py-12 text-center">
-                <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/10 to-primary/5 ring-1 ring-primary/10">
-                  <MessageSquare size={28} className="text-primary/60" />
+                <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-[#171717]/10 to-[#171717]/5 ring-1 ring-[#171717]/10">
+                  <MessageSquare size={28} className="text-[#171717]/60" />
                 </div>
-                <h3 className="mb-1 text-xl font-semibold tracking-tight text-foreground">
+                <h3 className="mb-1 text-xl font-semibold tracking-tight text-[#171717]">
                   {workTitle || "开始创作"}
                 </h3>
-                <p className="mb-8 max-w-xs text-sm text-muted-foreground">
+                <p className="mb-8 max-w-xs text-sm text-[#888888]">
                   当前还没有消息，选择一个方向开始与 AI 协作写作
                 </p>
                 <div className="flex w-full max-w-sm flex-col gap-3">
@@ -263,14 +263,14 @@ export function WorkspaceChatPanel({
                     <button
                       key={prompt.text}
                       onClick={() => handlePromptClick(prompt.text)}
-                      className="group flex items-center gap-4 rounded-xl border border-border bg-card px-5 py-4 text-left shadow-sm transition-all hover:border-primary/40 hover:bg-primary/[0.02] hover:shadow-md"
+                      className="group flex items-center gap-4 rounded-xl border border-[#ebebeb] bg-white px-5 py-4 text-left shadow-sm transition-all hover:border-[#171717]/40 hover:bg-[#171717]/[0.02] hover:shadow-md"
                     >
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/5 text-primary/60 transition-colors group-hover:bg-primary/10 group-hover:text-primary">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#171717]/5 text-[#171717]/60 transition-colors group-hover:bg-[#171717]/10 group-hover:text-[#171717]">
                         <prompt.icon size={18} />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-foreground">{prompt.text}</p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">{prompt.hint}</p>
+                        <p className="text-sm font-medium text-[#171717]">{prompt.text}</p>
+                        <p className="mt-0.5 text-xs text-[#888888]">{prompt.hint}</p>
                       </div>
                     </button>
                   ))}
@@ -280,15 +280,15 @@ export function WorkspaceChatPanel({
               messages.map((message) => (
                 <div key={message.id} className={cn("animate-pop flex w-full gap-3", message.role === "user" ? "justify-end" : "justify-start")}>
                   {message.role === "assistant" ? (
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted text-xs font-bold text-primary">AI</div>
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#ebebeb] bg-[#f5f5f5] text-xs font-bold text-[#171717]">AI</div>
                   ) : null}
                   <div className="max-w-[85%]">
                     <div
                       className={cn(
                         "rounded-2xl border px-4 py-3 text-sm leading-relaxed shadow-sm",
                         message.role === "user"
-                          ? "rounded-br-sm border-primary bg-primary text-primary-foreground"
-                          : "rounded-tl-sm border-border bg-background text-card-foreground"
+                          ? "rounded-br-sm border-[#171717] bg-[#171717] text-white"
+                          : "rounded-tl-sm border-[#ebebeb] bg-white text-[#171717]"
                       )}
                     >
                       {renderMessageContent(message)}
@@ -314,7 +314,7 @@ export function WorkspaceChatPanel({
                     </div>
                   </div>
                   {message.role === "user" ? (
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">U</div>
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#171717] text-xs font-bold text-white">U</div>
                   ) : null}
                 </div>
               ))
@@ -325,7 +325,7 @@ export function WorkspaceChatPanel({
             data-testid="workspace-chat-dropzone"
             className={cn(
               "mx-4 mb-4 rounded-2xl border bg-background shadow-sm transition-colors",
-              isDropActive ? "border-primary bg-primary/5 shadow-[0_0_0_1px_hsl(var(--primary))]" : "border-border"
+              isDropActive ? "border-[#171717] bg-[#171717]/5 shadow-[0_0_0_1px_#171717]" : "border-[#ebebeb]"
             )}
             onDragEnter={(event) => {
               if (!readDraggedReference(event.dataTransfer)) return;
@@ -355,18 +355,18 @@ export function WorkspaceChatPanel({
             }}
           >
             <div className="flex items-center pl-3 pr-4 py-2">
-              <div className="flex min-w-0 items-center text-xs text-muted-foreground">
+              <div className="flex min-w-0 items-center text-xs text-[#888888]">
                 {modelStatus === "loading" ? (
-                  <span className="text-muted-foreground/50">模型加载中...</span>
+                  <span className="text-[#888888]/50">模型加载中...</span>
                 ) : modelStatus === "error" ? (
                   <>
-                    <span className="text-destructive">模型列表加载失败</span>
+                    <span className="text-[#ee0000]">模型列表加载失败</span>
                     <button type="button" className="ml-1 underline hover:no-underline" onClick={onRetryModels}>
                       重试
                     </button>
                   </>
                 ) : !selectedModel ? (
-                  <span className="text-muted-foreground/50">暂无可用模型</span>
+                  <span className="text-[#888888]/50">暂无可用模型</span>
                 ) : (
                   <ModelPicker models={aiModels} selectedId={selectedModelId} onSelect={onSelectChatModel} />
                 )}
@@ -374,7 +374,7 @@ export function WorkspaceChatPanel({
               <div className="relative ml-[2px]" ref={thinkingPopupRef}>
                 <button
                   className={cn(
-                    "flex items-center justify-center rounded p-1 transition-colors",
+                    "flex items-center justify-center rounded-full p-1 text-[#888888] transition-colors hover:bg-[#f5f5f5] hover:text-[#171717]",
                     THINKING_ICON_COLORS[thinkingIntensity]
                   )}
                   onClick={() => setShowThinkingPopup((v) => !v)}
@@ -383,8 +383,8 @@ export function WorkspaceChatPanel({
                   <Brain size={14} />
                 </button>
                 {showThinkingPopup && (
-                  <div className="absolute bottom-full left-0 z-50 mb-2 w-52 rounded-lg border border-border bg-popover p-3 shadow-lg">
-                    <span className="text-[11px] text-muted-foreground">思考强度</span>
+                  <div className="absolute bottom-full left-0 z-50 mb-2 w-52 rounded-xl border border-[#ebebeb] bg-white p-3 shadow-[0px_1px_1px_rgba(0,0,0,0.02),0px_8px_16px_-4px_rgba(0,0,0,0.04),0px_24px_32px_-8px_rgba(0,0,0,0.06)] ring-1 ring-inset ring-[#00000014]">
+                    <span className="text-[11px] text-[#888888]">思考强度</span>
                     <div className="mt-2 flex gap-1">
                       {THINKING_LEVELS.map((level, index) => {
                         const activeIndex = THINKING_LEVELS.indexOf(thinkingIntensity);
@@ -394,7 +394,7 @@ export function WorkspaceChatPanel({
                             key={level}
                             className={cn(
                               "h-2 flex-1 rounded-full transition-all",
-                              isFilled ? THINKING_BAR_COLORS[thinkingIntensity] : "bg-muted"
+                              isFilled ? THINKING_BAR_COLORS[thinkingIntensity] : "bg-[#f5f5f5]"
                             )}
                             onClick={() => onThinkingIntensityChange(level)}
                           />
@@ -407,7 +407,7 @@ export function WorkspaceChatPanel({
                           key={level}
                           className={cn(
                             "flex-1 text-center text-[10px] transition-colors",
-                            level === thinkingIntensity ? THINKING_ICON_COLORS[thinkingIntensity] : "text-muted-foreground/60"
+                            level === thinkingIntensity ? THINKING_ICON_COLORS[thinkingIntensity] : "text-[#888888]/60"
                           )}
                         >
                           {THINKING_LABELS[level]}
@@ -437,13 +437,13 @@ export function WorkspaceChatPanel({
           </div>
         </div>
       ) : (
-        <div className="absolute inset-0 z-30 flex flex-col bg-background/95 backdrop-blur">
-          <div className="flex h-14 items-center justify-between border-b border-border bg-background p-4">
+        <div className="absolute inset-0 z-30 flex flex-col bg-white/95 backdrop-blur">
+          <div className="flex h-14 items-center justify-between border-b border-[#ebebeb] bg-white p-4">
             <div className="flex items-center gap-2">
-              <Wand2 size={16} className="text-foreground" />
-              <span className="text-sm font-semibold text-foreground">AI 写作建议</span>
+              <Wand2 size={16} className="text-[#171717]" />
+              <span className="text-sm font-semibold text-[#171717]">AI 写作建议</span>
             </div>
-            <button className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground" onClick={onCloseOverlay} aria-label="关闭写作建议">
+            <button className="rounded-full p-1.5 text-[#888888] transition-colors hover:bg-[#f5f5f5] hover:text-[#171717]" onClick={onCloseOverlay} aria-label="关闭写作建议">
               <X size={18} />
             </button>
           </div>
@@ -453,30 +453,30 @@ export function WorkspaceChatPanel({
               return (
                 <div
                   key={`${suggestion.quote}-${index}`}
-                  className={cn("flex flex-col overflow-hidden rounded-xl border bg-card shadow-sm", selected ? "border-primary" : "border-border")}
+                  className={cn("flex flex-col overflow-hidden rounded-xl border bg-white shadow-[0px_1px_1px_rgba(0,0,0,0.02),0px_2px_2px_rgba(0,0,0,0.04)]", selected ? "border-[#171717]" : "border-[#ebebeb]")}
                 >
-                  <button className="border-b border-border bg-muted p-4 text-left" onClick={() => onSelectSuggestion(index)}>
-                    <span className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">原文引用</span>
-                    <p className="line-clamp-3 text-sm text-muted-foreground">{suggestion.quote}</p>
+                  <button className="border-b border-[#ebebeb] bg-[#fafafa] p-4 text-left" onClick={() => onSelectSuggestion(index)}>
+                    <span className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-[#888888]">原文引用</span>
+                    <p className="line-clamp-3 text-sm leading-5 text-[#888888]">{suggestion.quote}</p>
                   </button>
-                  <div className="border-b border-border p-4">
-                    <div className="flex items-start text-sm">
-                      <AlertCircle size={16} className="mr-2 mt-0.5 shrink-0 text-foreground" />
-                      <span className="text-foreground">{suggestion.issue}</span>
+                  <div className="border-b border-[#ebebeb] p-4">
+                    <div className="flex items-start text-sm leading-5">
+                      <AlertCircle size={16} className="mr-2 mt-0.5 shrink-0 text-[#171717]" />
+                      <span className="text-[#171717]">{suggestion.issue}</span>
                     </div>
                   </div>
-                  <div className="bg-background p-4">
-                    <span className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">推荐修改方案</span>
-                    <p className="mb-5 text-sm text-foreground">{suggestion.options[0]}</p>
+                  <div className="bg-white p-4">
+                    <span className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-[#888888]">推荐修改方案</span>
+                    <p className="mb-5 text-sm leading-5 text-[#171717]">{suggestion.options[0]}</p>
                     <div className="flex gap-3">
                       <button
-                        className="flex-1 rounded-lg bg-primary py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                        className="flex-1 rounded-full bg-[#171717] py-2 text-sm font-medium text-white transition-colors hover:bg-[#171717]/90"
                         onClick={() => onAcceptSuggestion(index)}
                       >
                         采纳替换
                       </button>
                       <button
-                        className="flex-1 rounded-lg border border-border bg-background py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+                        className="flex-1 rounded-full border border-[#ebebeb] bg-white py-2 text-sm font-medium text-[#171717] transition-colors hover:bg-[#fafafa]"
                         onClick={() => onSendSuggestionToChat(index)}
                       >
                         发送至对话

@@ -317,7 +317,7 @@ export default function AdminProductsPage() {
           <AlertDialogFooter><AlertDialogCancel>取消</AlertDialogCancel><AlertDialogAction onClick={() => void remove()}>确认</AlertDialogAction></AlertDialogFooter></AlertDialogContent>
       </AlertDialog>
       <AlertDialog open={!!statusTarget} onOpenChange={(open) => !open && setStatusTarget(null)}>
-        <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>确认更新商品状态？</AlertDialogTitle><AlertDialogDescription>将"{statusTarget?.row.name}"设置为{statusTarget?.row.status === "active" ? "停用" : "启用"}。</AlertDialogDescription></AlertDialogHeader>
+        <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>确认更新商品状态？</AlertDialogTitle><AlertDialogDescription>将「{statusTarget?.row.name}」设置为{statusTarget?.row.status === "active" ? "停用" : "启用"}。</AlertDialogDescription></AlertDialogHeader>
           <AlertDialogFooter><AlertDialogCancel>取消</AlertDialogCancel><AlertDialogAction onClick={() => void toggleStatus()}>确认</AlertDialogAction></AlertDialogFooter></AlertDialogContent>
       </AlertDialog>
     </AdminPage>

@@ -549,12 +549,16 @@ async def test_send_chat_message_persists_error_messages_without_content(
     )
     body = b"".join([chunk async for chunk in stream.body_iterator]).decode()
     assert "run failed" in body
-    assert "Tool 'get_setting' failed: tool boom" in body
+    # tool_call_error now emits tool_result (not global error) with cleaned message
+    assert "tool boom" in body
+    assert "event: tool_result" in body
     assert "event: done" in body
 
     chat_model = await session.get(routes_module.ChatSession, chat["id"])
     agent = await session.get(AgentRunStore, chat_model.agno_session_id)
     assert "run failed" in agent.runs[-1]["error"]
+    # Tool errors should NOT appear in the message-level error field
+    assert "tool boom" not in (agent.runs[-1].get("error") or "")
 
 
 async def test_send_chat_message_skips_empty_assistant_persistence(

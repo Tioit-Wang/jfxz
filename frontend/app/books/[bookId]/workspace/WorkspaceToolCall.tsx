@@ -272,7 +272,7 @@ function renderToolResult(block: ToolCallBlock) {
 
 export function WorkspaceToolCall({ block, expanded, onToggle }: WorkspaceToolCallProps) {
   const isStarted = block.status === "started";
-  const isError = !isStarted && block.result != null && hasError(block.result);
+  const isError = block.status === "error" || (!isStarted && block.result != null && hasError(block.result));
   const Icon = toolIcon(block.tool);
   const label = toolLabel(block.tool);
 
@@ -297,7 +297,7 @@ export function WorkspaceToolCall({ block, expanded, onToggle }: WorkspaceToolCa
       <div className={cn("tool-collapse", expanded && "expanded")}>
         <div>
           <div className="border-t border-neutral-200 bg-neutral-50/60 p-3">
-            {block.result ? renderToolResult(block) : <p className="text-xs text-neutral-400">工具正在执行，结果会在完成后显示。</p>}
+            {block.result ? renderToolResult(block) : isError ? <p className="rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700">工具调用失败</p> : <p className="text-xs text-neutral-400">工具正在执行，结果会在完成后显示。</p>}
           </div>
         </div>
       </div>

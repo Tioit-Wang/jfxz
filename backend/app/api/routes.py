@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import secrets
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
@@ -2002,6 +2003,26 @@ def _tool_result_status(result_text: str) -> str:
     return "error" if isinstance(parsed, dict) and "error" in parsed else "completed"
 
 
+def _clean_tool_error(raw: str) -> str:
+    """Convert verbose Pydantic validation errors to short human-readable messages."""
+    # Missing required argument: "chapter_id\n  Missing required argument [type=missing_argument, ...]"
+    match = re.search(r"(\w+)\s*\n\s*Missing required argument", raw)
+    if match:
+        return f"缺少必填参数: {match.group(1)}"
+    # Type error: "field\n  Input should be a valid string [type=string_type, ...]"
+    match = re.search(r"(\w+)\s*\n\s*(.+?)\s*\[type=", raw)
+    if match:
+        return f"参数 {match.group(1)} 校验失败: {match.group(2).strip().lower()}"
+    # Other validation error: extract field name from each error block
+    field_matches = re.findall(r"^(\w+)\s*\n\s+(.+?)(?:\s*\[type=|\n|$)", raw, re.MULTILINE)
+    if field_matches:
+        parts = [f"{f}: {d.strip().lower()}" for f, d in field_matches[:3]]
+        return f"参数校验失败: {'; '.join(parts)}"
+    # Fallback: take the first meaningful line
+    first_line = raw.split("\n")[0].strip()
+    return first_line or "工具调用失败"
+
+
 def start_tool_block(
     blocks: list[dict[str, Any]], tool_name: str, display: str
 ) -> None:
@@ -2334,16 +2355,28 @@ async def send_chat_message(
                         yield encode_sse("error", {"message": error_msg})
                     elif event.event == RunEvent.tool_call_error:
                         tool_name = event.tool.tool_name if event.tool else ""
-                        error_msg = str(event.content) if event.content else "Tool call failed"
+                        raw_error = str(event.content) if event.content else "Tool call failed"
+                        display = _TOOL_DISPLAY_NAMES.get(tool_name, tool_name)
+                        clean_msg = _clean_tool_error(raw_error)
                         logger.error(
                             "tool call error for chat %s, tool=%s: %s",
                             chat.id,
                             tool_name,
-                            error_msg,
+                            raw_error,
                         )
-                        error_messages.append(f"Tool '{tool_name}' failed: {error_msg}")
+                        error_result = json.dumps({"error": clean_msg}, ensure_ascii=False)
+                        tool_results.append(
+                            {"tool": tool_name, "display": display, "result": error_result}
+                        )
+                        complete_tool_block(blocks, tool_name, display, error_result)
                         yield encode_sse(
-                            "error", {"message": f"Tool '{tool_name}' failed: {error_msg}"}
+                            "tool_result",
+                            {
+                                "tool": tool_name,
+                                "display": display,
+                                "status": "error",
+                                "result": error_result,
+                            },
                         )
                     elif event.event == RunEvent.run_completed:  # pragma: no branch
                         completed_event = event

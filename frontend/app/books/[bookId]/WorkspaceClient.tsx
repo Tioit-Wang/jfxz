@@ -44,7 +44,9 @@ import {
   ApiClient,
   ApiError,
   type AiModelOption,
+  type AnalysisRound,
   type ApiSuggestion,
+  type PersistedAnalysis,
   type BillingOrder,
   type BillingProducts,
   type ChatMention,
@@ -303,10 +305,11 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const [summaryDraft, setSummaryDraft] = useState("");
   const [content, setContent] = useState("");
   const [summaryModalOpen, setSummaryModalOpen] = useState(false);
-  const [overlay, setOverlay] = useState(false);
   const [suggestions, setSuggestions] = useState<ApiSuggestion[]>([]);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState<number | null>(null);
   const [analysisNotice, setAnalysisNotice] = useState("");
+  const [activeChatTab, setActiveChatTab] = useState<"chat" | "suggestions">("chat");
+  const [persistedAnalysis, setPersistedAnalysis] = useState<PersistedAnalysis | null>(null);
   const [status, setStatus] = useState<SaveStatus>("loading");
   const [remoteUpdateNotice, setRemoteUpdateNotice] = useState<string | null>(null);
 
@@ -502,7 +505,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const clearAnalysis = useCallback(() => {
     setSuggestions([]);
     setActiveSuggestionIndex(null);
-    setOverlay(false);
     setAnalysisNotice("");
   }, []);
 
@@ -516,9 +518,18 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     pendingAddedWordsRef.current = 0;
     setSuggestions([]);
     setActiveSuggestionIndex(null);
-    setOverlay(false);
     setAnalysisNotice("");
-  }, []);
+    if (chapter) {
+      try {
+        const raw = localStorage.getItem(`jfxz_analysis_${bookId}_${chapter.id}`);
+        setPersistedAnalysis(raw ? JSON.parse(raw) : null);
+      } catch {
+        setPersistedAnalysis(null);
+      }
+    } else {
+      setPersistedAnalysis(null);
+    }
+  }, [bookId]);
 
   const recordContentDraft = useCallback((value: string) => {
     const previousCount = wordCount(draftContentRef.current);
@@ -787,7 +798,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     lastEditTimeRef.current = Date.now();
     recordContentDraft(value);
     setContent(value);
-    if (suggestions.length || overlay || analysisNotice) {
+    if (suggestions.length || analysisNotice) {
       clearAnalysis();
     }
   }
@@ -887,7 +898,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     if (!content.trim()) {
       setSuggestions([]);
       setActiveSuggestionIndex(null);
-      setOverlay(false);
       setAnalysisNotice("当前章节暂无正文，无法检测");
       setStatus("analyzed");
       return;
@@ -897,16 +907,29 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     try {
       await saveCurrentChapter();
       setStatus("analyzing");
-      const nextSuggestions = await client.analyzeChapter(bookId, content);
-      setSuggestions(nextSuggestions);
+      const chapterId = activeChapterIdRef.current;
+      const result = await client.analyzeChapter(bookId, chapterId, content);
+      const flatSuggestions = result.rounds.flatMap((r: AnalysisRound) => r.suggestions);
+      setSuggestions(flatSuggestions);
       setActiveSuggestionIndex(null);
-      setOverlay(false);
-      setAnalysisNotice(nextSuggestions.length ? `发现 ${nextSuggestions.length} 处可检查内容` : "未发现明显问题");
+      const analysis: PersistedAnalysis = {
+        chapterId,
+        chapterTitle: activeChapter?.title ?? "",
+        workId: bookId,
+        analyzedAt: new Date().toISOString(),
+        rounds: result.rounds,
+        totalSuggestions: result.total_suggestions,
+      };
+      setPersistedAnalysis(analysis);
+      try {
+        localStorage.setItem(`jfxz_analysis_${bookId}_${chapterId}`, JSON.stringify(analysis));
+      } catch { /* storage full, ignore */ }
+      setActiveChatTab("suggestions");
+      setAnalysisNotice(result.total_suggestions ? `发现 ${result.total_suggestions} 处可检查内容` : "未发现明显问题");
       setStatus("analyzed");
     } catch (error) {
       setSuggestions([]);
       setActiveSuggestionIndex(null);
-      setOverlay(false);
       setAnalysisNotice(apiErrorMessage(error));
       setStatus("error");
     }
@@ -934,7 +957,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     const nextContent = applySuggestion(content, { quote: suggestion.quote, replacement: nextReplacement });
     setContent(nextContent);
     clearAnalysis();
-    setOverlay(false);
     try {
       await saveCurrentChapter({ content: nextContent });
     } catch {
@@ -956,7 +978,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       replacement: nextReplacement
     };
     setPendingReferences([ref]);
-    setOverlay(false);
+    setActiveChatTab("chat");
     const nextInput = `针对这段建议，我们再讨论一下其他处理方式：${nextReplacement}`;
     setChatInput(nextInput);
     setChatMentions([]);
@@ -2044,7 +2066,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
             onContentChange={updateContent}
             onActivateSuggestion={(index) => {
               setActiveSuggestionIndex(index);
-              setOverlay(true);
+              setActiveChatTab("suggestions");
             }}
             onQuoteToChat={activeChapter ? (range) => handleQuoteToChat(activeChapter.id, activeChapter.title, range) : undefined}
             remoteUpdateNotice={remoteUpdateNotice}
@@ -2063,13 +2085,14 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
           className="min-h-0 min-w-0"
         >
           <WorkspaceChatPanel
-            overlay={overlay}
+            activeTab={activeChatTab}
+            onTabChange={setActiveChatTab}
             suggestions={suggestions}
             activeSuggestionIndex={activeSuggestionIndex}
+            persistedAnalysis={persistedAnalysis}
             onSelectSuggestion={setActiveSuggestionIndex}
             onAcceptSuggestion={(index) => void acceptSuggestion(index)}
             onSendSuggestionToChat={sendSuggestionToChat}
-            onCloseOverlay={() => setOverlay(false)}
             chatStatus={chatStatus}
             activeSession={activeSession}
             showHistory={showHistory}

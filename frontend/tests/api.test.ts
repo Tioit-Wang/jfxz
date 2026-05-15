@@ -153,7 +153,7 @@ describe("api client", () => {
       .mockResolvedValueOnce(jsonResponse({ id: "c1", volume_id: "v1", order_index: 1, title: "章改", summary: "摘要", content: "正文" }))
       .mockResolvedValueOnce(jsonResponse({ id: "v2", work_id: "w1", title: "第二卷", order_index: 2 }))
       .mockResolvedValueOnce(jsonResponse({ ok: true }))
-      .mockResolvedValueOnce(jsonResponse({ suggestions: [{ quote: "正文", issue: "问题", options: ["改文"] }] }))
+      .mockResolvedValueOnce(jsonResponse({ rounds: [{ round: 1, title: "角色检查", summary: "", suggestions: [{ quote: "正文", issue: "问题", options: ["改文"] }] }], total_suggestions: 1 }))
       .mockResolvedValueOnce(jsonResponse([{ id: "char-1", work_id: "w1", name: "角色", summary: "摘要", detail: "详情" }]))
       .mockResolvedValueOnce(jsonResponse({ id: "char-2", work_id: "w1", name: "新角色", summary: "摘要", detail: "" }))
       .mockResolvedValueOnce(jsonResponse({ id: "char-2", work_id: "w1", name: "新角色改", summary: "新摘要", detail: "新详情" }))
@@ -293,7 +293,7 @@ describe("api client", () => {
     ).resolves.toMatchObject({ title: "章改" });
     await expect(client.createVolume("w1", "第二卷")).resolves.toMatchObject({ id: "v2", order: 2 });
     await expect(client.deleteChapter("w1", "c1")).resolves.toBeUndefined();
-    await expect(client.analyzeChapter("w1", "正文")).resolves.toMatchObject([{ quote: "正文" }]);
+    await expect(client.analyzeChapter("w1", "c1", "正文")).resolves.toMatchObject({ rounds: [{ round: 1, title: "角色检查", suggestions: [{ quote: "正文" }] }], total_suggestions: 1 });
     await expect(client.listCharacters("w1", "角")).resolves.toMatchObject([{ id: "char-1" }]);
     await expect(client.createCharacter("w1", { name: "新角色", summary: "摘要" })).resolves.toMatchObject({
       id: "char-2"

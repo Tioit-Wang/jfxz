@@ -157,8 +157,9 @@ export default function AdminHome() {
     <AdminPage>
       <AdminHeading title="后台概览" description="平台核心运营数据与功能入口。" />
 
-      {/* Time Range Selector */}
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex-1 overflow-y-auto min-h-0 flex flex-col gap-6">
+        {/* Time Range Selector */}
+        <div className="flex flex-wrap items-center gap-3">
         <Calendar className="size-4 text-muted-foreground shrink-0" />
         <Tabs value={preset} onValueChange={(v) => {
           const p = presets.find((x) => x.label === v);
@@ -271,6 +272,7 @@ export default function AdminHome() {
             </Link>
           ))}
         </div>
+      </div>
       </div>
     </AdminPage>
   );

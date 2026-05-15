@@ -62,6 +62,7 @@ export default function AdminShell({ children }: Readonly<{ children: ReactNode 
 
   return (
     <SidebarProvider
+      className="h-svh overflow-hidden"
       style={
         {
           "--sidebar-width": "18rem",

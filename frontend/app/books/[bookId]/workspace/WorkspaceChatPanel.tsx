@@ -1,14 +1,16 @@
 "use client";
 
-import { AlertCircle, Brain, Clock3, History, MessageSquare, PenLine, Sparkles, Users, Wand2, X } from "lucide-react";
+import { AlertCircle, Brain, ChevronDown, ChevronRight, ClipboardCheck, Clock3, History, MessageSquare, PenLine, Sparkles, Users, Wand2 } from "lucide-react";
 import { type ReactNode, type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import type {
   AiModelOption,
+  AnalysisRound,
   ApiSuggestion,
   ChatMention,
   ChatMessage,
   ChatReference,
   ChatSession,
+  PersistedAnalysis,
 } from "@/api";
 import { ChatMentionInput, type ChatMentionInputHandle } from "@/components/ChatMentionInput";
 import { ModelPicker } from "@/components/ModelPicker";
@@ -45,13 +47,14 @@ const THINKING_BAR_COLORS: Record<ThinkingLevel, string> = {
 };
 
 type WorkspaceChatPanelProps = {
-  overlay: boolean;
+  activeTab: "chat" | "suggestions";
+  onTabChange: (tab: "chat" | "suggestions") => void;
   suggestions: ApiSuggestion[];
   activeSuggestionIndex: number | null;
+  persistedAnalysis: PersistedAnalysis | null;
   onSelectSuggestion: (index: number) => void;
   onAcceptSuggestion: (index: number) => void;
   onSendSuggestionToChat: (index: number) => void;
-  onCloseOverlay: () => void;
   chatStatus: "loading" | "ready" | "streaming" | "error" | "no_points" | "idle";
   activeSession?: ChatSession;
   showHistory: boolean;
@@ -90,13 +93,14 @@ type WorkspaceChatPanelProps = {
 };
 
 export function WorkspaceChatPanel({
-  overlay,
+  activeTab,
+  onTabChange,
   suggestions,
   activeSuggestionIndex,
+  persistedAnalysis,
   onSelectSuggestion,
   onAcceptSuggestion,
   onSendSuggestionToChat,
-  onCloseOverlay,
   chatStatus,
   activeSession,
   showHistory,
@@ -173,67 +177,77 @@ export function WorkspaceChatPanel({
 
   return (
     <aside data-testid="workspace-chat-panel" className="relative z-20 flex h-full min-h-0 min-w-0 flex-col border-l border-[#ebebeb] bg-white shadow-[-2px_0_12px_rgba(0,0,0,0.03)]">
-      <div className="flex h-14 items-center justify-between border-b border-[#ebebeb] p-4">
-        <div className="flex min-w-0 items-center gap-2">
-          <span
-            className={cn(
-              "h-2.5 w-2.5 shrink-0 rounded-full shadow-[0_0_10px_rgba(52,211,153,0.6)]",
-              chatStatus === "streaming" ? "animate-pulse bg-emerald-400" : "bg-[#888888]/40"
-            )}
-          />
-          <div className="min-w-0">
-            <h2 className="truncate text-sm font-semibold text-[#171717]">{activeSession?.title || "新的对话"}</h2>
-            <p className="truncate text-xs text-[#888888]">
-              {chatStatus === "streaming" ? "AI 回复中" : "当前会话 · 已读取作品上下文"}
-            </p>
-          </div>
-        </div>
-        <div className="flex gap-1">
-          <DropdownMenu open={showHistory} onOpenChange={onHistoryOpenChange}>
-            <DropdownMenuTrigger asChild>
-              <button className="rounded-full p-1.5 text-[#888888] transition-colors hover:bg-[#f5f5f5] hover:text-[#171717]" title="历史会话" aria-label="历史会话">
-                <Clock3 size={16} />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-80 p-2">
-              <div className="space-y-2">
-                <div className="px-1 py-1 text-xs font-medium text-[#888888]">最近会话</div>
-                <div className="max-h-64 space-y-2 overflow-y-auto">
-                  {sessions.length ? (
-                    sessions.map((session) => (
-                      <button
-                        key={session.id}
-                        className={cn(
-                          "w-full rounded-md border px-3 py-2 text-left text-xs transition-colors",
-                          session.id === activeSessionId
-                            ? "border-[#171717] bg-[#f5f5f5] text-[#171717]"
-                            : "border-transparent bg-transparent text-[#888888] hover:bg-[#f5f5f5] hover:text-[#171717]"
-                        )}
-                        onClick={() => onSwitchSession(session.id)}
-                      >
-                        <span className="block truncate font-medium">{session.title}</span>
-                        <span className="mt-1 block truncate text-[#888888]">{session.lastMessagePreview || "暂无消息"}</span>
-                      </button>
-                    ))
-                  ) : (
-                    <p className="px-2 py-3 text-xs text-[#888888]">暂无历史会话</p>
-                  )}
-                </div>
-              </div>
-            </DropdownMenuContent>
-          </DropdownMenu>
+      <div className="flex h-14 items-center justify-between border-b border-[#ebebeb] pl-4 pr-3">
+        <div className="flex items-center gap-1">
           <button
-            className="rounded-full p-1.5 text-[#888888] transition-colors hover:bg-[#f5f5f5] hover:text-[#171717]"
-            onClick={onCreateSession}
-            title="新建会话"
-            aria-label="新建会话"
+            onClick={() => onTabChange("chat")}
+            className={cn(
+              "relative px-3 py-1.5 text-sm font-medium transition-colors",
+              activeTab === "chat" ? "text-[#171717]" : "text-[#888888] hover:text-[#171717]"
+            )}
           >
-            <MessageSquare size={16} />
+            智能助手
+            {activeTab === "chat" ? <span className="absolute bottom-0 left-1/2 h-0.5 w-5 -translate-x-1/2 rounded-full bg-[#171717]" /> : null}
+          </button>
+          <button
+            onClick={() => onTabChange("suggestions")}
+            className={cn(
+              "relative px-3 py-1.5 text-sm font-medium transition-colors",
+              activeTab === "suggestions" ? "text-[#171717]" : "text-[#888888] hover:text-[#171717]"
+            )}
+          >
+            AI检查建议
+            {activeTab === "suggestions" ? <span className="absolute bottom-0 left-1/2 h-0.5 w-5 -translate-x-1/2 rounded-full bg-[#171717]" /> : null}
           </button>
         </div>
+        {activeTab === "chat" ? (
+          <div className="flex gap-1">
+            <DropdownMenu open={showHistory} onOpenChange={onHistoryOpenChange}>
+              <DropdownMenuTrigger asChild>
+                <button className="rounded-full p-1.5 text-[#888888] transition-colors hover:bg-[#f5f5f5] hover:text-[#171717]" title="历史会话" aria-label="历史会话">
+                  <Clock3 size={16} />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-80 p-2">
+                <div className="space-y-2">
+                  <div className="px-1 py-1 text-xs font-medium text-[#888888]">最近会话</div>
+                  <div className="max-h-64 space-y-2 overflow-y-auto">
+                    {sessions.length ? (
+                      sessions.map((session) => (
+                        <button
+                          key={session.id}
+                          className={cn(
+                            "w-full rounded-md border px-3 py-2 text-left text-xs transition-colors",
+                            session.id === activeSessionId
+                              ? "border-[#171717] bg-[#f5f5f5] text-[#171717]"
+                              : "border-transparent bg-transparent text-[#888888] hover:bg-[#f5f5f5] hover:text-[#171717]"
+                          )}
+                          onClick={() => onSwitchSession(session.id)}
+                        >
+                          <span className="block truncate font-medium">{session.title}</span>
+                          <span className="mt-1 block truncate text-[#888888]">{session.lastMessagePreview || "暂无消息"}</span>
+                        </button>
+                      ))
+                    ) : (
+                      <p className="px-2 py-3 text-xs text-[#888888]">暂无历史会话</p>
+                    )}
+                  </div>
+                </div>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <button
+              className="rounded-full p-1.5 text-[#888888] transition-colors hover:bg-[#f5f5f5] hover:text-[#171717]"
+              onClick={onCreateSession}
+              title="新建会话"
+              aria-label="新建会话"
+            >
+              <MessageSquare size={16} />
+            </button>
+          </div>
+        ) : null}
       </div>
 
-      {!overlay ? (
+      {activeTab === "chat" ? (
         <div className="flex flex-1 flex-col overflow-hidden">
           <div className="chat-scroll flex-1 space-y-5 overflow-y-auto p-4">
             <div className="flex justify-center">
@@ -437,58 +451,145 @@ export function WorkspaceChatPanel({
           </div>
         </div>
       ) : (
-        <div className="absolute inset-0 z-30 flex flex-col bg-white/95 backdrop-blur">
-          <div className="flex h-14 items-center justify-between border-b border-[#ebebeb] bg-white p-4">
-            <div className="flex items-center gap-2">
-              <Wand2 size={16} className="text-[#171717]" />
-              <span className="text-sm font-semibold text-[#171717]">AI 写作建议</span>
-            </div>
-            <button className="rounded-full p-1.5 text-[#888888] transition-colors hover:bg-[#f5f5f5] hover:text-[#171717]" onClick={onCloseOverlay} aria-label="关闭写作建议">
-              <X size={18} />
-            </button>
-          </div>
-          <div className="flex-1 space-y-3 overflow-y-auto p-4">
-            {suggestions.map((suggestion, index) => {
-              const selected = index === activeSuggestionIndex;
-              return (
-                <div
-                  key={`${suggestion.quote}-${index}`}
-                  className={cn("flex flex-col overflow-hidden rounded-xl border bg-white shadow-[0px_1px_1px_rgba(0,0,0,0.02),0px_2px_2px_rgba(0,0,0,0.04)]", selected ? "border-[#171717]" : "border-[#ebebeb]")}
-                >
-                  <button className="border-b border-[#ebebeb] bg-[#fafafa] p-4 text-left" onClick={() => onSelectSuggestion(index)}>
-                    <span className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-[#888888]">原文引用</span>
-                    <p className="line-clamp-3 text-sm leading-5 text-[#888888]">{suggestion.quote}</p>
-                  </button>
-                  <div className="border-b border-[#ebebeb] p-4">
-                    <div className="flex items-start text-sm leading-5">
-                      <AlertCircle size={16} className="mr-2 mt-0.5 shrink-0 text-[#171717]" />
-                      <span className="text-[#171717]">{suggestion.issue}</span>
-                    </div>
-                  </div>
-                  <div className="bg-white p-4">
-                    <span className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-[#888888]">推荐修改方案</span>
-                    <p className="mb-5 text-sm leading-5 text-[#171717]">{suggestion.options[0]}</p>
-                    <div className="flex gap-3">
-                      <button
-                        className="flex-1 rounded-full bg-[#171717] py-2 text-sm font-medium text-white transition-colors hover:bg-[#171717]/90"
-                        onClick={() => onAcceptSuggestion(index)}
-                      >
-                        采纳替换
-                      </button>
-                      <button
-                        className="flex-1 rounded-full border border-[#ebebeb] bg-white py-2 text-sm font-medium text-[#171717] transition-colors hover:bg-[#fafafa]"
-                        onClick={() => onSendSuggestionToChat(index)}
-                      >
-                        发送至对话
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        <AnalysisSuggestionsTab
+          suggestions={suggestions}
+          persistedAnalysis={persistedAnalysis}
+          activeSuggestionIndex={activeSuggestionIndex}
+          onSelectSuggestion={onSelectSuggestion}
+          onAcceptSuggestion={onAcceptSuggestion}
+          onSendSuggestionToChat={onSendSuggestionToChat}
+        />
       )}
     </aside>
+  );
+}
+
+function AnalysisSuggestionsTab({
+  suggestions,
+  persistedAnalysis,
+  activeSuggestionIndex,
+  onSelectSuggestion,
+  onAcceptSuggestion,
+  onSendSuggestionToChat,
+}: {
+  suggestions: ApiSuggestion[];
+  persistedAnalysis: PersistedAnalysis | null;
+  activeSuggestionIndex: number | null;
+  onSelectSuggestion: (index: number) => void;
+  onAcceptSuggestion: (index: number) => void;
+  onSendSuggestionToChat: (index: number) => void;
+}) {
+  const [collapsedRounds, setCollapsedRounds] = useState<Record<number, boolean>>({});
+
+  if (!persistedAnalysis || !persistedAnalysis.rounds.length) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center px-6 py-16 text-center">
+        <ClipboardCheck size={48} className="text-[#d4d4d4]" />
+        <h3 className="mt-4 text-sm font-semibold text-[#888888]">暂无检查结果</h3>
+        <p className="mt-1 max-w-xs text-xs text-[#888888]">
+          点击编辑器工具栏的「AI 分析本章」开始检查
+        </p>
+      </div>
+    );
+  }
+
+  const analyzedAt = (() => {
+    try {
+      return new Intl.DateTimeFormat("zh-CN", {
+        timeZone: "Asia/Shanghai",
+        year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit",
+      }).format(new Date(persistedAnalysis.analyzedAt));
+    } catch {
+      return "";
+    }
+  })();
+
+  const roundOffsets: number[] = [];
+  let offset = 0;
+  for (const round of persistedAnalysis.rounds) {
+    roundOffsets.push(offset);
+    offset += round.suggestions.length;
+  }
+
+  const toggleRound = (round: number) => {
+    setCollapsedRounds((prev) => ({ ...prev, [round]: !prev[round] }));
+  };
+
+  return (
+    <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="shrink-0 border-b border-[#ebebeb] px-4 py-3">
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-[#888888]">
+            {analyzedAt ? `分析时间：${analyzedAt}` : ""}
+          </span>
+          <span className="rounded-full bg-[#f5f5f5] px-2 py-0.5 text-xs font-medium text-[#171717]">
+            共 {persistedAnalysis.totalSuggestions} 处
+          </span>
+        </div>
+      </div>
+      <div className="flex-1 space-y-3 overflow-y-auto p-4">
+        {persistedAnalysis.rounds.map((round, roundIdx) => {
+          const isCollapsed = collapsedRounds[round.round] ?? false;
+          const flatOffset = roundOffsets[roundIdx];
+          return (
+            <div key={round.round}>
+              <button
+                className="mb-2 flex w-full items-center gap-1.5 text-left"
+                onClick={() => toggleRound(round.round)}
+              >
+                {isCollapsed ? <ChevronRight size={14} className="text-[#888888]" /> : <ChevronDown size={14} className="text-[#888888]" />}
+                <span className="text-sm font-semibold text-[#171717]">{round.title}</span>
+                {round.summary ? <span className="text-xs text-[#888888]">— {round.summary}</span> : null}
+                <span className="ml-auto rounded-full bg-[#f5f5f5] px-1.5 py-0.5 text-[11px] text-[#888888]">{round.suggestions.length}</span>
+              </button>
+              {!isCollapsed ? (
+                <div className="space-y-3">
+                  {round.suggestions.map((suggestion, localIdx) => {
+                    const flatIdx = flatOffset + localIdx;
+                    const selected = flatIdx === activeSuggestionIndex;
+                    return (
+                      <div
+                        key={`${suggestion.quote}-${flatIdx}`}
+                        className={cn("flex flex-col overflow-hidden rounded-xl border bg-white shadow-[0px_1px_1px_rgba(0,0,0,0.02),0px_2px_2px_rgba(0,0,0,0.04)]", selected ? "border-[#171717]" : "border-[#ebebeb]")}
+                      >
+                        <button className="border-b border-[#ebebeb] bg-[#fafafa] p-4 text-left" onClick={() => onSelectSuggestion(flatIdx)}>
+                          <span className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-[#888888]">原文引用</span>
+                          <p className="line-clamp-3 text-sm leading-5 text-[#888888]">{suggestion.quote}</p>
+                        </button>
+                        <div className="border-b border-[#ebebeb] p-4">
+                          <div className="flex items-start text-sm leading-5">
+                            <AlertCircle size={16} className="mr-2 mt-0.5 shrink-0 text-[#171717]" />
+                            <span className="text-[#171717]">{suggestion.issue}</span>
+                          </div>
+                        </div>
+                        <div className="bg-white p-4">
+                          <span className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-[#888888]">推荐修改方案</span>
+                          <p className="mb-5 text-sm leading-5 text-[#171717]">{suggestion.options[0]}</p>
+                          <div className="flex gap-3">
+                            <button
+                              className="flex-1 rounded-full bg-[#171717] py-2 text-sm font-medium text-white transition-colors hover:bg-[#171717]/90"
+                              onClick={() => onAcceptSuggestion(flatIdx)}
+                            >
+                              采纳替换
+                            </button>
+                            <button
+                              className="flex-1 rounded-full border border-[#ebebeb] bg-white py-2 text-sm font-medium text-[#171717] transition-colors hover:bg-[#fafafa]"
+                              onClick={() => onSendSuggestionToChat(flatIdx)}
+                            >
+                              发送至对话
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }

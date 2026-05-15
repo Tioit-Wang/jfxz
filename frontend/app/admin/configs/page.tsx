@@ -1,11 +1,12 @@
 "use client";
 
-import { AlertCircle, Eye, EyeOff, Save, Settings2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { AlertCircle, Edit, Eye, EyeOff, Save, Settings2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { type AdminConfig, type AdminConfigValue, type AiModelOption } from "@/api";
-import { AdminHeading, AdminPage, AdminPagination } from "../_components";
+import { AdminHeading, AdminPage } from "../_components";
 import { adminClient } from "../admin-utils";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -23,7 +24,9 @@ const labelMap: Record<string, string> = {
   enabled: "启用支付", app_id: "应用 ID", app_private_key: "应用私钥",
   alipay_public_key: "支付宝公钥", notify_url: "支付回调地址",
   seller_id: "商户 ID", timeout_express: "订单超时时间",
-  extra_options: "扩展参数", model_id: "编辑器检查模型"
+  extra_options: "扩展参数",
+  round_1_model_id: "角色检查模型", round_2_model_id: "逻辑检查模型", round_3_model_id: "风格检查模型",
+  round_1_thinking: "角色检查思考", round_2_thinking: "逻辑检查思考", round_3_thinking: "风格检查思考",
 };
 
 function configLabel(config: AdminConfig) { return labelMap[config.config_key] ?? config.config_key.replaceAll("_", " "); }
@@ -58,6 +61,350 @@ function MonoBadge({ children, className }: { children: React.ReactNode; classNa
   );
 }
 
+const ALL_PLACEHOLDERS = [
+  { key: "chapter_content", label: "当前章节正文" },
+  { key: "chapter_title", label: "当前章节标题" },
+  { key: "characters", label: "全部角色设定" },
+  { key: "surrounding_chapters", label: "前后章节内容" },
+  { key: "previous_chapters", label: "前N章内容" },
+];
+
+const ROUND_NAMES: Record<number, string> = { 1: "角色检查", 2: "逻辑检查", 3: "风格检查" };
+
+const ROUND_REQUIRED: Record<number, string[]> = {
+  1: ["chapter_content", "characters"],
+  2: ["chapter_content", "surrounding_chapters"],
+  3: ["chapter_content", "previous_chapters"],
+};
+
+const ROUND_PLACEHOLDERS: Record<number, string[]> = {
+  1: ["chapter_content", "chapter_title", "characters"],
+  2: ["chapter_content", "chapter_title", "surrounding_chapters"],
+  3: ["chapter_content", "chapter_title", "previous_chapters"],
+};
+
+const THINKING_LEVELS_ADMIN = ["none", "low", "medium", "high", "xhigh"] as const;
+type ThinkingLevelAdmin = (typeof THINKING_LEVELS_ADMIN)[number];
+
+const THINKING_LABELS_ADMIN: Record<ThinkingLevelAdmin, string> = {
+  none: "关闭", low: "低", medium: "中", high: "高", xhigh: "极限",
+};
+
+const THINKING_BAR_COLORS_ADMIN: Record<ThinkingLevelAdmin, string> = {
+  none: "bg-muted",
+  low: "bg-emerald-400",
+  medium: "bg-sky-400",
+  high: "bg-amber-400",
+  xhigh: "bg-rose-500",
+};
+
+function ThinkingBar({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const currentIdx = THINKING_LEVELS_ADMIN.indexOf(value as ThinkingLevelAdmin);
+  return (
+    <div className="flex items-center gap-3 flex-1">
+      <div className="flex gap-1 flex-1">
+        {THINKING_LEVELS_ADMIN.map((level, idx) => {
+          const isFilled = value !== "none" && idx <= currentIdx;
+          return (
+            <button
+              key={level}
+              className={cn(
+                "h-2 flex-1 rounded-full transition-all",
+                isFilled ? THINKING_BAR_COLORS_ADMIN[value as ThinkingLevelAdmin] : "bg-[#ebebeb]"
+              )}
+              onClick={() => onChange(level)}
+            />
+          );
+        })}
+      </div>
+      <span className="text-xs font-medium w-10 text-right tabular-nums text-muted-foreground">
+        {THINKING_LABELS_ADMIN[value as ThinkingLevelAdmin] ?? value}
+      </span>
+    </div>
+  );
+}
+
+function PromptEditorModal({
+  open, onOpenChange, round, promptText, getCheckDraft, setCheckDraft,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  round: number;
+  promptText: string;
+  getCheckDraft: (key: string) => DraftValue;
+  setCheckDraft: (key: string, value: DraftValue) => void;
+}) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const insertPlaceholder = useCallback((key: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const text = `{{${key}}}`;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const current = String(getCheckDraft(`round_${round}_prompt`) || "");
+    const nextValue = current.slice(0, start) + text + current.slice(end);
+    setCheckDraft(`round_${round}_prompt`, nextValue);
+    requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start + text.length, start + text.length);
+    });
+  }, [round, getCheckDraft, setCheckDraft]);
+
+  const validationError = (() => {
+    const required = ROUND_REQUIRED[round] || [];
+    const missing = required.filter((key) => !promptText.includes(`{{${key}}}`));
+    if (missing.length) {
+      return `${ROUND_NAMES[round]}缺少占位符: ${missing.map((k) => `{{${k}}}`).join("、")}`;
+    }
+    return "";
+  })();
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-3xl" showCloseButton>
+        <DialogHeader>
+          <DialogTitle>编辑提示词 — {ROUND_NAMES[round]}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          {/* 顶部工具栏 — 占位符插入按钮 */}
+          <div className="flex flex-wrap items-center gap-1.5 pb-3 border-b border-border">
+            <span className="text-xs text-muted-foreground shrink-0 mr-1">插入占位符：</span>
+            {ALL_PLACEHOLDERS.filter((ph) => ROUND_PLACEHOLDERS[round]?.includes(ph.key)).map((ph) => {
+              const isUsed = promptText.includes(`{{${ph.key}}}`);
+              return (
+                <button
+                  key={ph.key}
+                  disabled={isUsed}
+                  className={cn(
+                    "rounded-full px-2.5 py-1 text-xs border transition-colors",
+                    isUsed
+                      ? "border-[#ebebeb] bg-[#f5f5f5] text-[#d4d4d4] cursor-default"
+                      : "border-amber-200 bg-[#fef3c7] text-[#92400e] hover:bg-[#fde68a] cursor-pointer"
+                  )}
+                  onClick={() => insertPlaceholder(ph.key)}
+                  title={ph.label}
+                >
+                  {`{{${ph.key}}}`}
+                </button>
+              );
+            })}
+          </div>
+          {/* Markdown 编辑器 */}
+          <Textarea
+            ref={(el) => { textareaRef.current = el; }}
+            className="min-h-[320px] font-mono text-sm leading-relaxed"
+            value={promptText}
+            onChange={(e) => setCheckDraft(`round_${round}_prompt`, e.target.value)}
+          />
+          {validationError ? (
+            <span className="text-xs text-destructive flex items-center gap-1">
+              <AlertCircle size={12} />
+              {validationError}
+            </span>
+          ) : null}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} className="rounded-full">
+            完成
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AiCheckPanel({
+  configs, checkDrafts, getCheckDraft, setCheckDraft, models, checkSaving, onSave,
+}: {
+  configs: AdminConfig[];
+  checkDrafts: Record<string, DraftValue>;
+  getCheckDraft: (configKey: string) => DraftValue;
+  setCheckDraft: (configKey: string, value: DraftValue) => void;
+  models: AiModelOption[];
+  checkSaving: boolean;
+  onSave: () => void;
+}) {
+  const [activeRound, setActiveRound] = useState(1);
+  const [promptEditorOpen, setPromptEditorOpen] = useState(false);
+
+  const roundModelId = (rnd: number) => String(getCheckDraft(`round_${rnd}_model_id`) || "__none");
+  const roundModelMissing = (rnd: number) => {
+    const mid = roundModelId(rnd);
+    return mid !== "__none" && !models.some((m) => m.id === mid);
+  };
+  const roundThinking = (rnd: number) => String(getCheckDraft(`round_${rnd}_thinking`) || "xhigh");
+  const roundPrompt = (rnd: number) => String(getCheckDraft(`round_${rnd}_prompt`) || "");
+
+  const hasValidationError = (rnd: number) => {
+    if (getCheckDraft(`round_${rnd}_enabled`) === false) return false;
+    const prompt = String(getCheckDraft(`round_${rnd}_prompt`) || "");
+    const required = ROUND_REQUIRED[rnd] || [];
+    return required.some((key) => !prompt.includes(`{{${key}}}`));
+  };
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card shadow-card">
+      {/* Sub-tabs for 3 rounds */}
+      <Tabs value={String(activeRound)} onValueChange={(v) => setActiveRound(Number(v))} className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div className="shrink-0 px-5 pt-5">
+          <TabsList className="flex w-max gap-1.5 bg-transparent p-0 h-auto border-0 shadow-none justify-start">
+            {[1, 2, 3].map((rnd) => (
+              <TabsTrigger
+                key={rnd}
+                value={String(rnd)}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm leading-5 tracking-[-0.02em] transition-all flex-none h-auto w-auto",
+                  "data-[state=active]:bg-foreground data-[state=active]:text-background data-[state=active]:shadow-sm",
+                  "data-[state=inactive]:bg-muted data-[state=inactive]:text-muted-foreground data-[state=inactive]:hover:text-foreground"
+                )}
+              >
+                {ROUND_NAMES[rnd]}
+                {hasValidationError(rnd) && (
+                  <AlertCircle size={12} className="text-destructive" />
+                )}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
+
+        {/* Scrollable content */}
+        <div className="flex-1 overflow-y-auto px-5 pb-5">
+          {[1, 2, 3].map((rnd) => {
+            const enabled = getCheckDraft(`round_${rnd}_enabled`) !== false;
+            const promptText = roundPrompt(rnd);
+            return (
+              <TabsContent key={rnd} value={String(rnd)} className="mt-6 space-y-6">
+                {/* 1. 是否开启 */}
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <span className="text-sm font-medium">是否开启</span>
+                    <p className="text-xs text-muted-foreground">启用 {ROUND_NAMES[rnd]} 功能</p>
+                  </div>
+                  <Switch
+                    checked={enabled}
+                    onCheckedChange={(checked) => setCheckDraft(`round_${rnd}_enabled`, checked)}
+                  />
+                </div>
+
+                <div className="border-t border-border" />
+
+                {/* 2. 模型配置（模型选择 + 思考强度 合并） */}
+                <div className="space-y-3">
+                  <div className="space-y-0.5">
+                    <span className="text-sm font-medium">模型配置</span>
+                    <p className="text-xs text-muted-foreground">选择执行 {ROUND_NAMES[rnd]} 的 AI 模型并调节推理深度</p>
+                  </div>
+                  <div className="rounded-lg border border-border bg-muted/20 p-4 space-y-4">
+                    <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-center">
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-medium text-muted-foreground">模型</label>
+                        <Select
+                          value={roundModelId(rnd)}
+                          onValueChange={(v) => setCheckDraft(`round_${rnd}_model_id`, v === "__none" ? "" : v)}
+                        >
+                          <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                          <SelectContent><SelectGroup>
+                            <SelectItem value="__none">未选择</SelectItem>
+                            {roundModelMissing(rnd) && (
+                              <SelectItem value={roundModelId(rnd)}>当前不可用模型</SelectItem>
+                            )}
+                            {models.map((m) => (<SelectItem key={m.id} value={m.id}>{m.display_name}</SelectItem>))}
+                          </SelectGroup></SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1.5 sm:min-w-[200px]">
+                        <label className="text-xs font-medium text-muted-foreground">思考强度</label>
+                        <ThinkingBar
+                          value={roundThinking(rnd)}
+                          onChange={(v) => setCheckDraft(`round_${rnd}_thinking`, v)}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {rnd >= 2 && (
+                  <>
+                    <div className="border-t border-border" />
+                    <div className="space-y-2">
+                      <div className="space-y-0.5">
+                        <span className="text-sm font-medium">参考前 N 章</span>
+                        <p className="text-xs text-muted-foreground">检查时参考当前章节之前的章节数量</p>
+                      </div>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={100}
+                        value={String(getCheckDraft(`round_${rnd}_chapter_count`) ?? 6)}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value, 10);
+                          if (!isNaN(v) && v >= 1) setCheckDraft(`round_${rnd}_chapter_count`, v);
+                        }}
+                        className="w-24"
+                      />
+                    </div>
+                  </>
+                )}
+
+                <div className="border-t border-border" />
+
+                {/* 3. 提示词预览 */}
+                <div className="space-y-2">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="space-y-0.5">
+                      <span className="text-sm font-medium">提示词预览</span>
+                      <p className="text-xs text-muted-foreground">{ROUND_NAMES[rnd]} 使用的提示词模板</p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPromptEditorOpen(true)}
+                      className="rounded-full shrink-0"
+                    >
+                      <Edit className="size-3.5 mr-1" />
+                      编辑
+                    </Button>
+                  </div>
+                  <div className="rounded-lg border border-border bg-muted/30 p-3">
+                    <pre className="max-h-[160px] overflow-y-auto font-mono text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
+                      {promptText ? promptText : <span className="italic text-muted-foreground/50">暂无提示词</span>}
+                    </pre>
+                  </div>
+                  {hasValidationError(rnd) && enabled && (
+                    <span className="text-xs text-destructive flex items-center gap-1">
+                      <AlertCircle size={12} />
+                      缺少必要占位符
+                    </span>
+                  )}
+                </div>
+              </TabsContent>
+            );
+          })}
+        </div>
+      </Tabs>
+
+      {/* 底部保存栏 */}
+      <div className="border-t border-border px-5 py-3 flex items-center justify-between shrink-0">
+        <span className="text-xs text-muted-foreground">配置修改后需保存方可生效</span>
+        <Button onClick={onSave} disabled={checkSaving} className="rounded-full">
+          <Save className="size-4 mr-1" />
+          {checkSaving ? "保存中..." : "保存配置"}
+        </Button>
+      </div>
+
+      <PromptEditorModal
+        open={promptEditorOpen}
+        onOpenChange={setPromptEditorOpen}
+        round={activeRound}
+        promptText={roundPrompt(activeRound)}
+        getCheckDraft={getCheckDraft}
+        setCheckDraft={setCheckDraft}
+      />
+    </div>
+  );
+}
+
 export default function AdminConfigsPage() {
   const client = useMemo(() => adminClient(), []);
   const [configs, setConfigs] = useState<AdminConfig[]>([]);
@@ -73,19 +420,18 @@ export default function AdminConfigsPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [page, setPage] = useState(1); const [total, setTotal] = useState(0);
-  const pageSize = 10;
+
+  const [checkDrafts, setCheckDrafts] = useState<Record<string, DraftValue>>({});
+  const [checkSaving, setCheckSaving] = useState(false);
 
   const visibleDirtyIds = configs.filter((item) => dirtyIds.has(item.id) && !jsonErrors[item.id]).map((item) => item.id);
   const hasDirty = dirtyIds.size > 0;
 
-  async function load(targetGroup: string, nextPage = 1) {
-    setLoading(true); setLoadError(false);
+  async function load(targetGroup?: string, silent?: boolean) {
+    if (!silent) setLoading(true);
+    setLoadError(false);
     try {
-      const [allData, pageData] = await Promise.all([
-        client.listAdminConfigs({ pageSize: 100 }),
-        client.listAdminConfigs({ group: targetGroup, page: nextPage, pageSize })
-      ]);
+      const allData = await client.listAdminConfigs({ pageSize: 100 });
 
       const nextGroups = Array.from(new Set(allData.items.map((item) => item.config_group))).sort();
       setGroups(nextGroups);
@@ -96,21 +442,25 @@ export default function AdminConfigsPage() {
       }
       setGroupCounts(counts);
 
-      if (!activeGroup) {
-        const firstGroup = nextGroups[0] || "";
-        setActiveGroup(firstGroup);
-        if (!firstGroup) { setConfigs([]); setTotal(0); setPage(1); setLoading(false); return; }
-      }
+      const group = targetGroup || activeGroup || nextGroups[0] || "";
+      if (!activeGroup) setActiveGroup(group);
 
-      setConfigs(pageData.items);
-      setTotal(pageData.total); setPage(pageData.page);
-      setDrafts((current) => { const next = { ...current }; for (const item of pageData.items) { if (!dirtyIds.has(item.id)) next[item.id] = configValue(item); } return next; });
+      const filtered = allData.items.filter((item) => item.config_group === group);
+      setConfigs(filtered);
+      setDrafts((current) => {
+        const next = { ...current };
+        for (const item of filtered) {
+          if (!dirtyIds.has(item.id)) next[item.id] = configValue(item);
+        }
+        return next;
+      });
+
       if (!models.length) { try { setModels(await client.listAiModels()); } catch {} }
     } catch { setLoadError(true); toast.error("配置加载失败"); }
-    finally { setLoading(false); }
+    finally { if (!silent) setLoading(false); }
   }
 
-  useEffect(() => { void load("", 1); }, []);
+  useEffect(() => { void load(); }, []);
 
   function updateDraft(config: AdminConfig, value: DraftValue) {
     if (config.value_type === "json") {
@@ -128,7 +478,7 @@ export default function AdminConfigsPage() {
     try {
       for (const id of ids) { const config = configs.find((item) => item.id === id); if (!config) continue; await client.updateAdminConfig(id, payloadFor(config, drafts[id] ?? configValue(config))); }
       setDirtyIds((c) => { const next = new Set(c); ids.forEach((id) => next.delete(id)); return next; });
-      toast.success("配置已保存"); await load(activeGroup, page); return true;
+      toast.success("配置已保存"); await load(); return true;
     } catch { toast.error("配置保存失败"); return false; }
     finally { setSaving(false); }
   }
@@ -136,41 +486,71 @@ export default function AdminConfigsPage() {
   function requestGroupChange(group: string) {
     if (group === activeGroup) return;
     if (hasDirty) { setPendingGroup(group); return; }
+    applyGroup(group);
+  }
+
+  function applyGroup(group: string) {
     setActiveGroup(group);
-    void load(group, 1);
+    void load(group);
   }
 
   async function saveAndSwitch() {
     if (!pendingGroup) return;
     const saved = await saveDirty(Array.from(dirtyIds));
     if (!saved) return;
-    setActiveGroup(pendingGroup); setPendingGroup(null);
-    await load(pendingGroup, 1);
+    const group = pendingGroup;
+    setPendingGroup(null);
+    applyGroup(group);
   }
 
   async function discardAndSwitch() {
     if (!pendingGroup) return;
     setDirtyIds(new Set()); setJsonErrors({});
-    setActiveGroup(pendingGroup); setPendingGroup(null);
-    await load(pendingGroup, 1);
+    const group = pendingGroup;
+    setPendingGroup(null);
+    applyGroup(group);
+  }
+
+  function getCheckDraft(configKey: string): DraftValue {
+    for (const config of configs) {
+      if (config.config_group === "ai.editor_check" && config.config_key === configKey) {
+        return checkDrafts[config.id] ?? configValue(config);
+      }
+    }
+    return "";
+  }
+
+  function setCheckDraft(configKey: string, value: DraftValue) {
+    for (const config of configs) {
+      if (config.config_group === "ai.editor_check" && config.config_key === configKey) {
+        setCheckDrafts((prev) => ({ ...prev, [config.id]: value }));
+        return;
+      }
+    }
+  }
+
+  async function saveCheckConfig() {
+    setCheckSaving(true);
+    try {
+      for (const config of configs) {
+        if (config.config_group !== "ai.editor_check") continue;
+        const draft = checkDrafts[config.id];
+        if (draft === undefined) continue;
+        const current = configValue(config);
+        if (String(draft) === String(current)) continue;
+        await client.updateAdminConfig(config.id, payloadFor(config, draft));
+      }
+      toast.success("AI 检查配置已保存");
+      await load(activeGroup, true);
+    } catch {
+      toast.error("配置保存失败");
+    } finally {
+      setCheckSaving(false);
+    }
   }
 
   function renderControl(config: AdminConfig) {
     const value = drafts[config.id] ?? configValue(config);
-    if (config.config_group === "ai.editor_check" && config.config_key === "model_id") {
-      const selected = String(value || "__none");
-      const selectedMissing = selected !== "__none" && !models.some((m) => m.id === selected);
-      return (
-        <Select value={selected} onValueChange={(v) => updateDraft(config, v === "__none" ? "" : v)}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
-          <SelectContent><SelectGroup>
-            <SelectItem value="__none">未选择</SelectItem>
-            {selectedMissing && <SelectItem value={selected}>当前不可用模型</SelectItem>}
-            {models.map((m) => (<SelectItem key={m.id} value={m.id}>{m.display_name}</SelectItem>))}
-          </SelectGroup></SelectContent>
-        </Select>
-      );
-    }
     if (config.value_type === "boolean") return (
       <div className="flex items-center gap-3">
         <Switch checked={Boolean(value)} onCheckedChange={(checked) => updateDraft(config, checked)} />
@@ -228,7 +608,7 @@ export default function AdminConfigsPage() {
               variant="outline"
               size="sm"
               className="mx-auto mt-4 rounded-full"
-              onClick={() => void load(activeGroup, page)}
+              onClick={() => void load()}
             >
               重新加载
             </Button>
@@ -248,7 +628,7 @@ export default function AdminConfigsPage() {
         </div>
       ) : (
         <Tabs value={activeGroup} onValueChange={requestGroupChange} className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div className="overflow-x-auto shrink-0 -mx-1 px-1">
+          <div className="overflow-x-auto overflow-y-hidden shrink-0 -mx-1 px-1">
             <TabsList className="flex w-max min-w-full flex-wrap gap-1.5 bg-transparent p-0 h-auto border-0 shadow-none">
               {groups.map((g) => (
                 <TabsTrigger
@@ -271,8 +651,18 @@ export default function AdminConfigsPage() {
             </TabsList>
           </div>
           {groups.map((group) => (
-            <TabsContent key={group} value={group} className="mt-4 flex-1 overflow-hidden data-[state=inactive]:hidden">
-              {activeGroup === group && (
+            <TabsContent key={group} value={group} className="mt-4 flex flex-1 flex-col overflow-hidden data-[state=inactive]:hidden">
+              {activeGroup === group && group === "ai.editor_check" ? (
+                <AiCheckPanel
+                  configs={configs}
+                  checkDrafts={checkDrafts}
+                  getCheckDraft={getCheckDraft}
+                  setCheckDraft={setCheckDraft}
+                  models={models}
+                  checkSaving={checkSaving}
+                  onSave={() => void saveCheckConfig()}
+                />
+              ) : activeGroup === group && (
                 !configs.length ? (
                   <div className="flex h-full items-center justify-center">
                     <Empty>
@@ -286,50 +676,46 @@ export default function AdminConfigsPage() {
                     </Empty>
                   </div>
                 ) : (
-                  <div className="flex h-full flex-col overflow-hidden">
-                    {/* Scrollable config list — same pattern as orders/users pages */}
-                    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card shadow-card">
-                      <div className="overflow-auto">
-                        {configs.map((config, index) => (
-                          <div
-                            key={config.id}
-                            className={cn(
-                              "px-5 py-4 grid gap-x-6 gap-y-2 lg:grid-cols-[200px_1fr] lg:items-start transition-colors hover:bg-muted/20",
-                              index < configs.length - 1 && "border-b border-border"
-                            )}
-                          >
-                            <div className="flex min-w-0 flex-col gap-1.5">
-                              <div className="flex flex-wrap items-center gap-1.5">
-                                <span className="text-sm font-medium">{configLabel(config)}</span>
-                                <MonoBadge>{config.value_type}</MonoBadge>
-                                {config.is_required && <MonoBadge>必填</MonoBadge>}
-                                {dirtyIds.has(config.id) && (
-                                  <MonoBadge className="text-amber-700 bg-amber-50 dark:text-amber-400 dark:bg-amber-950">
-                                    未保存
-                                  </MonoBadge>
-                                )}
-                              </div>
-                              <span className="caption-mono">{config.config_group}.{config.config_key}</span>
-                              {config.description && (
-                                <span className="text-xs text-muted-foreground/70 leading-relaxed">{config.description}</span>
+                  <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card shadow-card">
+                    <div className="overflow-auto flex-1">
+                      {configs.map((config, index) => (
+                        <div
+                          key={config.id}
+                          className={cn(
+                            "px-5 py-4 grid gap-x-6 gap-y-2 lg:grid-cols-[200px_1fr] lg:items-start transition-colors hover:bg-muted/20",
+                            index < configs.length - 1 && "border-b border-border"
+                          )}
+                        >
+                          <div className="flex min-w-0 flex-col gap-1.5">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-sm font-medium">{configLabel(config)}</span>
+                              <MonoBadge>{config.value_type}</MonoBadge>
+                              {config.is_required && <MonoBadge>必填</MonoBadge>}
+                              {dirtyIds.has(config.id) && (
+                                <MonoBadge className="text-amber-700 bg-amber-50 dark:text-amber-400 dark:bg-amber-950">
+                                  未保存
+                                </MonoBadge>
                               )}
                             </div>
-                            <div className="min-w-0">
-                              {renderControl(config)}
-                            </div>
+                            <span className="caption-mono">{config.config_group}.{config.config_key}</span>
+                            {config.description && (
+                              <span className="text-xs text-muted-foreground/70 leading-relaxed">{config.description}</span>
+                            )}
                           </div>
-                        ))}
-                      </div>
+                          <div className="min-w-0">
+                            {renderControl(config)}
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                    {/* Pagination + save — outside the scroll container */}
-                    <div className="flex items-center justify-between gap-4 pt-4 pb-1">
-                      <AdminPagination page={page} pageSize={pageSize} total={total} onPageChange={(nextPage) => void load(activeGroup, nextPage)} />
+                    <div className="border-t border-border px-5 py-3 flex items-center justify-between shrink-0">
+                      <span className="text-xs text-muted-foreground">配置修改后需保存方可生效</span>
                       <Button
                         disabled={saving || visibleDirtyIds.length === 0}
                         onClick={() => void saveDirty()}
-                        className="rounded-full bg-foreground text-background hover:bg-foreground/90 px-5 shadow-sm shrink-0"
+                        className="rounded-full px-5 shadow-sm shrink-0"
                       >
-                        <Save className="size-4" /> 保存配置
+                        <Save className="size-4 mr-1" /> 保存配置
                       </Button>
                     </div>
                   </div>
@@ -344,6 +730,7 @@ export default function AdminConfigsPage() {
         <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>当前配置尚未保存</AlertDialogTitle><AlertDialogDescription>切换到 {pendingGroup ? groupLabel(pendingGroup) : ""} 前，可以先保存修改。</AlertDialogDescription></AlertDialogHeader>
           <AlertDialogFooter><AlertDialogCancel>继续编辑</AlertDialogCancel><Button variant="outline" onClick={discardAndSwitch}>放弃更改</Button><AlertDialogAction onClick={() => void saveAndSwitch()}>保存并切换</AlertDialogAction></AlertDialogFooter></AlertDialogContent>
       </AlertDialog>
+
     </AdminPage>
   );
 }

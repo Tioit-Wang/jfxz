@@ -48,6 +48,22 @@ export type ApiSuggestion = {
   options: string[];
 };
 
+export type AnalysisRound = {
+  round: number;
+  title: string;
+  summary: string;
+  suggestions: ApiSuggestion[];
+};
+
+export type PersistedAnalysis = {
+  chapterId: string;
+  chapterTitle: string;
+  workId: string;
+  analyzedAt: string;
+  rounds: AnalysisRound[];
+  totalSuggestions: number;
+};
+
 export type ApiChapterVersion = {
   id: string;
   version_number: number;
@@ -1163,12 +1179,12 @@ export class ApiClient {
     return mapChapterVersion(data);
   }
 
-  async analyzeChapter(workId: string, content: string): Promise<ApiSuggestion[]> {
-    const data = await this.request<{ suggestions: ApiSuggestion[] }>(`/works/${workId}/analyze`, {
+  async analyzeChapter(workId: string, chapterId: string, content: string): Promise<{ rounds: AnalysisRound[]; total_suggestions: number }> {
+    const data = await this.request<{ rounds: AnalysisRound[]; total_suggestions: number }>(`/works/${workId}/analyze`, {
       method: "POST",
-      body: JSON.stringify({ content })
+      body: JSON.stringify({ chapter_id: chapterId, content })
     });
-    return data.suggestions;
+    return data;
   }
 
   async listCharacters(workId: string, q?: string): Promise<NamedContent[]> {

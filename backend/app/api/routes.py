@@ -148,6 +148,7 @@ class ChatIn(BaseModel):
 
 
 class AnalyzeIn(BaseModel):
+    chapter_id: str = Field(default="", max_length=36)
     content: str = Field(default="", max_length=200000)
 
 
@@ -157,8 +158,17 @@ class AnalyzeSuggestion(BaseModel):
     options: list[str] = Field(default_factory=list, max_length=5)
 
 
+class AnalyzeRound(BaseModel):
+    round: int = Field(ge=1, le=3)
+    title: str = Field(min_length=1, max_length=50)
+    summary: str = Field(default="", max_length=2000)
+    suggestions: list[AnalyzeSuggestion] = Field(default_factory=list, max_length=20)
+
+
 class AnalyzeOut(BaseModel):
     suggestions: list[AnalyzeSuggestion] = Field(default_factory=list, max_length=20)
+    rounds: list[AnalyzeRound] = Field(default_factory=list, max_length=3)
+    total_suggestions: int = 0
 
 
 class ChatSessionIn(BaseModel):
@@ -688,7 +698,20 @@ async def seed_defaults(session: AsyncSession) -> None:
         ("payment.alipay_f2f", "seller_id", "string", "alipay f2f seller_id", True),
         ("payment.alipay_f2f", "timeout_express", "string", "alipay f2f timeout_express", True),
         ("payment.alipay_f2f", "extra_options", "json", "alipay f2f extra_options", True),
-        ("ai.editor_check", "model_id", "string", "editor check ai model id", False),
+        ("ai.editor_check", "round_1_model_id", "string", "角色检查 AI 模型", False),
+        ("ai.editor_check", "round_2_model_id", "string", "逻辑检查 AI 模型", False),
+        ("ai.editor_check", "round_3_model_id", "string", "风格检查 AI 模型", False),
+        ("ai.editor_check", "round_1_thinking", "string", "角色检查思考强度", False),
+        ("ai.editor_check", "round_2_thinking", "string", "逻辑检查思考强度", False),
+        ("ai.editor_check", "round_3_thinking", "string", "风格检查思考强度", False),
+        ("ai.editor_check", "round_1_enabled", "boolean", "启用角色检查", False),
+        ("ai.editor_check", "round_2_enabled", "boolean", "启用逻辑检查", False),
+        ("ai.editor_check", "round_3_enabled", "boolean", "启用风格检查", False),
+        ("ai.editor_check", "round_2_chapter_count", "integer", "逻辑检查参考前 N 章", False),
+        ("ai.editor_check", "round_3_chapter_count", "integer", "风格检查参考前 N 章", False),
+        ("ai.editor_check", "round_1_prompt", "string", "角色检查提示词", False),
+        ("ai.editor_check", "round_2_prompt", "string", "逻辑检查提示词", False),
+        ("ai.editor_check", "round_3_prompt", "string", "风格检查提示词", False),
         ("billing", "points_per_cny", "integer", "积分汇率，1元人民币对应的积分数", False),
     ]
     for group, key, value_type, description, is_required in config_seeds:
@@ -698,23 +721,44 @@ async def seed_defaults(session: AsyncSession) -> None:
                 GlobalConfig.config_group == group, GlobalConfig.config_key == key
             ),
         )
+        value_defaults: dict[str, Any] = {}
+        if group == "billing" and key == "points_per_cny":
+            value_defaults = {"integer_value": 10000}
+        elif group == "payment.alipay_f2f" and key == "enabled":
+            value_defaults = {"boolean_value": False}
+        elif group == "payment.alipay_f2f" and key == "timeout_express":
+            value_defaults = {"string_value": "30m"}
+        elif group == "payment.alipay_f2f" and key == "extra_options":
+            value_defaults = {"json_value": {}}
+        elif group == "ai.editor_check" and key in ("round_1_thinking", "round_2_thinking", "round_3_thinking"):
+            value_defaults = {"string_value": "xhigh"}
+        elif group == "ai.editor_check" and key in ("round_1_enabled", "round_2_enabled", "round_3_enabled"):
+            value_defaults = {"boolean_value": True}
+        elif group == "ai.editor_check" and key in ("round_2_chapter_count", "round_3_chapter_count"):
+            value_defaults = {"integer_value": 6}
+        elif group == "ai.editor_check" and key == "round_1_prompt":
+            from app.prompts import ROUND_1_PROMPT
+            value_defaults = {"string_value": ROUND_1_PROMPT}
+        elif group == "ai.editor_check" and key == "round_2_prompt":
+            from app.prompts import ROUND_2_PROMPT
+            value_defaults = {"string_value": ROUND_2_PROMPT}
+        elif group == "ai.editor_check" and key == "round_3_prompt":
+            from app.prompts import ROUND_3_PROMPT
+            value_defaults = {"string_value": ROUND_3_PROMPT}
         if existing_config is None:
-            defaults: dict[str, Any] = dict(
+            defaults = dict(
                 config_group=group,
                 config_key=key,
                 value_type=value_type,
                 is_required=is_required,
                 description=description,
+                **value_defaults,
             )
-            if group == "billing" and key == "points_per_cny":
-                defaults["integer_value"] = 10000
-            elif group == "payment.alipay_f2f" and key == "enabled":
-                defaults["boolean_value"] = False
-            elif group == "payment.alipay_f2f" and key == "timeout_express":
-                defaults["string_value"] = "30m"
-            elif group == "payment.alipay_f2f" and key == "extra_options":
-                defaults["json_value"] = {}
             session.add(GlobalConfig(**defaults))
+        elif value_defaults:
+            for col, val in value_defaults.items():
+                if getattr(existing_config, col) is None:
+                    setattr(existing_config, col, val)
 
     existing_models = await one(session, select(func.count(AiModel.id)))
     if not existing_models:
@@ -1799,35 +1843,42 @@ def parse_analysis_output(value: str, source_text: str) -> list[dict[str, Any]]:
 
 
 async def request_analysis(
-    text: str, base_url: str, api_key: str, model_id: str
+    text: str, base_url: str, api_key: str, model_id: str,
+    prompt: str | None = None, thinking_intensity: float = 0.0,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     if not api_key:
         if get_settings().env == "test":
             return [], {"prompt_tokens": 0, "completion_tokens": 0, "cached_tokens": 0}
         raise HTTPException(status_code=503, detail="AI service not configured")
-    prompt = (
-        "你是中文长篇小说编辑器的基础校对助手。只检查错别字、错误标点符号、明显病句或不通顺表达。"
-        "不要检查人物设定、世界观设定、剧情节奏或文风。"
-        "必须只返回 JSON，不要返回 Markdown，不要解释。"
-        '返回结构必须严格为：{"suggestions":[{"quote":"原文片段","issue":"问题说明","options":["修改方案"]}]}。'
-        'quote 必须逐字来自用户正文，options 至少一个。没有问题时返回 {"suggestions":[]}。'
-    )
+    if prompt is None:
+        prompt = (
+            "你是中文长篇小说编辑器的基础校对助手。只检查错别字、错误标点符号、明显病句或不通顺表达。"
+            "不要检查人物设定、世界观设定、剧情节奏或文风。"
+            "必须只返回 JSON，不要返回 Markdown，不要解释。"
+            '返回结构必须严格为：{"suggestions":[{"quote":"原文片段","issue":"问题说明","options":["修改方案"]}]}。'
+            'quote 必须逐字来自用户正文，options 至少一个。没有问题时返回 {"suggestions":[]}。'
+        )
+    request_json: dict[str, Any] = {
+        "model": model_id,
+        "messages": [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": text},
+        ],
+        "temperature": 0,
+    }
+    if thinking_intensity > 0:
+        reasoning_effort = "max" if thinking_intensity > 0.66 else "high"
+        request_json["reasoning_effort"] = reasoning_effort
+        request_json["extra_body"] = {"thinking": {"type": "enabled"}}
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=120) as client:
             response = await client.post(
                 f"{base_url.rstrip('/')}/chat/completions",
                 headers={
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                 },
-                json={
-                    "model": model_id,
-                    "messages": [
-                        {"role": "system", "content": prompt},
-                        {"role": "user", "content": text},
-                    ],
-                    "temperature": 0,
-                },
+                json=request_json,
             )
             response.raise_for_status()
             data = response.json()
@@ -1843,11 +1894,16 @@ async def request_analysis(
     return parse_analysis_output(content, text), usage
 
 
-async def _resolve_editor_model(session: AsyncSession) -> AiModel | None:
+THINKING_INTENSITY_MAP: dict[str, float] = {
+    "none": 0.0, "low": 0.25, "medium": 0.5, "high": 0.75, "xhigh": 1.0,
+}
+
+
+async def _resolve_editor_model(session: AsyncSession, round_num: int) -> AiModel | None:
     result = await session.execute(
         select(GlobalConfig).where(
             GlobalConfig.config_group == "ai.editor_check",
-            GlobalConfig.config_key == "model_id",
+            GlobalConfig.config_key == f"round_{round_num}_model_id",
         )
     )
     config = result.scalar_one_or_none()
@@ -1859,53 +1915,187 @@ async def _resolve_editor_model(session: AsyncSession) -> AiModel | None:
     return model
 
 
+def _fill_prompt(template: str, **kwargs: str) -> str:
+    result = template
+    for key, value in kwargs.items():
+        result = result.replace(f"{{{{{key}}}}}", value)
+    return result
+
+
+async def _get_characters_context(session: AsyncSession, work_id: str) -> str:
+    result = await session.execute(
+        select(Character).where(Character.work_id == work_id).order_by(Character.name)
+    )
+    characters = result.scalars().all()
+    if not characters:
+        return "（无角色设定）"
+    lines: list[str] = []
+    for idx, ch in enumerate(characters, 1):
+        parts = [f"{idx}. {ch.name}"]
+        if ch.summary:
+            parts.append(f"   简介：{ch.summary}")
+        if ch.detail:
+            parts.append(f"   详情：{ch.detail}")
+        lines.append("\n".join(parts))
+    return "\n\n".join(lines)
+
+
+async def _get_surrounding_context(
+    session: AsyncSession, work_id: str, chapter_id: str, count: int = 6,
+) -> str:
+    all_chapters = (await session.execute(ordered_chapters_statement(work_id))).scalars().all()
+    target_idx: int | None = None
+    for idx, ch in enumerate(all_chapters):
+        if ch.id == chapter_id:
+            target_idx = idx
+            break
+    if target_idx is None or target_idx == 0:
+        return "（无前面章节）"
+    start = max(0, target_idx - count)
+    previous = all_chapters[start:target_idx]
+    if not previous:
+        return "（无前面章节）"
+    lines: list[str] = []
+    for ch in previous:
+        lines.append(f"## 第{ch.order_index}章 {ch.title}\n\n{ch.content}")
+    return "\n\n---\n\n".join(lines)
+
+
+async def _get_previous_context(
+    session: AsyncSession, work_id: str, chapter_id: str, count: int = 6,
+) -> str:
+    all_chapters = (await session.execute(ordered_chapters_statement(work_id))).scalars().all()
+    target_idx: int | None = None
+    for idx, ch in enumerate(all_chapters):
+        if ch.id == chapter_id:
+            target_idx = idx
+            break
+    if target_idx is None or target_idx == 0:
+        return "（无前面章节）"
+    start = max(0, target_idx - count)
+    previous = all_chapters[start:target_idx]
+    if not previous:
+        return "（无前面章节）"
+    lines: list[str] = []
+    for ch in previous:
+        lines.append(f"## 第{ch.order_index}章 {ch.title}\n\n{ch.content}")
+    return "\n\n---\n\n".join(lines)
+
+
+ROUND_TITLES = {1: "角色检查", 2: "逻辑检查", 3: "风格检查"}
+
+
 @router.post("/works/{work_id}/analyze")
 async def analyze_chapter(
     work_id: str,
     payload: AnalyzeIn,
     user: User = Depends(current_user),
     session: AsyncSession = Depends(get_session),
-) -> dict[str, Any]:
+) -> AnalyzeOut:
     await owned_work(session, user.id, work_id)
     text = payload.content
     if not text.strip():
-        return {"suggestions": []}
+        return AnalyzeOut()
 
-    ai_model = await _resolve_editor_model(session)
-    if ai_model is None:
-        raise HTTPException(status_code=503, detail="no editor check model configured")
+    configs_result = await session.execute(
+        select(GlobalConfig).where(GlobalConfig.config_group == "ai.editor_check")
+    )
+    configs: dict[str, GlobalConfig] = {c.config_key: c for c in configs_result.scalars()}
+
+    def _round_enabled(round_num: int) -> bool:
+        cfg = configs.get(f"round_{round_num}_enabled")
+        return bool(cfg.boolean_value) if cfg else True
+
+    def _round_thinking(round_num: int) -> float:
+        cfg = configs.get(f"round_{round_num}_thinking")
+        level = cfg.string_value if cfg and cfg.string_value else "xhigh"
+        return THINKING_INTENSITY_MAP.get(level, 0.0)
+
+    def _round_chapter_count(round_num: int) -> int:
+        cfg = configs.get(f"round_{round_num}_chapter_count")
+        return cfg.integer_value if cfg and cfg.integer_value else 6
 
     settings = get_settings()
     base_url = settings.ai_provider_base_url
     api_key = settings.ai_provider_api_key or ""
-    model_id = ai_model.provider_model_id
-    from app.services.billing_service import pre_check_balance
 
-    await pre_check_balance(
-        session, user.id, ai_model, estimated_input_tokens=max(1, len(text) // 3)
-    )
+    chapter_title = ""
+    if payload.chapter_id:
+        chapter = await session.get(Chapter, payload.chapter_id)
+        if chapter:
+            chapter_title = chapter.title
 
-    try:
-        suggestions, usage = await request_analysis(text, base_url, api_key, model_id)
-    except Exception:
-        raise HTTPException(
-            status_code=500, detail="AI analysis failed, no charge applied"
-        ) from None
+    if payload.chapter_id:
+        chars_ctx, surrounding_ctx, previous_ctx = await asyncio.gather(
+            _get_characters_context(session, work_id),
+            _get_surrounding_context(session, work_id, payload.chapter_id, count=_round_chapter_count(2)),
+            _get_previous_context(session, work_id, payload.chapter_id, count=_round_chapter_count(3)),
+        )
+    else:
+        chars_ctx = await _get_characters_context(session, work_id)
+        surrounding_ctx = "（无法定位）"
+        previous_ctx = "（无前面章节）"
 
-    from app.services.billing_service import deduct_by_usage
+    placeholder_values = {
+        "chapter_content": text,
+        "chapter_title": chapter_title,
+        "characters": chars_ctx,
+        "surrounding_chapters": surrounding_ctx,
+        "previous_chapters": previous_ctx,
+    }
 
-    await deduct_by_usage(
-        session,
-        user.id,
-        ai_model,
-        usage,
-        work_id=work_id,
-        source_id=work_id,
-        source_type="ai_editor_check",
-    )
+    rounds_def: list[tuple[int, str, AiModel, float]] = []
+    for rnd in (1, 2, 3):
+        if not _round_enabled(rnd):
+            continue
+        prompt_cfg = configs.get(f"round_{rnd}_prompt")
+        if prompt_cfg is None or not prompt_cfg.string_value:
+            continue
+        model = await _resolve_editor_model(session, rnd)
+        if model is None:
+            continue
+        rounds_def.append((rnd, prompt_cfg.string_value, model, _round_thinking(rnd)))
+
+    if not rounds_def:
+        return AnalyzeOut()
+
+    from app.services.billing_service import pre_check_balance, deduct_by_usage
+
+    first_model = rounds_def[0][2]
+    estimated_tokens = max(1, len(text) // 2) * len(rounds_def)
+    await pre_check_balance(session, user.id, first_model, estimated_input_tokens=estimated_tokens)
+
+    async def _run_round(rnd: int, prompt_template: str, model: AiModel, thinking: float) -> tuple[AnalyzeRound, dict[str, int] | None, str | None]:
+        prompt = _fill_prompt(prompt_template, **placeholder_values)
+        try:
+            suggestions, usage = await request_analysis(
+                text, base_url, api_key, model.provider_model_id,
+                prompt=prompt, thinking_intensity=thinking,
+            )
+            return AnalyzeRound(
+                round=rnd, title=ROUND_TITLES.get(rnd, f"第{rnd}轮"),
+                suggestions=[AnalyzeSuggestion(**s) for s in suggestions],
+            ), usage, None
+        except HTTPException as exc:
+            return AnalyzeRound(
+                round=rnd, title=ROUND_TITLES.get(rnd, f"第{rnd}轮"),
+                summary=f"检查失败：{exc.detail}", suggestions=[],
+            ), None, str(exc.detail)
+
+    results = await asyncio.gather(*(_run_round(rnd, tpl, model, thinking) for rnd, tpl, model, thinking in rounds_def))
+
+    rounds: list[AnalyzeRound] = []
+    for rnd_obj, usage, _ in results:
+        rounds.append(rnd_obj)
+        if usage and (usage["prompt_tokens"] or usage["completion_tokens"]):
+            await deduct_by_usage(
+                session, user.id, first_model, usage,
+                work_id=work_id, source_id=work_id, source_type="ai_editor_check",
+            )
 
     await session.commit()
-    return {"suggestions": suggestions}
+    total_suggestions = sum(len(r.suggestions) for r in rounds)
+    return AnalyzeOut(rounds=rounds, total_suggestions=total_suggestions)
 
 
 @router.get("/works/{work_id}/chat-sessions")

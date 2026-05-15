@@ -544,7 +544,7 @@ export function WorkspaceSidebarPanel({
               灵感便签 ({inspirationNotes.length})
             </span>
             <span className="inline-flex items-center gap-2 text-neutral-400">
-              {!notesCollapsed ? <button className="rounded-full p-1 text-[#888888] hover:bg-[#f5f5f5] hover:text-[#171717]" onClick={(event) => { event.stopPropagation(); onStartCreateNote(); }} aria-label="新建灵感便签"><Plus size={15} /></button> : null}
+              {!notesCollapsed ? <span role="button" className="rounded-full p-1 text-[#888888] hover:bg-[#f5f5f5] hover:text-[#171717] cursor-pointer" onClick={(event) => { event.stopPropagation(); onStartCreateNote(); }} aria-label="新建灵感便签"><Plus size={15} /></span> : null}
               {notesCollapsed ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
             </span>
           </button>
@@ -563,7 +563,7 @@ export function WorkspaceSidebarPanel({
                       <span className="block truncate text-xs font-semibold">{note.title}</span>
                       <span className="block truncate text-[10px] text-neutral-400">{note.category} · {formatUpdatedAt(note.updatedAt)}</span>
                     </span>
-                    <button className="rounded-full p-1 text-[#888888] opacity-0 hover:bg-[#f7d4d6] hover:text-[#ee0000] group-hover:opacity-100" onClick={(event) => { event.stopPropagation(); onDeleteNote(note); }} aria-label="删除便签"><Trash2 size={12} /></button>
+                    <span role="button" className="rounded-full p-1 text-[#888888] opacity-0 hover:bg-[#f7d4d6] hover:text-[#ee0000] group-hover:opacity-100 cursor-pointer" onClick={(event) => { event.stopPropagation(); onDeleteNote(note); }} aria-label="删除便签"><Trash2 size={12} /></span>
                   </button>
                 ))}
                 {!inspirationNotes.length ? <button className="w-full rounded-xl border border-dashed border-[#ebebeb] py-3 text-xs text-[#888888] hover:border-[#a1a1a1] hover:text-[#171717]" onClick={onStartCreateNote}>+ 新建灵感便签</button> : null}

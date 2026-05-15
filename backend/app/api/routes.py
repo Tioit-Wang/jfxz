@@ -2105,13 +2105,13 @@ async def list_analysis_checks(
     work_id: str,
     user: User = Depends(current_user),
     session: AsyncSession = Depends(get_session),
-) -> dict[str, list[dict[str, str]]]:
+) -> dict[str, list[dict[str, object]]]:
     await owned_work(session, user.id, work_id)
     configs_result = await session.execute(
         select(GlobalConfig).where(GlobalConfig.config_group == "ai.editor_check")
     )
     configs: dict[str, GlobalConfig] = {c.config_key: c for c in configs_result.scalars()}
-    checks: list[dict[str, str]] = []
+    checks: list[dict[str, object]] = []
     for check_id in CHECK_IDS:
         enabled_cfg = configs.get(f"{check_id}_enabled")
         prompt_cfg = configs.get(f"{check_id}_prompt")

@@ -1149,7 +1149,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                         type: "tool_call",
                         tool,
                         display: data?.display ?? toolLabel(tool),
-                        status: (status === "error" ? "error" : "completed") as const,
+                        status: (status === "error" ? "error" : "completed") as "error" | "completed",
                         result: data?.result
                       }
                     ],
@@ -1159,7 +1159,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                 const updated = blocks.map((b, i) =>
                   i === startedIdx
                     ? b.type === "tool_call"
-                      ? { ...b, display: data?.display ?? b.display, status: (status === "error" ? "error" : "completed") as const, result: data?.result }
+                      ? { ...b, display: data?.display ?? b.display, status: (status === "error" ? "error" : "completed") as "error" | "completed", result: data?.result }
                       : b
                     : b
                 );

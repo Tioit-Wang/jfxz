@@ -1643,7 +1643,7 @@ export class ApiClient {
     onChunk: (chunk: string) => void,
     modelId?: string,
     thinkingIntensity?: number,
-    onToolCall?: (tool: string, status: "started" | "completed", data?: { display?: string; result?: string }) => void,
+    onToolCall?: (tool: string, status: "started" | "completed" | "error", data?: { display?: string; result?: string }) => void,
     onError?: (message: string) => void,
     signal?: AbortSignal
   ): Promise<ChatMessage> {

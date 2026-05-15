@@ -17,6 +17,10 @@
     "frontend/node_modules": true,
     "frontend/playwright-report": true,
     "frontend/test-results": true,
+    ".agents": true,
+    ".claude": true,
+    "skills-lock.json": true,
+    "backend/.context": true,
   },
   "search.exclude": {
     "**/__pycache__": true,
@@ -28,7 +32,12 @@
     "**/test-results": true,
     ".chrome-mcp-profile": true,
     ".runtime-logs": true,
-    "frontend/.next": true
+    "frontend/.next": true,
+    ".agents": true,
+    ".claude": true,
+    "*.pem": true,
+    "skills-lock.json": true,
+    "backend/.context": true
   },
   "python.defaultInterpreterPath": "${workspaceFolder}/backend/.venv/Scripts/python.exe",
   "typescript.tsdk": "frontend/node_modules/typescript/lib"

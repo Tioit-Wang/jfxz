@@ -339,7 +339,7 @@ function AiCheckPanel({
                         value={String(getCheckDraft(`round_${rnd}_chapter_count`) ?? 6)}
                         onChange={(e) => {
                           const v = parseInt(e.target.value, 10);
-                          if (!isNaN(v) && v >= 1) setCheckDraft(`round_${rnd}_chapter_count`, v);
+                          if (!isNaN(v) && v >= 1) setCheckDraft(`round_${rnd}_chapter_count`, String(v));
                         }}
                         className="w-24"
                       />

@@ -17,6 +17,7 @@ interface ShareDialogProps {
   shareEnabled: boolean;
   shareToken: string | null;
   onShareToggle: (enabled: boolean) => void;
+  activeChapterId?: string;
 }
 
 function CopyButton({ text, label }: { text: string; label: string }) {
@@ -48,9 +49,11 @@ export default function ShareDialog({
   shareEnabled,
   shareToken,
   onShareToggle,
+  activeChapterId,
 }: ShareDialogProps) {
+  const chapterParam = activeChapterId ? `?chapterId=${activeChapterId}` : "";
   const authorPreviewUrl = typeof window !== "undefined"
-    ? `${window.location.origin}/books/${bookId}/preview`
+    ? `${window.location.origin}/books/${bookId}/preview${chapterParam}`
     : "";
   const publicUrl = shareToken
     ? `${typeof window !== "undefined" ? window.location.origin : ""}/s/${shareToken}`
@@ -78,7 +81,7 @@ export default function ShareDialog({
               />
               <CopyButton text={authorPreviewUrl} label="复制作者预览链接" />
               <a
-                href={`/books/${bookId}/preview`}
+                href={`/books/${bookId}/preview${chapterParam}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex shrink-0 items-center gap-1 rounded-full border border-[#ebebeb] px-3 py-1.5 text-xs leading-4 text-[#4d4d4d] transition-colors hover:bg-[#fafafa]"

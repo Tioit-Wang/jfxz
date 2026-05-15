@@ -4,7 +4,7 @@ import { AlertCircle, Edit, Eye, EyeOff, Save, Settings2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { type AdminConfig, type AdminConfigValue, type AiModelOption } from "@/api";
-import { AdminHeading, AdminPage } from "../_components";
+import { AdminPage } from "../_components";
 import { adminClient } from "../admin-utils";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -25,8 +25,11 @@ const labelMap: Record<string, string> = {
   alipay_public_key: "支付宝公钥", notify_url: "支付回调地址",
   seller_id: "商户 ID", timeout_express: "订单超时时间",
   extra_options: "扩展参数",
-  round_1_model_id: "角色检查模型", round_2_model_id: "逻辑检查模型", round_3_model_id: "风格检查模型",
-  round_1_thinking: "角色检查思考", round_2_thinking: "逻辑检查思考", round_3_thinking: "风格检查思考",
+  character_model_id: "角色检查模型", logic_model_id: "逻辑检查模型", style_model_id: "风格检查模型",
+  character_thinking: "角色检查思考", logic_thinking: "逻辑检查思考", style_thinking: "风格检查思考",
+  character_enabled: "启用角色检查", logic_enabled: "启用逻辑检查", style_enabled: "启用风格检查",
+  character_prompt: "角色检查提示词", logic_prompt: "逻辑检查提示词", style_prompt: "风格检查提示词",
+  logic_chapter_count: "逻辑检查参考前N章", style_chapter_count: "风格检查参考前N章",
 };
 
 function configLabel(config: AdminConfig) { return labelMap[config.config_key] ?? config.config_key.replaceAll("_", " "); }
@@ -69,18 +72,20 @@ const ALL_PLACEHOLDERS = [
   { key: "previous_chapters", label: "前N章内容" },
 ];
 
-const ROUND_NAMES: Record<number, string> = { 1: "角色检查", 2: "逻辑检查", 3: "风格检查" };
+const CHECK_IDS = ["character", "logic", "style"] as const;
+type CheckId = (typeof CHECK_IDS)[number];
+const CHECK_NAMES: Record<string, string> = { character: "角色检查", logic: "逻辑检查", style: "风格检查" };
 
-const ROUND_REQUIRED: Record<number, string[]> = {
-  1: ["chapter_content", "characters"],
-  2: ["chapter_content", "surrounding_chapters"],
-  3: ["chapter_content", "previous_chapters"],
+const CHECK_REQUIRED: Record<string, string[]> = {
+  character: ["chapter_content", "characters"],
+  logic: ["chapter_content", "surrounding_chapters"],
+  style: ["chapter_content", "previous_chapters"],
 };
 
-const ROUND_PLACEHOLDERS: Record<number, string[]> = {
-  1: ["chapter_content", "chapter_title", "characters"],
-  2: ["chapter_content", "chapter_title", "surrounding_chapters"],
-  3: ["chapter_content", "chapter_title", "previous_chapters"],
+const CHECK_PLACEHOLDERS: Record<string, string[]> = {
+  character: ["chapter_content", "chapter_title", "characters"],
+  logic: ["chapter_content", "chapter_title", "surrounding_chapters"],
+  style: ["chapter_content", "chapter_title", "previous_chapters"],
 };
 
 const THINKING_LEVELS_ADMIN = ["none", "low", "medium", "high", "xhigh"] as const;
@@ -125,11 +130,11 @@ function ThinkingBar({ value, onChange }: { value: string; onChange: (v: string)
 }
 
 function PromptEditorModal({
-  open, onOpenChange, round, promptText, getCheckDraft, setCheckDraft,
+  open, onOpenChange, checkId, promptText, getCheckDraft, setCheckDraft,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  round: number;
+  checkId: string;
   promptText: string;
   getCheckDraft: (key: string) => DraftValue;
   setCheckDraft: (key: string, value: DraftValue) => void;
@@ -142,20 +147,20 @@ function PromptEditorModal({
     const text = `{{${key}}}`;
     const start = textarea.selectionStart;
     const end = textarea.selectionEnd;
-    const current = String(getCheckDraft(`round_${round}_prompt`) || "");
+    const current = String(getCheckDraft(`${checkId}_prompt`) || "");
     const nextValue = current.slice(0, start) + text + current.slice(end);
-    setCheckDraft(`round_${round}_prompt`, nextValue);
+    setCheckDraft(`${checkId}_prompt`, nextValue);
     requestAnimationFrame(() => {
       textarea.focus();
       textarea.setSelectionRange(start + text.length, start + text.length);
     });
-  }, [round, getCheckDraft, setCheckDraft]);
+  }, [checkId, getCheckDraft, setCheckDraft]);
 
   const validationError = (() => {
-    const required = ROUND_REQUIRED[round] || [];
+    const required = CHECK_REQUIRED[checkId] || [];
     const missing = required.filter((key) => !promptText.includes(`{{${key}}}`));
     if (missing.length) {
-      return `${ROUND_NAMES[round]}缺少占位符: ${missing.map((k) => `{{${k}}}`).join("、")}`;
+      return `${CHECK_NAMES[checkId]}缺少占位符: ${missing.map((k) => `{{${k}}}`).join("、")}`;
     }
     return "";
   })();
@@ -164,13 +169,13 @@ function PromptEditorModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-3xl" showCloseButton>
         <DialogHeader>
-          <DialogTitle>编辑提示词 — {ROUND_NAMES[round]}</DialogTitle>
+          <DialogTitle>编辑提示词 — {CHECK_NAMES[checkId]}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           {/* 顶部工具栏 — 占位符插入按钮 */}
           <div className="flex flex-wrap items-center gap-1.5 pb-3 border-b border-border">
             <span className="text-xs text-muted-foreground shrink-0 mr-1">插入占位符：</span>
-            {ALL_PLACEHOLDERS.filter((ph) => ROUND_PLACEHOLDERS[round]?.includes(ph.key)).map((ph) => {
+            {ALL_PLACEHOLDERS.filter((ph) => CHECK_PLACEHOLDERS[checkId]?.includes(ph.key)).map((ph) => {
               const isUsed = promptText.includes(`{{${ph.key}}}`);
               return (
                 <button
@@ -195,7 +200,7 @@ function PromptEditorModal({
             ref={(el) => { textareaRef.current = el; }}
             className="min-h-[320px] font-mono text-sm leading-relaxed"
             value={promptText}
-            onChange={(e) => setCheckDraft(`round_${round}_prompt`, e.target.value)}
+            onChange={(e) => setCheckDraft(`${checkId}_prompt`, e.target.value)}
           />
           {validationError ? (
             <span className="text-xs text-destructive flex items-center gap-1">
@@ -225,42 +230,42 @@ function AiCheckPanel({
   checkSaving: boolean;
   onSave: () => void;
 }) {
-  const [activeRound, setActiveRound] = useState(1);
+  const [activeCheck, setActiveCheck] = useState<string>("character");
   const [promptEditorOpen, setPromptEditorOpen] = useState(false);
 
-  const roundModelId = (rnd: number) => String(getCheckDraft(`round_${rnd}_model_id`) || "__none");
-  const roundModelMissing = (rnd: number) => {
-    const mid = roundModelId(rnd);
+  const checkModelId = (id: string) => String(getCheckDraft(`${id}_model_id`) || "__none");
+  const checkModelMissing = (id: string) => {
+    const mid = checkModelId(id);
     return mid !== "__none" && !models.some((m) => m.id === mid);
   };
-  const roundThinking = (rnd: number) => String(getCheckDraft(`round_${rnd}_thinking`) || "xhigh");
-  const roundPrompt = (rnd: number) => String(getCheckDraft(`round_${rnd}_prompt`) || "");
+  const checkThinking = (id: string) => String(getCheckDraft(`${id}_thinking`) || "xhigh");
+  const checkPrompt = (id: string) => String(getCheckDraft(`${id}_prompt`) || "");
 
-  const hasValidationError = (rnd: number) => {
-    if (getCheckDraft(`round_${rnd}_enabled`) === false) return false;
-    const prompt = String(getCheckDraft(`round_${rnd}_prompt`) || "");
-    const required = ROUND_REQUIRED[rnd] || [];
+  const hasValidationError = (id: string) => {
+    if (getCheckDraft(`${id}_enabled`) === false) return false;
+    const prompt = String(getCheckDraft(`${id}_prompt`) || "");
+    const required = CHECK_REQUIRED[id] || [];
     return required.some((key) => !prompt.includes(`{{${key}}}`));
   };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card shadow-card">
       {/* Sub-tabs for 3 rounds */}
-      <Tabs value={String(activeRound)} onValueChange={(v) => setActiveRound(Number(v))} className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <Tabs value={activeCheck} onValueChange={(v) => setActiveCheck(v)} className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="shrink-0 px-5 pt-5">
           <TabsList className="flex w-max gap-1.5 bg-transparent p-0 h-auto border-0 shadow-none justify-start">
-            {[1, 2, 3].map((rnd) => (
+            {CHECK_IDS.map((checkId) => (
               <TabsTrigger
-                key={rnd}
-                value={String(rnd)}
+                key={checkId}
+                value={String(checkId)}
                 className={cn(
                   "inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm leading-5 tracking-[-0.02em] transition-all flex-none h-auto w-auto",
                   "data-[state=active]:bg-foreground data-[state=active]:text-background data-[state=active]:shadow-sm",
                   "data-[state=inactive]:bg-muted data-[state=inactive]:text-muted-foreground data-[state=inactive]:hover:text-foreground"
                 )}
               >
-                {ROUND_NAMES[rnd]}
-                {hasValidationError(rnd) && (
+                {CHECK_NAMES[checkId]}
+                {hasValidationError(checkId) && (
                   <AlertCircle size={12} className="text-destructive" />
                 )}
               </TabsTrigger>
@@ -270,20 +275,20 @@ function AiCheckPanel({
 
         {/* Scrollable content */}
         <div className="flex-1 overflow-y-auto px-5 pb-5">
-          {[1, 2, 3].map((rnd) => {
-            const enabled = getCheckDraft(`round_${rnd}_enabled`) !== false;
-            const promptText = roundPrompt(rnd);
+          {CHECK_IDS.map((checkId) => {
+            const enabled = getCheckDraft(`${checkId}_enabled`) !== false;
+            const promptText = checkPrompt(checkId);
             return (
-              <TabsContent key={rnd} value={String(rnd)} className="mt-6 space-y-6">
+              <TabsContent key={checkId} value={String(checkId)} className="mt-6 space-y-6">
                 {/* 1. 是否开启 */}
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
                     <span className="text-sm font-medium">是否开启</span>
-                    <p className="text-xs text-muted-foreground">启用 {ROUND_NAMES[rnd]} 功能</p>
+                    <p className="text-xs text-muted-foreground">启用 {CHECK_NAMES[checkId]} 功能</p>
                   </div>
                   <Switch
                     checked={enabled}
-                    onCheckedChange={(checked) => setCheckDraft(`round_${rnd}_enabled`, checked)}
+                    onCheckedChange={(checked) => setCheckDraft(`${checkId}_enabled`, checked)}
                   />
                 </div>
 
@@ -293,21 +298,21 @@ function AiCheckPanel({
                 <div className="space-y-3">
                   <div className="space-y-0.5">
                     <span className="text-sm font-medium">模型配置</span>
-                    <p className="text-xs text-muted-foreground">选择执行 {ROUND_NAMES[rnd]} 的 AI 模型并调节推理深度</p>
+                    <p className="text-xs text-muted-foreground">选择执行 {CHECK_NAMES[checkId]} 的 AI 模型并调节推理深度</p>
                   </div>
                   <div className="rounded-lg border border-border bg-muted/20 p-4 space-y-4">
                     <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-center">
                       <div className="space-y-1.5">
                         <label className="text-xs font-medium text-muted-foreground">模型</label>
                         <Select
-                          value={roundModelId(rnd)}
-                          onValueChange={(v) => setCheckDraft(`round_${rnd}_model_id`, v === "__none" ? "" : v)}
+                          value={checkModelId(checkId)}
+                          onValueChange={(v) => setCheckDraft(`${checkId}_model_id`, v === "__none" ? "" : v)}
                         >
                           <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                           <SelectContent><SelectGroup>
                             <SelectItem value="__none">未选择</SelectItem>
-                            {roundModelMissing(rnd) && (
-                              <SelectItem value={roundModelId(rnd)}>当前不可用模型</SelectItem>
+                            {checkModelMissing(checkId) && (
+                              <SelectItem value={checkModelId(checkId)}>当前不可用模型</SelectItem>
                             )}
                             {models.map((m) => (<SelectItem key={m.id} value={m.id}>{m.display_name}</SelectItem>))}
                           </SelectGroup></SelectContent>
@@ -316,15 +321,15 @@ function AiCheckPanel({
                       <div className="space-y-1.5 sm:min-w-[200px]">
                         <label className="text-xs font-medium text-muted-foreground">思考强度</label>
                         <ThinkingBar
-                          value={roundThinking(rnd)}
-                          onChange={(v) => setCheckDraft(`round_${rnd}_thinking`, v)}
+                          value={checkThinking(checkId)}
+                          onChange={(v) => setCheckDraft(`${checkId}_thinking`, v)}
                         />
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {rnd >= 2 && (
+                {checkId !== "character" && (
                   <>
                     <div className="border-t border-border" />
                     <div className="space-y-2">
@@ -336,10 +341,10 @@ function AiCheckPanel({
                         type="number"
                         min={1}
                         max={100}
-                        value={String(getCheckDraft(`round_${rnd}_chapter_count`) ?? 6)}
+                        value={String(getCheckDraft(`${checkId}_chapter_count`) ?? 6)}
                         onChange={(e) => {
                           const v = parseInt(e.target.value, 10);
-                          if (!isNaN(v) && v >= 1) setCheckDraft(`round_${rnd}_chapter_count`, String(v));
+                          if (!isNaN(v) && v >= 1) setCheckDraft(`${checkId}_chapter_count`, String(v));
                         }}
                         className="w-24"
                       />
@@ -354,7 +359,7 @@ function AiCheckPanel({
                   <div className="flex items-start justify-between gap-4">
                     <div className="space-y-0.5">
                       <span className="text-sm font-medium">提示词预览</span>
-                      <p className="text-xs text-muted-foreground">{ROUND_NAMES[rnd]} 使用的提示词模板</p>
+                      <p className="text-xs text-muted-foreground">{CHECK_NAMES[checkId]} 使用的提示词模板</p>
                     </div>
                     <Button
                       variant="outline"
@@ -371,7 +376,7 @@ function AiCheckPanel({
                       {promptText ? promptText : <span className="italic text-muted-foreground/50">暂无提示词</span>}
                     </pre>
                   </div>
-                  {hasValidationError(rnd) && enabled && (
+                  {hasValidationError(checkId) && enabled && (
                     <span className="text-xs text-destructive flex items-center gap-1">
                       <AlertCircle size={12} />
                       缺少必要占位符
@@ -396,8 +401,8 @@ function AiCheckPanel({
       <PromptEditorModal
         open={promptEditorOpen}
         onOpenChange={setPromptEditorOpen}
-        round={activeRound}
-        promptText={roundPrompt(activeRound)}
+        checkId={activeCheck}
+        promptText={checkPrompt(activeCheck)}
         getCheckDraft={getCheckDraft}
         setCheckDraft={setCheckDraft}
       />
@@ -581,7 +586,7 @@ export default function AdminConfigsPage() {
 
   return (
     <AdminPage>
-      <AdminHeading title="系统配置" description="按分组维护全局配置，支持在列表中直接编辑并统一保存。" />
+
 
       {loading ? (
         <div className="rounded-lg border border-border bg-card shadow-card overflow-hidden">

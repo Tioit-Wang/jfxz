@@ -153,7 +153,7 @@ describe("api client", () => {
       .mockResolvedValueOnce(jsonResponse({ id: "c1", volume_id: "v1", order_index: 1, title: "章改", summary: "摘要", content: "正文" }))
       .mockResolvedValueOnce(jsonResponse({ id: "v2", work_id: "w1", title: "第二卷", order_index: 2 }))
       .mockResolvedValueOnce(jsonResponse({ ok: true }))
-      .mockResolvedValueOnce(jsonResponse({ rounds: [{ round: 1, title: "角色检查", summary: "", suggestions: [{ quote: "正文", issue: "问题", options: ["改文"] }] }], total_suggestions: 1 }))
+      .mockResolvedValueOnce(jsonResponse({ round: "character", title: "角色检查", summary: "", suggestions: [{ quote: "正文", issue: "问题", options: ["改文"] }] }))
       .mockResolvedValueOnce(jsonResponse([{ id: "char-1", work_id: "w1", name: "角色", summary: "摘要", detail: "详情" }]))
       .mockResolvedValueOnce(jsonResponse({ id: "char-2", work_id: "w1", name: "新角色", summary: "摘要", detail: "" }))
       .mockResolvedValueOnce(jsonResponse({ id: "char-2", work_id: "w1", name: "新角色改", summary: "新摘要", detail: "新详情" }))
@@ -293,7 +293,7 @@ describe("api client", () => {
     ).resolves.toMatchObject({ title: "章改" });
     await expect(client.createVolume("w1", "第二卷")).resolves.toMatchObject({ id: "v2", order: 2 });
     await expect(client.deleteChapter("w1", "c1")).resolves.toBeUndefined();
-    await expect(client.analyzeChapter("w1", "c1", "正文")).resolves.toMatchObject({ rounds: [{ round: 1, title: "角色检查", suggestions: [{ quote: "正文" }] }], total_suggestions: 1 });
+    await expect(client.analyzeChapterCheck("w1", "c1", "正文", "character")).resolves.toMatchObject({ round: "character", title: "角色检查", suggestions: [{ quote: "正文" }] });
     await expect(client.listCharacters("w1", "角")).resolves.toMatchObject([{ id: "char-1" }]);
     await expect(client.createCharacter("w1", { name: "新角色", summary: "摘要" })).resolves.toMatchObject({
       id: "char-2"
@@ -1032,5 +1032,41 @@ describe("api client", () => {
 
     const result = await client.streamChatMessage("s1", "hi",vi.fn());
     expect(result.blocks).toBeUndefined();
+  });
+
+  it("previewChapters constructs URL with direction parameter", async () => {
+    const chapters = [
+      { id: "c1", volume_id: null, order_index: 1, title: "第一章", summary: null, content: "内容一" },
+      { id: "c2", volume_id: null, order_index: 2, title: "第二章", summary: null, content: "内容二" },
+    ];
+    const fetcher = queuedFetcher(
+      jsonResponse({ chapters, total: 2, around_index: 0 }),
+    );
+    const client = new ApiClient("http://api", fetcher);
+
+    const result = await client.previewChapters("w1", "c1", 1, "after");
+    expect(result).toMatchObject({ total: 2 });
+    expect(result.chapters).toHaveLength(2);
+    expect(result.chapters[0]).toMatchObject({ id: "c1", title: "第一章" });
+
+    const calls = apiCalls(fetcher);
+    expect(calls[0][0]).toBe("http://api/works/w1/preview?limit=1&around=c1&direction=after");
+  });
+
+  it("publicPreviewChapters constructs URL with direction parameter", async () => {
+    const apiData = {
+      work: { title: "作品", short_intro: "简介" },
+      chapters: [{ id: "c1", volume_id: null, order_index: 1, title: "第一章", summary: null, content: "内容" }],
+      total: 2,
+      around_index: 0,
+    };
+    const fetcher = queuedFetcher(jsonResponse(apiData));
+    const client = new ApiClient("http://api", fetcher);
+
+    const result = await client.publicPreviewChapters("token-123", "c1", 1, "before");
+    expect(result).toMatchObject({ work: { title: "作品" }, total: 2 });
+
+    const calls = apiCalls(fetcher);
+    expect(calls[0][0]).toBe("http://api/public/token-123/preview?limit=1&around=c1&direction=before");
   });
 });

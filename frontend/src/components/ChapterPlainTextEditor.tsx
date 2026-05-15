@@ -21,6 +21,7 @@ type ChapterPlainTextEditorProps = {
   value: string;
   suggestions: ApiSuggestion[];
   activeSuggestionIndex: number | null;
+  showSuggestions?: boolean;
   disabled?: boolean;
   onChange: (value: string) => void;
   onActivateSuggestion: (index: number) => void;
@@ -119,6 +120,7 @@ export function ChapterPlainTextEditor({
   value,
   suggestions,
   activeSuggestionIndex,
+  showSuggestions,
   disabled = false,
   onChange,
   onActivateSuggestion,
@@ -257,10 +259,12 @@ export function ChapterPlainTextEditor({
 
   useEffect(() => {
     if (!editor) return;
-    const decorations = buildSuggestionDecorations(editor, suggestions, activeSuggestionIndex);
+    const decorations = showSuggestions
+      ? buildSuggestionDecorations(editor, suggestions, activeSuggestionIndex)
+      : DecorationSet.empty;
     editor.view.dispatch(editor.state.tr.setMeta(suggestionPluginKey, decorations));
     setHover(null);
-  }, [activeSuggestionIndex, editor, suggestions]);
+  }, [activeSuggestionIndex, editor, suggestions, showSuggestions]);
 
   return (
     <div ref={containerRef} className="editor-settings-scope relative flex min-h-[58vh] flex-1 flex-col">

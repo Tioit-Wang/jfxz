@@ -49,7 +49,7 @@ export type ApiSuggestion = {
 };
 
 export type AnalysisRound = {
-  round: number;
+  round: string;
   title: string;
   summary: string;
   suggestions: ApiSuggestion[];
@@ -63,6 +63,10 @@ export type PersistedAnalysis = {
   rounds: AnalysisRound[];
   totalSuggestions: number;
 };
+
+export type SuggestionState = ApiSuggestion & { stale: boolean };
+
+export type CheckInfo = { id: string; title: string; has_model: boolean };
 
 export type ApiChapterVersion = {
   id: string;
@@ -1179,12 +1183,18 @@ export class ApiClient {
     return mapChapterVersion(data);
   }
 
-  async analyzeChapter(workId: string, chapterId: string, content: string): Promise<{ rounds: AnalysisRound[]; total_suggestions: number }> {
-    const data = await this.request<{ rounds: AnalysisRound[]; total_suggestions: number }>(`/works/${workId}/analyze`, {
+  async getAnalysisChecks(workId: string): Promise<{ checks: CheckInfo[] }> {
+    return this.request<{ checks: CheckInfo[] }>(`/works/${workId}/analyze/checks`);
+  }
+
+  async analyzeChapterCheck(
+    workId: string, chapterId: string, content: string, checkId: string, signal?: AbortSignal
+  ): Promise<AnalysisRound> {
+    return this.request<AnalysisRound>(`/works/${workId}/analyze/${checkId}`, {
       method: "POST",
-      body: JSON.stringify({ chapter_id: chapterId, content })
+      body: JSON.stringify({ chapter_id: chapterId, content }),
+      signal,
     });
-    return data;
   }
 
   async listCharacters(workId: string, q?: string): Promise<NamedContent[]> {

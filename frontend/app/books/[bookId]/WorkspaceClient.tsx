@@ -46,6 +46,7 @@ import {
   type AiModelOption,
   type AnalysisRound,
   type ApiSuggestion,
+  type CheckInfo,
   type PersistedAnalysis,
   type BillingOrder,
   type BillingProducts,
@@ -90,6 +91,7 @@ import { PaymentDialog } from "@/components/billing/PaymentDialog";
 import { cn } from "@/lib/utils";
 import { applySuggestion, type Chapter, type Work, wordCount } from "@/domain";
 import { type WorkspaceMentionReference } from "./workspace/dnd";
+import { AnalyzeProgressModal } from "./workspace/AnalyzeProgressModal";
 import { WorkspaceChatPanel } from "./workspace/WorkspaceChatPanel";
 import { WorkspaceEditorPanel } from "./workspace/WorkspaceEditorPanel";
 import ShareDialog from "./workspace/ShareDialog";
@@ -502,10 +504,21 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     settings: { title: "设定资料", count: `${settings.length} 条设定` }
   }[activeTab];
 
+  const [staleSet, setStaleSet] = useState<Set<number>>(new Set());
+
   const clearAnalysis = useCallback(() => {
     setSuggestions([]);
     setActiveSuggestionIndex(null);
     setAnalysisNotice("");
+    setStaleSet(new Set());
+  }, []);
+
+  const validateSuggestions = useCallback((text: string, items: ApiSuggestion[]) => {
+    const next = new Set<number>();
+    for (let i = 0; i < items.length; i++) {
+      if (text.indexOf(items[i].quote) === -1) next.add(i);
+    }
+    setStaleSet(next);
   }, []);
 
   const syncDraft = useCallback((chapter: Chapter | undefined) => {
@@ -519,6 +532,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     setSuggestions([]);
     setActiveSuggestionIndex(null);
     setAnalysisNotice("");
+    setStaleSet(new Set());
     if (chapter) {
       try {
         const raw = localStorage.getItem(`jfxz_analysis_${bookId}_${chapter.id}`);
@@ -798,8 +812,8 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     lastEditTimeRef.current = Date.now();
     recordContentDraft(value);
     setContent(value);
-    if (suggestions.length || analysisNotice) {
-      clearAnalysis();
+    if (suggestions.length) {
+      validateSuggestions(value, suggestions);
     }
   }
 
@@ -894,45 +908,90 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     }
   }
 
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
+  const [enabledChecks, setEnabledChecks] = useState<CheckInfo[]>([]);
+  const [checkProgress, setCheckProgress] = useState<Record<string, "loading" | "done" | "error">>({});
+  const [checkErrors, setCheckErrors] = useState<Record<string, string>>({});
+  const [progressOpen, setProgressOpen] = useState(false);
+
+  function cancelAnalysis() {
+    abortController?.abort();
+    setAbortController(null);
+    setProgressOpen(false);
+    setStatus("analyzed");
+  }
+
   async function analyze() {
     if (!content.trim()) {
-      setSuggestions([]);
-      setActiveSuggestionIndex(null);
       setAnalysisNotice("当前章节暂无正文，无法检测");
       setStatus("analyzed");
       return;
     }
+    try { await saveCurrentChapter(); } catch { /* proceed */ }
     setStatus("analyzing");
     setAnalysisNotice("");
+    const chapterId = activeChapterIdRef.current;
+
+    let checks: CheckInfo[] = [];
     try {
-      await saveCurrentChapter();
-      setStatus("analyzing");
-      const chapterId = activeChapterIdRef.current;
-      const result = await client.analyzeChapter(bookId, chapterId, content);
-      const flatSuggestions = result.rounds.flatMap((r: AnalysisRound) => r.suggestions);
-      setSuggestions(flatSuggestions);
-      setActiveSuggestionIndex(null);
-      const analysis: PersistedAnalysis = {
-        chapterId,
-        chapterTitle: activeChapter?.title ?? "",
-        workId: bookId,
-        analyzedAt: new Date().toISOString(),
-        rounds: result.rounds,
-        totalSuggestions: result.total_suggestions,
-      };
-      setPersistedAnalysis(analysis);
-      try {
-        localStorage.setItem(`jfxz_analysis_${bookId}_${chapterId}`, JSON.stringify(analysis));
-      } catch { /* storage full, ignore */ }
-      setActiveChatTab("suggestions");
-      setAnalysisNotice(result.total_suggestions ? `发现 ${result.total_suggestions} 处可检查内容` : "未发现明显问题");
-      setStatus("analyzed");
-    } catch (error) {
-      setSuggestions([]);
-      setActiveSuggestionIndex(null);
-      setAnalysisNotice(apiErrorMessage(error));
+      const res = await client.getAnalysisChecks(bookId);
+      checks = res.checks;
+    } catch {
+      setAnalysisNotice("获取检查配置失败");
       setStatus("error");
+      return;
     }
+    const active = checks.filter((c) => c.has_model);
+    setEnabledChecks(active);
+    if (!active.length) {
+      setAnalysisNotice("没有启用且已配置模型的检查项");
+      setStatus("analyzed");
+      return;
+    }
+
+    const ctrl = new AbortController();
+    setAbortController(ctrl);
+    setCheckProgress(Object.fromEntries(active.map((c) => [c.id, "loading"])));
+    setCheckErrors({});
+    setProgressOpen(true);
+
+    const results: AnalysisRound[] = [];
+    const promises = active.map(async (check) => {
+      try {
+        const round = await client.analyzeChapterCheck(bookId, chapterId, content, check.id, ctrl.signal);
+        results.push(round);
+        setCheckProgress((p) => ({ ...p, [check.id]: "done" }));
+      } catch (err: unknown) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        setCheckProgress((p) => ({ ...p, [check.id]: "error" }));
+        setCheckErrors((e) => ({ ...e, [check.id]: apiErrorMessage(err) }));
+      }
+    });
+
+    await Promise.allSettled(promises);
+    if (ctrl.signal.aborted) return;
+
+    const flatSuggestions = results.flatMap((r) => r.suggestions);
+    setSuggestions(flatSuggestions);
+    setActiveSuggestionIndex(null);
+    setStaleSet(new Set());
+    const totalSuggestions = results.reduce((s, r) => s + r.suggestions.length, 0);
+    const analysis: PersistedAnalysis = {
+      chapterId,
+      chapterTitle: activeChapter?.title ?? "",
+      workId: bookId,
+      analyzedAt: new Date().toISOString(),
+      rounds: results,
+      totalSuggestions,
+    };
+    setPersistedAnalysis(analysis);
+    try {
+      localStorage.setItem(`jfxz_analysis_${bookId}_${chapterId}`, JSON.stringify(analysis));
+    } catch { /* storage full, ignore */ }
+    setActiveChatTab("suggestions");
+    setAnalysisNotice(totalSuggestions ? `发现 ${totalSuggestions} 处可检查内容` : "未发现明显问题");
+    setStatus("analyzed");
+    setAbortController(null);
   }
 
   function openSummaryModal() {
@@ -2062,6 +2121,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
             onOpenEditorSettings={() => setEditorSettingsOpen(true)}
             onOpenVersionHistory={() => setVersionHistoryOpen(true)}
             onOpenAccount={() => void openAccount()}
+            showSuggestions={activeChatTab === "suggestions"}
             onAnalyze={() => void analyze()}
             onContentChange={updateContent}
             onActivateSuggestion={(index) => {
@@ -2091,6 +2151,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
             activeSuggestionIndex={activeSuggestionIndex}
             persistedAnalysis={persistedAnalysis}
             onSelectSuggestion={setActiveSuggestionIndex}
+            staleIndices={staleSet}
             onAcceptSuggestion={(index) => void acceptSuggestion(index)}
             onSendSuggestionToChat={sendSuggestionToChat}
             chatStatus={chatStatus}
@@ -2141,6 +2202,16 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
         </ResizablePanel>
       </ResizablePanelGroup>
       ) : null}
+
+      <AnalyzeProgressModal
+        open={progressOpen}
+        checks={enabledChecks}
+        progress={checkProgress}
+        errors={checkErrors}
+        hasResults={suggestions.length > 0}
+        onCancel={cancelAnalysis}
+        onViewResults={() => { setProgressOpen(false); setActiveChatTab("suggestions"); }}
+      />
 
       <Dialog open={summaryModalOpen} onOpenChange={setSummaryModalOpen}>
         <DialogContent className="overflow-hidden rounded-xl bg-white p-0 shadow-[0px_1px_1px_rgba(0,0,0,0.02),0px_8px_16px_-4px_rgba(0,0,0,0.04),0px_24px_32px_-8px_rgba(0,0,0,0.06)] ring-1 ring-inset ring-[#00000014] sm:max-w-lg [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:rounded-full [&_[data-slot=dialog-close]]:text-[#888888] [&_[data-slot=dialog-close]]:hover:bg-[#f5f5f5] [&_[data-slot=dialog-close]]:hover:text-[#171717]">
@@ -2740,6 +2811,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
         bookId={bookId}
         shareEnabled={shareEnabled}
         shareToken={shareToken}
+        activeChapterId={activeChapterId}
         onShareToggle={async (enabled) => {
           try {
             const result = await client.toggleShare(bookId, enabled);

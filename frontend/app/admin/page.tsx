@@ -22,7 +22,7 @@ import {
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { type AdminStats } from "@/api";
-import { AdminHeading, AdminPage } from "./_components";
+import { AdminPage } from "./_components";
 import { adminClient } from "./admin-utils";
 import { formatToken } from "@/lib/format";
 import { Button } from "@/components/ui/button";
@@ -155,7 +155,7 @@ export default function AdminHome() {
 
   return (
     <AdminPage>
-      <AdminHeading title="后台概览" description="平台核心运营数据与功能入口。" />
+
 
       <div className="flex-1 overflow-y-auto min-h-0 flex flex-col gap-6">
         {/* Time Range Selector */}

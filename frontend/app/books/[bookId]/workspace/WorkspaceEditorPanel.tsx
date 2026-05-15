@@ -23,6 +23,7 @@ type WorkspaceEditorPanelProps = {
   analysisNotice: string;
   suggestions: ApiSuggestion[];
   activeSuggestionIndex: number | null;
+  showSuggestions?: boolean;
   accountLabel: string;
   accountSubtitle: string;
   styleSettings: {
@@ -63,6 +64,7 @@ export function WorkspaceEditorPanel({
   analysisNotice,
   suggestions,
   activeSuggestionIndex,
+  showSuggestions,
   accountLabel,
   accountSubtitle,
   styleSettings,
@@ -201,6 +203,7 @@ export function WorkspaceEditorPanel({
                 value={content}
                 suggestions={suggestions}
                 activeSuggestionIndex={activeSuggestionIndex}
+                showSuggestions={showSuggestions}
                 disabled={status === "loading"}
                 onChange={onContentChange}
                 onActivateSuggestion={onActivateSuggestion}

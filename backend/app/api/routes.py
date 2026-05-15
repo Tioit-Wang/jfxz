@@ -159,7 +159,7 @@ class AnalyzeSuggestion(BaseModel):
 
 
 class AnalyzeRound(BaseModel):
-    round: int = Field(ge=1, le=3)
+    round: str = Field(min_length=1, max_length=50)
     title: str = Field(min_length=1, max_length=50)
     summary: str = Field(default="", max_length=2000)
     suggestions: list[AnalyzeSuggestion] = Field(default_factory=list, max_length=20)
@@ -698,20 +698,20 @@ async def seed_defaults(session: AsyncSession) -> None:
         ("payment.alipay_f2f", "seller_id", "string", "alipay f2f seller_id", True),
         ("payment.alipay_f2f", "timeout_express", "string", "alipay f2f timeout_express", True),
         ("payment.alipay_f2f", "extra_options", "json", "alipay f2f extra_options", True),
-        ("ai.editor_check", "round_1_model_id", "string", "角色检查 AI 模型", False),
-        ("ai.editor_check", "round_2_model_id", "string", "逻辑检查 AI 模型", False),
-        ("ai.editor_check", "round_3_model_id", "string", "风格检查 AI 模型", False),
-        ("ai.editor_check", "round_1_thinking", "string", "角色检查思考强度", False),
-        ("ai.editor_check", "round_2_thinking", "string", "逻辑检查思考强度", False),
-        ("ai.editor_check", "round_3_thinking", "string", "风格检查思考强度", False),
-        ("ai.editor_check", "round_1_enabled", "boolean", "启用角色检查", False),
-        ("ai.editor_check", "round_2_enabled", "boolean", "启用逻辑检查", False),
-        ("ai.editor_check", "round_3_enabled", "boolean", "启用风格检查", False),
-        ("ai.editor_check", "round_2_chapter_count", "integer", "逻辑检查参考前 N 章", False),
-        ("ai.editor_check", "round_3_chapter_count", "integer", "风格检查参考前 N 章", False),
-        ("ai.editor_check", "round_1_prompt", "string", "角色检查提示词", False),
-        ("ai.editor_check", "round_2_prompt", "string", "逻辑检查提示词", False),
-        ("ai.editor_check", "round_3_prompt", "string", "风格检查提示词", False),
+        ("ai.editor_check", "character_model_id", "string", "角色检查 AI 模型", False),
+        ("ai.editor_check", "logic_model_id", "string", "逻辑检查 AI 模型", False),
+        ("ai.editor_check", "style_model_id", "string", "风格检查 AI 模型", False),
+        ("ai.editor_check", "character_thinking", "string", "角色检查思考强度", False),
+        ("ai.editor_check", "logic_thinking", "string", "逻辑检查思考强度", False),
+        ("ai.editor_check", "style_thinking", "string", "风格检查思考强度", False),
+        ("ai.editor_check", "character_enabled", "boolean", "启用角色检查", False),
+        ("ai.editor_check", "logic_enabled", "boolean", "启用逻辑检查", False),
+        ("ai.editor_check", "style_enabled", "boolean", "启用风格检查", False),
+        ("ai.editor_check", "logic_chapter_count", "integer", "逻辑检查参考前 N 章", False),
+        ("ai.editor_check", "style_chapter_count", "integer", "风格检查参考前 N 章", False),
+        ("ai.editor_check", "character_prompt", "string", "角色检查提示词", False),
+        ("ai.editor_check", "logic_prompt", "string", "逻辑检查提示词", False),
+        ("ai.editor_check", "style_prompt", "string", "风格检查提示词", False),
         ("billing", "points_per_cny", "integer", "积分汇率，1元人民币对应的积分数", False),
     ]
     for group, key, value_type, description, is_required in config_seeds:
@@ -730,21 +730,21 @@ async def seed_defaults(session: AsyncSession) -> None:
             value_defaults = {"string_value": "30m"}
         elif group == "payment.alipay_f2f" and key == "extra_options":
             value_defaults = {"json_value": {}}
-        elif group == "ai.editor_check" and key in ("round_1_thinking", "round_2_thinking", "round_3_thinking"):
+        elif group == "ai.editor_check" and key in ("character_thinking", "logic_thinking", "style_thinking"):
             value_defaults = {"string_value": "xhigh"}
-        elif group == "ai.editor_check" and key in ("round_1_enabled", "round_2_enabled", "round_3_enabled"):
+        elif group == "ai.editor_check" and key in ("character_enabled", "logic_enabled", "style_enabled"):
             value_defaults = {"boolean_value": True}
-        elif group == "ai.editor_check" and key in ("round_2_chapter_count", "round_3_chapter_count"):
+        elif group == "ai.editor_check" and key in ("logic_chapter_count", "style_chapter_count"):
             value_defaults = {"integer_value": 6}
-        elif group == "ai.editor_check" and key == "round_1_prompt":
-            from app.prompts import ROUND_1_PROMPT
-            value_defaults = {"string_value": ROUND_1_PROMPT}
-        elif group == "ai.editor_check" and key == "round_2_prompt":
-            from app.prompts import ROUND_2_PROMPT
-            value_defaults = {"string_value": ROUND_2_PROMPT}
-        elif group == "ai.editor_check" and key == "round_3_prompt":
-            from app.prompts import ROUND_3_PROMPT
-            value_defaults = {"string_value": ROUND_3_PROMPT}
+        elif group == "ai.editor_check" and key == "character_prompt":
+            from app.prompts import CHARACTER_PROMPT
+            value_defaults = {"string_value": CHARACTER_PROMPT}
+        elif group == "ai.editor_check" and key == "logic_prompt":
+            from app.prompts import LOGIC_PROMPT
+            value_defaults = {"string_value": LOGIC_PROMPT}
+        elif group == "ai.editor_check" and key == "style_prompt":
+            from app.prompts import STYLE_PROMPT
+            value_defaults = {"string_value": STYLE_PROMPT}
         if existing_config is None:
             defaults = dict(
                 config_group=group,
@@ -755,6 +755,7 @@ async def seed_defaults(session: AsyncSession) -> None:
                 **value_defaults,
             )
             session.add(GlobalConfig(**defaults))
+            await session.flush()
         elif value_defaults:
             for col, val in value_defaults.items():
                 if getattr(existing_config, col) is None:
@@ -1899,11 +1900,11 @@ THINKING_INTENSITY_MAP: dict[str, float] = {
 }
 
 
-async def _resolve_editor_model(session: AsyncSession, round_num: int) -> AiModel | None:
+async def _resolve_editor_model(session: AsyncSession, check_id: str) -> AiModel | None:
     result = await session.execute(
         select(GlobalConfig).where(
             GlobalConfig.config_group == "ai.editor_check",
-            GlobalConfig.config_key == f"round_{round_num}_model_id",
+            GlobalConfig.config_key == f"{check_id}_model_id",
         )
     )
     config = result.scalar_one_or_none()
@@ -1982,7 +1983,8 @@ async def _get_previous_context(
     return "\n\n---\n\n".join(lines)
 
 
-ROUND_TITLES = {1: "角色检查", 2: "逻辑检查", 3: "风格检查"}
+CHECK_TITLES = {"character": "角色检查", "logic": "逻辑检查", "style": "风格检查"}
+CHECK_IDS = ("character", "logic", "style")
 
 
 @router.post("/works/{work_id}/analyze")
@@ -2002,17 +2004,17 @@ async def analyze_chapter(
     )
     configs: dict[str, GlobalConfig] = {c.config_key: c for c in configs_result.scalars()}
 
-    def _round_enabled(round_num: int) -> bool:
-        cfg = configs.get(f"round_{round_num}_enabled")
+    def _check_enabled(check_id: str) -> bool:
+        cfg = configs.get(f"{check_id}_enabled")
         return bool(cfg.boolean_value) if cfg else True
 
-    def _round_thinking(round_num: int) -> float:
-        cfg = configs.get(f"round_{round_num}_thinking")
+    def _check_thinking(check_id: str) -> float:
+        cfg = configs.get(f"{check_id}_thinking")
         level = cfg.string_value if cfg and cfg.string_value else "xhigh"
         return THINKING_INTENSITY_MAP.get(level, 0.0)
 
-    def _round_chapter_count(round_num: int) -> int:
-        cfg = configs.get(f"round_{round_num}_chapter_count")
+    def _check_chapter_count(check_id: str) -> int:
+        cfg = configs.get(f"{check_id}_chapter_count")
         return cfg.integer_value if cfg and cfg.integer_value else 6
 
     settings = get_settings()
@@ -2028,8 +2030,8 @@ async def analyze_chapter(
     if payload.chapter_id:
         chars_ctx, surrounding_ctx, previous_ctx = await asyncio.gather(
             _get_characters_context(session, work_id),
-            _get_surrounding_context(session, work_id, payload.chapter_id, count=_round_chapter_count(2)),
-            _get_previous_context(session, work_id, payload.chapter_id, count=_round_chapter_count(3)),
+            _get_surrounding_context(session, work_id, payload.chapter_id, count=_check_chapter_count("logic")),
+            _get_previous_context(session, work_id, payload.chapter_id, count=_check_chapter_count("style")),
         )
     else:
         chars_ctx = await _get_characters_context(session, work_id)
@@ -2044,28 +2046,28 @@ async def analyze_chapter(
         "previous_chapters": previous_ctx,
     }
 
-    rounds_def: list[tuple[int, str, AiModel, float]] = []
-    for rnd in (1, 2, 3):
-        if not _round_enabled(rnd):
+    check_defs: list[tuple[str, str, AiModel, float]] = []
+    for check_id in CHECK_IDS:
+        if not _check_enabled(check_id):
             continue
-        prompt_cfg = configs.get(f"round_{rnd}_prompt")
+        prompt_cfg = configs.get(f"{check_id}_prompt")
         if prompt_cfg is None or not prompt_cfg.string_value:
             continue
-        model = await _resolve_editor_model(session, rnd)
+        model = await _resolve_editor_model(session, check_id)
         if model is None:
             continue
-        rounds_def.append((rnd, prompt_cfg.string_value, model, _round_thinking(rnd)))
+        check_defs.append((check_id, prompt_cfg.string_value, model, _check_thinking(check_id)))
 
-    if not rounds_def:
+    if not check_defs:
         return AnalyzeOut()
 
     from app.services.billing_service import pre_check_balance, deduct_by_usage
 
-    first_model = rounds_def[0][2]
-    estimated_tokens = max(1, len(text) // 2) * len(rounds_def)
+    first_model = check_defs[0][2]
+    estimated_tokens = max(1, len(text) // 2) * len(check_defs)
     await pre_check_balance(session, user.id, first_model, estimated_input_tokens=estimated_tokens)
 
-    async def _run_round(rnd: int, prompt_template: str, model: AiModel, thinking: float) -> tuple[AnalyzeRound, dict[str, int] | None, str | None]:
+    async def _run_check(check_id: str, prompt_template: str, model: AiModel, thinking: float) -> tuple[AnalyzeRound, dict[str, int] | None, str | None]:
         prompt = _fill_prompt(prompt_template, **placeholder_values)
         try:
             suggestions, usage = await request_analysis(
@@ -2073,16 +2075,16 @@ async def analyze_chapter(
                 prompt=prompt, thinking_intensity=thinking,
             )
             return AnalyzeRound(
-                round=rnd, title=ROUND_TITLES.get(rnd, f"第{rnd}轮"),
+                round=check_id, title=CHECK_TITLES.get(check_id, check_id),
                 suggestions=[AnalyzeSuggestion(**s) for s in suggestions],
             ), usage, None
         except HTTPException as exc:
             return AnalyzeRound(
-                round=rnd, title=ROUND_TITLES.get(rnd, f"第{rnd}轮"),
+                round=check_id, title=CHECK_TITLES.get(check_id, check_id),
                 summary=f"检查失败：{exc.detail}", suggestions=[],
             ), None, str(exc.detail)
 
-    results = await asyncio.gather(*(_run_round(rnd, tpl, model, thinking) for rnd, tpl, model, thinking in rounds_def))
+    results = await asyncio.gather(*(_run_check(check_id, tpl, model, thinking) for check_id, tpl, model, thinking in check_defs))
 
     rounds: list[AnalyzeRound] = []
     for rnd_obj, usage, _ in results:
@@ -2096,6 +2098,143 @@ async def analyze_chapter(
     await session.commit()
     total_suggestions = sum(len(r.suggestions) for r in rounds)
     return AnalyzeOut(rounds=rounds, total_suggestions=total_suggestions)
+
+
+@router.get("/works/{work_id}/analyze/checks")
+async def list_analysis_checks(
+    work_id: str,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, list[dict[str, str]]]:
+    await owned_work(session, user.id, work_id)
+    configs_result = await session.execute(
+        select(GlobalConfig).where(GlobalConfig.config_group == "ai.editor_check")
+    )
+    configs: dict[str, GlobalConfig] = {c.config_key: c for c in configs_result.scalars()}
+    checks: list[dict[str, str]] = []
+    for check_id in CHECK_IDS:
+        enabled_cfg = configs.get(f"{check_id}_enabled")
+        prompt_cfg = configs.get(f"{check_id}_prompt")
+        model_cfg = configs.get(f"{check_id}_model_id")
+        enabled = bool(enabled_cfg.boolean_value) if enabled_cfg else True
+        has_prompt = bool(prompt_cfg and prompt_cfg.string_value)
+        has_model = bool(model_cfg and model_cfg.string_value)
+        if enabled and has_prompt:
+            checks.append({
+                "id": check_id,
+                "title": CHECK_TITLES.get(check_id, check_id),
+                "has_model": has_model,
+            })
+    return {"checks": checks}
+
+
+@router.post("/works/{work_id}/analyze/{check_id}")
+async def analyze_chapter_check(
+    work_id: str,
+    check_id: str,
+    payload: AnalyzeIn,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> AnalyzeRound:
+    if check_id not in CHECK_TITLES:
+        raise HTTPException(status_code=404, detail=f"unknown check id: {check_id}")
+    await owned_work(session, user.id, work_id)
+    text = payload.content
+    if not text.strip():
+        return AnalyzeRound(round=check_id, title=CHECK_TITLES[check_id])
+
+    configs_result = await session.execute(
+        select(GlobalConfig).where(GlobalConfig.config_group == "ai.editor_check")
+    )
+    configs: dict[str, GlobalConfig] = {c.config_key: c for c in configs_result.scalars()}
+
+    def _check_enabled() -> bool:
+        cfg = configs.get(f"{check_id}_enabled")
+        return bool(cfg.boolean_value) if cfg else True
+
+    if not _check_enabled():
+        raise HTTPException(status_code=400, detail=f"check not enabled: {check_id}")
+
+    prompt_cfg = configs.get(f"{check_id}_prompt")
+    if prompt_cfg is None or not prompt_cfg.string_value:
+        raise HTTPException(status_code=400, detail=f"no prompt configured for: {check_id}")
+
+    model = await _resolve_editor_model(session, check_id)
+    if model is None:
+        raise HTTPException(status_code=503, detail=f"no active model configured for: {check_id}")
+
+    settings = get_settings()
+    base_url = settings.ai_provider_base_url
+    api_key = settings.ai_provider_api_key or ""
+
+    chapter_title = ""
+    char_ctx = ""
+    surround_ctx = ""
+    prev_ctx = ""
+    if payload.chapter_id:
+        chapter = await session.get(Chapter, payload.chapter_id)
+        if chapter:
+            chapter_title = chapter.title
+        if check_id == "character":
+            char_ctx = await _get_characters_context(session, work_id)
+        elif check_id == "logic":
+            chapter_count_cfg = configs.get("logic_chapter_count")
+            cnt = chapter_count_cfg.integer_value if chapter_count_cfg and chapter_count_cfg.integer_value else 6
+            char_ctx, surround_ctx, _ = await asyncio.gather(
+                _get_characters_context(session, work_id),
+                _get_surrounding_context(session, work_id, payload.chapter_id, count=cnt),
+                _get_previous_context(session, work_id, payload.chapter_id, count=0),  # not needed for logic
+            )
+        elif check_id == "style":
+            chapter_count_cfg = configs.get("style_chapter_count")
+            cnt = chapter_count_cfg.integer_value if chapter_count_cfg and chapter_count_cfg.integer_value else 6
+            char_ctx, prev_ctx = await asyncio.gather(
+                _get_characters_context(session, work_id),
+                _get_previous_context(session, work_id, payload.chapter_id, count=cnt),
+            )
+    else:
+        char_ctx = await _get_characters_context(session, work_id)
+
+    placeholder_values = {
+        "chapter_content": text,
+        "chapter_title": chapter_title,
+        "characters": char_ctx,
+        "surrounding_chapters": surround_ctx or "（未启用）",
+        "previous_chapters": prev_ctx or "（未启用）",
+    }
+
+    thinking_cfg = configs.get(f"{check_id}_thinking")
+    level = thinking_cfg.string_value if thinking_cfg and thinking_cfg.string_value else "xhigh"
+    thinking = THINKING_INTENSITY_MAP.get(level, 0.0)
+
+    prompt = _fill_prompt(prompt_cfg.string_value, **placeholder_values)
+
+    from app.services.billing_service import pre_check_balance, deduct_by_usage
+
+    estimated_tokens = max(1, len(text) // 2)
+    await pre_check_balance(session, user.id, model, estimated_input_tokens=estimated_tokens)
+
+    try:
+        suggestions, usage = await request_analysis(
+            text, base_url, api_key, model.provider_model_id,
+            prompt=prompt, thinking_intensity=thinking,
+        )
+    except HTTPException as exc:
+        return AnalyzeRound(
+            round=check_id, title=CHECK_TITLES[check_id],
+            summary=f"检查失败：{exc.detail}", suggestions=[],
+        )
+
+    if usage and (usage["prompt_tokens"] or usage["completion_tokens"]):
+        await deduct_by_usage(
+            session, user.id, model, usage,
+            work_id=work_id, source_id=work_id, source_type="ai_editor_check",
+        )
+    await session.commit()
+    return AnalyzeRound(
+        round=check_id, title=CHECK_TITLES[check_id],
+        suggestions=[AnalyzeSuggestion(**s) for s in suggestions],
+    )
 
 
 @router.get("/works/{work_id}/chat-sessions")

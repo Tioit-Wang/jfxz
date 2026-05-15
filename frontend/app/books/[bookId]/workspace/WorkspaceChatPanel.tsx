@@ -52,6 +52,7 @@ type WorkspaceChatPanelProps = {
   suggestions: ApiSuggestion[];
   activeSuggestionIndex: number | null;
   persistedAnalysis: PersistedAnalysis | null;
+  staleIndices: Set<number>;
   onSelectSuggestion: (index: number) => void;
   onAcceptSuggestion: (index: number) => void;
   onSendSuggestionToChat: (index: number) => void;
@@ -98,6 +99,7 @@ export function WorkspaceChatPanel({
   suggestions,
   activeSuggestionIndex,
   persistedAnalysis,
+  staleIndices,
   onSelectSuggestion,
   onAcceptSuggestion,
   onSendSuggestionToChat,
@@ -479,7 +481,7 @@ function AnalysisSuggestionsTab({
   onAcceptSuggestion: (index: number) => void;
   onSendSuggestionToChat: (index: number) => void;
 }) {
-  const [collapsedRounds, setCollapsedRounds] = useState<Record<number, boolean>>({});
+  const [collapsedRounds, setCollapsedRounds] = useState<Record<string, boolean>>({});
 
   if (!persistedAnalysis || !persistedAnalysis.rounds.length) {
     return (
@@ -512,7 +514,7 @@ function AnalysisSuggestionsTab({
     offset += round.suggestions.length;
   }
 
-  const toggleRound = (round: number) => {
+  const toggleRound = (round: string) => {
     setCollapsedRounds((prev) => ({ ...prev, [round]: !prev[round] }));
   };
 

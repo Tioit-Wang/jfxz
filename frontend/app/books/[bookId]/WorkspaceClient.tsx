@@ -98,6 +98,7 @@ import ShareDialog from "./workspace/ShareDialog";
 import VersionHistoryDialog from "./workspace/VersionHistoryDialog";
 import { WorkspaceSidebarPanel } from "./workspace/WorkspaceSidebarPanel";
 import { toolLabel, WorkspaceToolCall } from "./workspace/WorkspaceToolCall";
+import { WorkspaceThinkingBlock } from "./workspace/WorkspaceThinkingBlock";
 
 type WorkspaceClientProps = {
   bookId: string;
@@ -332,6 +333,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
 
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
+  const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set());
 
   const [characterSearch, setCharacterSearch] = useState("");
   const [activeCharacterId, setActiveCharacterId] = useState("");
@@ -1402,7 +1404,33 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
             items.map((item) => (item.id === assistantId ? { ...item, error: errorMessage } : item))
           );
         },
-        controller.signal
+        controller.signal,
+        // onThinking: accumulate thinking chunks into blocks
+        (thinkingChunk) => {
+          setMessages((items) =>
+            items.map((item) => {
+              if (item.id !== assistantId) return item;
+              const blocks = item.blocks ?? [];
+              const last = blocks[blocks.length - 1];
+              const updatedBlocks = (last && last.type === "thinking")
+                ? blocks.map((b, i) => i === blocks.length - 1 && b.type === "thinking" ? { ...b, content: b.content + thinkingChunk } : b)
+                : [...blocks, { type: "thinking" as const, content: thinkingChunk }];
+              return { ...item, blocks: updatedBlocks };
+            })
+          );
+        },
+        // onThinkingDone: auto-collapse all thinking blocks for this message
+        () => {
+          setExpandedThinking((prev) => {
+            const next = new Set(prev);
+            for (const key of prev) {
+              if (key.startsWith(`${assistantId}-thinking-`)) {
+                next.delete(key);
+              }
+            }
+            return next;
+          });
+        }
       );
       setMessages((items) =>
         items.map((item) => {
@@ -1443,6 +1471,15 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       setStreamingMessageId(null);
       if (error instanceof DOMException && error.name === "AbortError") {
         setChatStatus("idle");
+        setExpandedThinking((prev) => {
+          const next = new Set(prev);
+          for (const key of prev) {
+            if (key.startsWith(`${assistantId}-thinking-`)) {
+              next.delete(key);
+            }
+          }
+          return next;
+        });
         return;
       }
       if (!sseErrorShown) {
@@ -1906,6 +1943,15 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     });
   }
 
+  function toggleThinkingExpand(key: string) {
+    setExpandedThinking((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
   function renderMessageContent(message: ChatMessage) {
     const isStreaming = message.id === streamingMessageId;
 
@@ -1920,6 +1966,21 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
               if (!block.text) return null;
               const isLastText = index === lastBlockIdx && isStreaming;
               return <div key={`text-${index}`}>{renderMarkdown(block.text, isLastText)}</div>;
+            }
+            if (block.type === "thinking") {
+              if (!block.content) return null;
+              const thinkingKey = `${message.id}-thinking-${index}`;
+              const isThinkingStreaming = isStreaming && index === lastBlockIdx;
+              const isExpanded = expandedThinking.has(thinkingKey) || isThinkingStreaming;
+              return (
+                <WorkspaceThinkingBlock
+                  key={`thinking-${index}`}
+                  content={block.content}
+                  expanded={isExpanded}
+                  onToggle={() => toggleThinkingExpand(thinkingKey)}
+                  isStreaming={isThinkingStreaming}
+                />
+              );
             }
             const toolKey = `${message.id}-tool-${index}`;
             const isStarted = block.status === "started";

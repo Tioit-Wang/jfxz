@@ -1552,7 +1552,7 @@ async def preview_chapters(
 
     When `direction` is provided with `around`:
       - "after": returns limit chapters AFTER the target (cursor-forward).
-      - "before": returns limit chapters BEFORE the target (cursor-backward).
+      - "before": returns the window of limit chapters ending at the target.
     Otherwise, the legacy centered behavior applies: chapters are centered around
     the target with floor(limit/2) chapters before and after.
     When both `around` and `direction` are omitted, returns the first N chapters.
@@ -2332,9 +2332,18 @@ def append_text_block(blocks: list[dict[str, Any]], content: str) -> None:
     if not content:
         return
     if blocks and blocks[-1].get("type") == "text":
-        blocks[-1]["text"] = f'{blocks[-1].get("text", "")}{content}'
+        blocks[-1]["text"] = blocks[-1].get("text", "") + content
         return
     blocks.append({"type": "text", "text": content})
+
+
+def append_thinking_block(blocks: list[dict[str, Any]], content: str) -> None:
+    if not content:
+        return
+    if blocks and blocks[-1].get("type") == "thinking":
+        blocks[-1]["content"] = blocks[-1].get("content", "") + content
+        return
+    blocks.append({"type": "thinking", "content": content})
 
 
 def _tool_result_status(result_text: str) -> str:
@@ -2663,7 +2672,14 @@ async def send_chat_message(
             )
             try:
                 async for event in event_stream:
-                    if event.event == RunEvent.run_content:
+                    if event.event == RunEvent.reasoning_content_delta:
+                        reasoning_chunk = getattr(event, "reasoning_content", "") or ""
+                        if reasoning_chunk:
+                            append_thinking_block(blocks, reasoning_chunk)
+                            yield encode_sse("thinking", reasoning_chunk)
+                    elif event.event == RunEvent.reasoning_completed:
+                        yield encode_sse("thinking_done", {})
+                    elif event.event == RunEvent.run_content:
                         content = event.content
                         if content:
                             full_content_parts.append(content)
@@ -4068,7 +4084,7 @@ async def public_preview_chapters(
 
     When `direction` is provided with `around`:
       - "after": returns limit chapters AFTER the target (cursor-forward).
-      - "before": returns limit chapters BEFORE the target (cursor-backward).
+      - "before": returns the window of limit chapters ending at the target.
     Otherwise, the legacy centered behavior applies.
     """
     work_result = await session.execute(
@@ -4288,6 +4304,8 @@ async def admin_create_prompt(
     cat = await session.get(WritingPromptCategory, payload.category_id)
     if cat is None:
         raise HTTPException(status_code=400, detail="category not found")
+    if not cat.is_active:
+        raise HTTPException(status_code=400, detail="category is inactive")
     item = WritingPrompt(**payload.model_dump())
     session.add(item)
     await session.commit()
@@ -4306,6 +4324,8 @@ async def admin_update_prompt(
         cat = await session.get(WritingPromptCategory, payload.category_id)
         if cat is None:
             raise HTTPException(status_code=400, detail="category not found")
+        if not cat.is_active:
+            raise HTTPException(status_code=400, detail="category is inactive")
     for key, value in payload.model_dump().items():
         setattr(item, key, value)
     await session.commit()

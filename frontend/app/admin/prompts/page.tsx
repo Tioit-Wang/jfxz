@@ -124,9 +124,8 @@ export default function AdminPromptsPage() {
       setCatForm(null);
       await loadCategories();
       toast.success("分类已保存");
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 409) toast.error("该分类下存在提示词，无法操作");
-      else toast.error("分类保存失败");
+    } catch {
+      toast.error("分类保存失败");
     }
   }
 

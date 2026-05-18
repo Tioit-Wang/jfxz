@@ -201,6 +201,8 @@ export type ChatAction = {
 
 export type TextBlock = { type: "text"; text: string };
 
+export type ThinkingBlock = { type: "thinking"; content: string };
+
 export type ToolCallBlock = {
   type: "tool_call";
   tool: string;
@@ -209,10 +211,11 @@ export type ToolCallBlock = {
   result?: string;
 };
 
-export type ContentBlock = TextBlock | ToolCallBlock;
+export type ContentBlock = TextBlock | ThinkingBlock | ToolCallBlock;
 
 type ApiContentBlock =
   | { type: "text"; text: string }
+  | { type: "thinking"; content: string }
   | { type: "tool_call"; tool: string; display: string; status: "started" | "completed" | "error"; result?: string };
 
 export type ChatMessage = {
@@ -867,6 +870,12 @@ function normalizeContentBlocks(blocks?: ApiContentBlock[]): ContentBlock[] | un
     if (block.type === "text") {
       if (block.text) {
         normalized.push({ type: "text", text: block.text });
+      }
+      continue;
+    }
+    if (block.type === "thinking") {
+      if (block.content) {
+        normalized.push({ type: "thinking", content: block.content });
       }
       continue;
     }
@@ -1753,7 +1762,9 @@ export class ApiClient {
     thinkingIntensity?: number,
     onToolCall?: (tool: string, status: "started" | "completed" | "error", data?: { display?: string; result?: string }) => void,
     onError?: (message: string) => void,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    onThinking?: (chunk: string) => void,
+    onThinkingDone?: () => void
   ): Promise<ChatMessage> {
     const response = await this.rawRequest(`/chat-sessions/${sessionId}/messages`, {
       signal,
@@ -1813,6 +1824,15 @@ export class ApiClient {
             } catch {
               // Ignore malformed tool events
             }
+          } else if (event.event === "thinking") {
+            const text = parseSseText(event.data);
+            if (text !== null && onThinking) {
+              onThinking(text);
+            }
+          } else if (event.event === "thinking_done") {
+            if (onThinkingDone) {
+              onThinkingDone();
+            }
           } else if (event.event === "text" || event.event === null) {
             const text = parseSseText(event.data);
             if (text !== null) {
@@ -1850,6 +1870,15 @@ export class ApiClient {
             }
           } catch {
             // Ignore malformed tool events
+          }
+        } else if (event.event === "thinking" && event.data) {
+          const text = parseSseText(event.data);
+          if (text !== null && onThinking) {
+            onThinking(text);
+          }
+        } else if (event.event === "thinking_done") {
+          if (onThinkingDone) {
+            onThinkingDone();
           }
         } else if ((event.event === "text" || event.event === null) && event.data) {
           const text = parseSseText(event.data);

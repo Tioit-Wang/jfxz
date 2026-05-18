@@ -98,6 +98,10 @@ class WorkIn(BaseModel):
     background_rules: str = Field(default="", max_length=20000)
     focus_requirements: str | None = Field(default=None, max_length=10000)
     forbidden_requirements: str | None = Field(default=None, max_length=10000)
+    estimated_word_count: int = Field(default=600000)
+    estimated_chapter_word_count: int = Field(default=2000)
+    target_audience: str = Field(default="", max_length=100)
+    writing_style: str = Field(default="", max_length=500)
 
 
 class ShareToggleIn(BaseModel):
@@ -733,6 +737,7 @@ async def seed_defaults(session: AsyncSession) -> None:
         ("ai.editor_check", "logic_prompt", "string", "逻辑检查提示词", False),
         ("ai.editor_check", "style_prompt", "string", "风格检查提示词", False),
         ("billing", "points_per_cny", "integer", "积分汇率，1元人民币对应的积分数", False),
+        ("ai.prompt_description", "config", "string", "AI生成描述的模型配置，JSON格式：model_id/thinking/prompt，需包含{{detail_prompt}}占位符", True),
     ]
     for group, key, value_type, description, is_required in config_seeds:
         existing_config = await one(
@@ -765,6 +770,14 @@ async def seed_defaults(session: AsyncSession) -> None:
         elif group == "ai.editor_check" and key == "style_prompt":
             from app.prompts import STYLE_PROMPT
             value_defaults = {"string_value": STYLE_PROMPT}
+        elif group == "ai.prompt_description" and key == "config":
+            value_defaults = {
+                "string_value": json.dumps({
+                    "model_id": "__none",
+                    "thinking": "medium",
+                    "prompt": "请根据以下详细提示词，生成一段简洁的摘要描述（不超过200字），用于让AI助理快速识别该提示词的用途。\n\n详细提示词：\n{{detail_prompt}}\n\n请只输出摘要描述，不要附加其他内容。",
+                }, ensure_ascii=False),
+            }
         if existing_config is None:
             defaults = dict(
                 config_group=group,

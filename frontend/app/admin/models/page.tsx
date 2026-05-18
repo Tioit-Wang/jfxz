@@ -4,7 +4,7 @@ import { AlertCircle, Minus, Plus, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ApiError, type AdminAiModel, type AdminAiModelInput, type AdminModelListParams } from "@/api";
-import { AdminHeading, AdminPage, AdminPagination, StatusBadge } from "../_components";
+import { AdminPage, AdminPagination, StatusBadge } from "../_components";
 import { adminClient } from "../admin-utils";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
@@ -188,10 +188,6 @@ export default function AdminModelsPage() {
 
   return (
     <AdminPage>
-      <AdminHeading title="模型管理" description="管理 AI 模型配置、评分和定价。" action={
-        <Button onClick={() => setForm({ ...emptyForm })} className="gap-1.5"><Plus className="size-4" />新建模型</Button>
-      } />
-
       {/* Search + Status filter */}
       <div className="flex shrink-0 items-center gap-2">
         <div className="relative flex-1 max-w-xs">
@@ -206,6 +202,7 @@ export default function AdminModelsPage() {
             <SelectItem value="inactive">inactive</SelectItem>
           </SelectGroup></SelectContent>
         </Select>
+        <Button onClick={() => setForm({ ...emptyForm })} className="ml-auto gap-1.5 shrink-0"><Plus className="size-4" />新建模型</Button>
       </div>
 
       {/* Range filters */}

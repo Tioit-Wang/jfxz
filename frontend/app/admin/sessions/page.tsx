@@ -4,7 +4,7 @@ import { AlertCircle, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { type AdminSession } from "@/api";
-import { AdminHeading, AdminPage, AdminPagination } from "../_components";
+import { AdminPage, AdminPagination } from "../_components";
 import { adminClient, formatDate } from "../admin-utils";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -58,7 +58,7 @@ export default function AdminSessionsPage() {
 
   return (
     <AdminPage>
-      <AdminHeading title="会话管理" description="只读查看用户会话索引和 Agent Session 基础信息。" />
+
 
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-sm">

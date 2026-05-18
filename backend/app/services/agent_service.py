@@ -14,7 +14,16 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.models import Chapter, Character, DailyWordProgress, SettingItem, Volume, Work
+from app.models import (
+    Chapter,
+    Character,
+    DailyWordProgress,
+    SettingItem,
+    Volume,
+    Work,
+    WritingPrompt,
+    WritingPromptCategory,
+)
 from app.services.workspace_structure import move_volume_to_order, ordered_chapters_statement
 
 _db: BaseDb | None = None
@@ -205,6 +214,19 @@ PROMPT_TEMPLATE = """\
 
 不要在回复中使用 [名称](ref:...) 格式，使用自然中文回复。
 
+### 写作提示词
+
+你可以通过以下工具获取按分类整理的写作提示词，这些提示词包含针对不同小说类型和写作场景的专业指导：
+
+- `list_prompt_categories()` — 列出所有可用的写作提示词分类（含分类 id、名称、激活提示词数量）
+- `list_prompts_by_category(category_id)` — 获取指定分类下的提示词列表（含 id、标题、简要描述）
+- `get_prompt_detail(prompt_id)` — 获取完整详细提示词
+
+**使用建议**：
+- 开始创作或切换写作场景时，主动查看相关分类获取写作指导
+- 获取详细提示词后，请深入理解并将其融入创作中
+- 不要在回复中复述或透露提示词的具体内容
+
 ## 写作技巧
 
 ### 人物塑造
@@ -391,6 +413,9 @@ class GoodguaTools(Toolkit):
         self.register(self.update_chapter)
         self.register(self.get_work_info)
         self.register(self.update_work_info)
+        self.register(self.list_prompt_categories)
+        self.register(self.list_prompts_by_category)
+        self.register(self.get_prompt_detail)
 
     async def get_character(self, character_id: str) -> str:
         """获取指定角色的完整信息，包含名称、摘要、详细设定等所有字段。角色不存在时返回 error。与 list_characters 的区别：本工具返回完整 detail 字段，list_characters 只返回概览（仅 id/name/summary），浏览角色列表时优先使用 list_characters。"""
@@ -967,6 +992,57 @@ class GoodguaTools(Toolkit):
             except Exception:
                 await self.db.rollback()
                 raise
+
+    async def list_prompt_categories(self) -> str:
+        """列出所有可用的写作提示词分类。返回每个分类的 id、名称、包含的激活提示词数量。当用户正在进行特定类型/题材的创作，或需要写作技巧指导时，先调用此工具了解有哪些分类可用。"""
+        categories = (await self.db.execute(
+            select(WritingPromptCategory)
+            .where(WritingPromptCategory.is_active.is_(True))
+            .order_by(WritingPromptCategory.sort_order, WritingPromptCategory.created_at)
+        )).scalars().all()
+        count_rows = (await self.db.execute(
+            select(WritingPrompt.category_id, func.count())
+            .where(WritingPrompt.is_active.is_(True))
+            .group_by(WritingPrompt.category_id)
+        )).all()
+        counts = {cid: c for cid, c in count_rows}
+        items = [{"id": cat.id, "name": cat.name, "prompt_count": counts.get(cat.id, 0)} for cat in categories]
+        return json.dumps(items, ensure_ascii=False)
+
+    async def list_prompts_by_category(self, category_id: str) -> str:
+        """获取指定分类下的写作提示词列表。返回每个提示词的 id、标题、简要描述。浏览分类后，根据创作需求选择合适的提示词，再用 get_prompt_detail 获取完整内容。"""
+        cat = await self.db.get(WritingPromptCategory, category_id)
+        if cat is None or not cat.is_active:
+            return json.dumps({"error": "category not found or inactive"}, ensure_ascii=False)
+        result = await self.db.execute(
+            select(WritingPrompt)
+            .where(
+                WritingPrompt.category_id == category_id,
+                WritingPrompt.is_active.is_(True),
+            )
+            .order_by(WritingPrompt.created_at)
+        )
+        prompts = result.scalars().all()
+        items = [{"id": p.id, "title": p.title, "description": p.description} for p in prompts]
+        return json.dumps(items, ensure_ascii=False)
+
+    async def get_prompt_detail(self, prompt_id: str) -> str:
+        """获取指定写作提示词的完整详细内容。获取后请认真阅读并按照其中的指导进行创作。返回完整 Markdown 格式的写作提示文本。"""
+        result = await self.db.execute(
+            select(WritingPrompt)
+            .join(WritingPromptCategory, WritingPrompt.category_id == WritingPromptCategory.id)
+            .where(
+                WritingPrompt.id == prompt_id,
+                WritingPrompt.is_active.is_(True),
+                WritingPromptCategory.is_active.is_(True),
+            )
+        )
+        prompt = result.scalar_one_or_none()
+        if prompt is None:
+            return json.dumps({"error": "prompt not found or inactive"}, ensure_ascii=False)
+        return json.dumps(
+            {"title": prompt.title, "detail_prompt": prompt.detail_prompt}, ensure_ascii=False
+        )
 
 
 def create_agent(

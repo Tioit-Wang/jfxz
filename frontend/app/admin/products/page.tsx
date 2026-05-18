@@ -4,7 +4,7 @@ import { AlertCircle, ChevronDown, ChevronUp, Plus, Search, Trash2 } from "lucid
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { type AdminProductInput, type AdminProductKind, type AiModelOption, type CostPreviewOut } from "@/api";
-import { AdminHeading, AdminPage, AdminPagination, StatusBadge } from "../_components";
+import { AdminPage, AdminPagination, StatusBadge } from "../_components";
 import { adminClient, money } from "../admin-utils";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
@@ -140,17 +140,12 @@ export default function AdminProductsPage() {
 
   return (
     <AdminPage>
-      <AdminHeading title="套餐与加油包" description="管理订阅套餐和积分加油包。" action={
-        <div className="flex items-center gap-2">
-          <Button onClick={() => setForm(emptyPlan)}><Plus className="size-4" />新建套餐</Button>
-          <Button variant="outline" onClick={() => setForm(emptyTopup)}><Plus className="size-4" />新建加油包</Button>
-        </div>
-      } />
-
       <div className="flex shrink-0 items-center gap-3">
         <Tabs value={activeKind} onValueChange={(v) => setActiveKind(v as AdminProductKind)}>
           <TabsList className="border border-border"><TabsTrigger value="plans" className="data-[state=active]:bg-card">套餐</TabsTrigger><TabsTrigger value="credit-packs" className="data-[state=active]:bg-card">加油包</TabsTrigger></TabsList>
         </Tabs>
+        <Button onClick={() => setForm(emptyPlan)} className="shrink-0 gap-1.5"><Plus className="size-4" />新建套餐</Button>
+        <Button variant="outline" onClick={() => setForm(emptyTopup)} className="shrink-0 gap-1.5"><Plus className="size-4" />新建加油包</Button>
         <div className="relative flex-1 max-w-xs">
           <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
           <Input className="h-9 pl-9" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索商品名称…" />

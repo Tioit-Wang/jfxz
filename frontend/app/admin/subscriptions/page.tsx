@@ -4,7 +4,7 @@ import { AlertCircle, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { type AdminSubscription } from "@/api";
-import { AdminHeading, AdminPage, AdminPagination, StatusBadge } from "../_components";
+import { AdminPage, AdminPagination, StatusBadge } from "../_components";
 import { adminClient, formatDate } from "../admin-utils";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -56,7 +56,7 @@ export default function AdminSubscriptionsPage() {
 
   return (
     <AdminPage>
-      <AdminHeading title="订阅管理" description="查看用户当前套餐、周期和续费时间。" />
+
 
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-sm">

@@ -326,6 +326,49 @@ export type AdminListParams = {
   pageSize?: number;
 };
 
+export type PromptCategory = {
+  id: string;
+  name: string;
+  sort_order: number;
+  is_active: boolean;
+  prompt_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PromptCategoryInput = {
+  name: string;
+  sort_order?: number;
+  is_active?: boolean;
+};
+
+export type WritingPrompt = {
+  id: string;
+  title: string;
+  description: string;
+  category_id: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type WritingPromptDetail = WritingPrompt & {
+  detail_prompt: string;
+  category_name: string;
+};
+
+export type WritingPromptInput = {
+  title: string;
+  description: string;
+  detail_prompt: string;
+  category_id: string;
+  is_active?: boolean;
+};
+
+export type PromptListParams = AdminListParams & {
+  category_id?: string;
+};
+
 export type AdminProductInput = {
   name: string;
   priceAmount: string;
@@ -1427,6 +1470,61 @@ export class ApiClient {
       method: "PATCH",
       body: JSON.stringify(aiModelPayload(input))
     });
+  }
+
+  // ---- Writing Prompt Categories ----
+
+  async listAdminPromptCategories(params: AdminListParams = {}): Promise<Paginated<PromptCategory>> {
+    return this.request<Paginated<PromptCategory>>(`/admin/prompt-categories${this.listQuery(params)}`);
+  }
+
+  async createAdminPromptCategory(input: PromptCategoryInput): Promise<PromptCategory> {
+    return this.request<PromptCategory>("/admin/prompt-categories", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  }
+
+  async updateAdminPromptCategory(id: string, input: PromptCategoryInput): Promise<PromptCategory> {
+    return this.request<PromptCategory>(`/admin/prompt-categories/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(input)
+    });
+  }
+
+  async deleteAdminPromptCategory(id: string): Promise<void> {
+    await this.request(`/admin/prompt-categories/${id}`, { method: "DELETE" });
+  }
+
+  // ---- Writing Prompts ----
+
+  async listAdminPrompts(params: PromptListParams = {}): Promise<Paginated<WritingPrompt>> {
+    const search = new URLSearchParams(this.listQuery(params).replace(/^\?/, ""));
+    if (params.category_id) search.set("category_id", params.category_id);
+    const qs = search.toString() ? `?${search}` : "";
+    return this.request<Paginated<WritingPrompt>>(`/admin/prompts${qs}`);
+  }
+
+  async getAdminPrompt(id: string): Promise<WritingPromptDetail> {
+    return this.request<WritingPromptDetail>(`/admin/prompts/${id}`);
+  }
+
+  async createAdminPrompt(input: WritingPromptInput): Promise<WritingPrompt> {
+    return this.request<WritingPrompt>("/admin/prompts", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  }
+
+  async updateAdminPrompt(id: string, input: WritingPromptInput): Promise<WritingPrompt> {
+    return this.request<WritingPrompt>(`/admin/prompts/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(input)
+    });
+  }
+
+  async deleteAdminPrompt(id: string): Promise<void> {
+    await this.request(`/admin/prompts/${id}`, { method: "DELETE" });
   }
 
   async listAdminProducts(): Promise<{

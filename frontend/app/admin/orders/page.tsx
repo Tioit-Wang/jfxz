@@ -4,7 +4,7 @@ import { AlertCircle, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { type AdminOrder } from "@/api";
-import { AdminHeading, AdminPage, AdminPagination, StatusBadge } from "../_components";
+import { AdminPage, AdminPagination, StatusBadge } from "../_components";
 import { adminClient, formatDate, money } from "../admin-utils";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -56,7 +56,7 @@ export default function AdminOrdersPage() {
 
   return (
     <AdminPage>
-      <AdminHeading title="订单管理" description="查看订单、支付状态和权益发放来源。" />
+
 
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-sm">

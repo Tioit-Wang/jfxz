@@ -372,3 +372,31 @@ class GlobalConfig(Base, TimestampMixin):
     json_value: Mapped[dict | None] = mapped_column(JSON)
     description: Mapped[str | None] = mapped_column(Text)
     is_required: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class WritingPromptCategory(Base, TimestampMixin):
+    __tablename__ = "writing_prompt_category"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    prompts: Mapped[list["WritingPrompt"]] = relationship(
+        back_populates="category", cascade="all, delete-orphan"
+    )
+
+
+class WritingPrompt(Base, TimestampMixin):
+    __tablename__ = "writing_prompt"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    title: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
+    detail_prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    category_id: Mapped[str] = mapped_column(
+        ForeignKey("writing_prompt_category.id", ondelete="CASCADE"), index=True
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    category: Mapped["WritingPromptCategory"] = relationship(back_populates="prompts")

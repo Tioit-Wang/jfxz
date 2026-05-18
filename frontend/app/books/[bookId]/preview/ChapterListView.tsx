@@ -2,80 +2,87 @@
 
 import type { Chapter } from "@/domain";
 
-export type LoadDirection = "up" | "down";
-
 export function ChapterListView({
-  chapters,
+  chapter,
   fontSize,
-  loadingMore,
+  currentOrder,
   total,
-  loadedCount,
-  topSentinelRef,
-  bottomSentinelRef,
+  hasPrev,
+  hasNext,
+  onPrev,
+  onNext,
+  loadingPrev,
+  loadingNext,
 }: {
-  chapters: Chapter[];
+  chapter: Chapter;
   fontSize: number;
-  loadingMore: LoadDirection | null;
+  currentOrder: number;
   total: number;
-  loadedCount: number;
-  topSentinelRef: React.RefObject<HTMLDivElement | null>;
-  bottomSentinelRef: React.RefObject<HTMLDivElement | null>;
+  hasPrev: boolean;
+  hasNext: boolean;
+  onPrev: () => void;
+  onNext: () => void;
+  loadingPrev: boolean;
+  loadingNext: boolean;
 }) {
-  if (chapters.length === 0) return null;
-
   return (
-    <>
-      {/* Top sentinel */}
-      <div ref={topSentinelRef} className="h-1" />
+    <div
+      className="select-none"
+      onCopy={(e) => e.preventDefault()}
+      onCut={(e) => e.preventDefault()}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      <article
+        id={`ch-${chapter.id}`}
+        className="mb-10"
+        style={{ fontSize: `${fontSize}px`, lineHeight: 1.9 }}
+      >
+        <h2 className="mb-6 text-center text-2xl font-bold tracking-wide" style={{ fontSize: `${fontSize + 4}px` }}>
+          {chapter.title}
+        </h2>
+        {chapter.content ? (
+          <div className="space-y-4 leading-relaxed text-neutral-800">
+            {chapter.content.split("\n").map((paragraph, idx) => {
+              const trimmed = paragraph.trimEnd();
+              if (!trimmed) return <div key={idx} className="h-3" />;
+              return (
+                <p key={idx} className="indent-8">
+                  {trimmed}
+                </p>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-center text-neutral-400 italic">本章暂无正文</p>
+        )}
+      </article>
 
-      {loadingMore === "up" && (
-        <div className="flex justify-center py-6">
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-600" />
-        </div>
-      )}
-
-      {chapters.map((chapter) => (
-        <article
-          key={chapter.id}
-          id={`ch-${chapter.id}`}
-          className="mb-10"
-          style={{ fontSize: `${fontSize}px`, lineHeight: 1.9 }}
+      {/* Navigation */}
+      <div className="flex items-center justify-between border-t border-neutral-200 pt-6 mt-10">
+        <button
+          onClick={onPrev}
+          disabled={!hasPrev || loadingPrev}
+          className="flex items-center gap-1 rounded-lg border border-neutral-200 bg-white px-4 py-2 text-sm text-neutral-700 transition-colors hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          <h2 className="mb-6 text-center text-2xl font-bold tracking-wide" style={{ fontSize: `${fontSize + 4}px` }}>
-            {chapter.title}
-          </h2>
-          {chapter.content ? (
-            <div className="space-y-4 leading-relaxed text-neutral-800">
-              {chapter.content.split("\n").map((paragraph, idx) => {
-                const trimmed = paragraph.trimEnd();
-                if (!trimmed) return <div key={idx} className="h-3" />;
-                return (
-                  <p key={idx} className="indent-8">
-                    {trimmed}
-                  </p>
-                );
-              })}
-            </div>
-          ) : (
-            <p className="text-center text-neutral-400 italic">本章暂无正文</p>
-          )}
-        </article>
-      ))}
-
-      {loadingMore === "down" && (
-        <div className="flex justify-center py-6">
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-600" />
-        </div>
-      )}
-
-      {/* Loaded count indicator */}
-      <div className="py-6 text-center text-xs text-neutral-400">
-        已加载 {loadedCount} / {total} 章
-        {loadedCount < total && <span className="ml-1">· 继续滚动加载更多</span>}
+          {loadingPrev ? (
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-600" />
+          ) : null}
+          上一章
+        </button>
+        <span className="text-xs text-neutral-400">
+          第 {currentOrder} / {total} 章
+        </span>
+        <button
+          onClick={onNext}
+          disabled={!hasNext || loadingNext}
+          className="flex items-center gap-1 rounded-lg border border-neutral-200 bg-white px-4 py-2 text-sm text-neutral-700 transition-colors hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          下一章
+          {loadingNext ? (
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-600" />
+          ) : null}
+        </button>
       </div>
-
-      {/* Bottom sentinel */}
-      <div ref={bottomSentinelRef} className="h-1" />
-    </>
+    </div>
   );
 }

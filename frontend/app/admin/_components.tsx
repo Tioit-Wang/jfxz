@@ -8,26 +8,6 @@ import {
   PaginationPrevious
 } from "@/components/ui/pagination";
 
-export function AdminHeading({
-  title,
-  description,
-  action
-}: Readonly<{
-  title: string;
-  description: string;
-  action?: ReactNode;
-}>) {
-  return (
-    <header className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-      <div className="flex min-w-0 flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-[-0.02em] text-foreground">{title}</h1>
-        <p className="max-w-3xl text-sm text-muted-foreground">{description}</p>
-      </div>
-      {action ? <div className="flex shrink-0 items-center gap-2">{action}</div> : null}
-    </header>
-  );
-}
-
 export function AdminPage({ children }: Readonly<{ children: ReactNode }>) {
   return <div className="flex h-full min-h-0 flex-col gap-6 overflow-hidden">{children}</div>;
 }

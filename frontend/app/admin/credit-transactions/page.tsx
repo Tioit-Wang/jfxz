@@ -4,7 +4,7 @@ import { Minus, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { type AdminCreditTransaction } from "@/api";
-import { AdminHeading, AdminPage, AdminPagination } from "../_components";
+import { AdminPage, AdminPagination } from "../_components";
 import { adminClient, formatDate } from "../admin-utils";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -179,7 +179,7 @@ export default function AdminCreditTransactionsPage() {
 
   return (
     <AdminPage>
-      <AdminHeading title="积分流水" description="只读查看用户积分发放、消耗、清零、退款和调整记录。" />
+
 
       {/* Search + Select row */}
       <div className="flex flex-wrap items-center gap-2">

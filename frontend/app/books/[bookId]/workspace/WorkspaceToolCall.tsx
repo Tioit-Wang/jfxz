@@ -40,6 +40,9 @@ const TOOL_LABELS: Record<string, string> = {
   update_volume: "更新卷",
   get_work_info: "查看作品",
   update_work_info: "更新作品",
+  list_prompt_categories: "查询写作提示",
+  list_prompts_by_category: "查询写作提示",
+  get_prompt_detail: "查询写作提示",
 };
 
 export function toolLabel(toolName: string): string {

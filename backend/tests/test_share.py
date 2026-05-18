@@ -98,6 +98,59 @@ async def test_public_preview_no_auth_required(client: AsyncClient) -> None:
     assert resp.status_code == 200
 
 
+async def test_public_preview_direction_after(client: AsyncClient) -> None:
+    """public_preview_chapters with direction=after returns correct chapters."""
+    headers = await auth_headers(client)
+    work_id = await create_work(client, headers)
+    # Create chapters via the chapters API
+    ch_ids = []
+    for i in range(1, 6):
+        resp = await client.post(
+            f"/works/{work_id}/chapters",
+            headers=headers,
+            json={"title": f"第{i}章", "content": f"正文{i}", "order": i},
+        )
+        assert resp.status_code == 200
+        ch_ids.append(resp.json()["id"])
+
+    r_share = await client.patch(f"/works/{work_id}/share", headers=headers, json={"share_enabled": True})
+    token = r_share.json()["share_token"]
+
+    # direction=after from chapter 3
+    resp = await client.get(f"/public/{token}/preview?around={ch_ids[2]}&limit=2&direction=after")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["chapters"]) == 2
+    assert [ch["title"] for ch in data["chapters"]] == ["第4章", "第5章"]
+    assert "work" in data
+    assert data["work"]["title"] == "雾港纪事"
+
+
+async def test_public_preview_direction_before(client: AsyncClient) -> None:
+    """public_preview_chapters with direction=before returns correct chapters."""
+    headers = await auth_headers(client)
+    work_id = await create_work(client, headers)
+    ch_ids = []
+    for i in range(1, 6):
+        resp = await client.post(
+            f"/works/{work_id}/chapters",
+            headers=headers,
+            json={"title": f"第{i}章", "content": f"正文{i}", "order": i},
+        )
+        assert resp.status_code == 200
+        ch_ids.append(resp.json()["id"])
+
+    r_share = await client.patch(f"/works/{work_id}/share", headers=headers, json={"share_enabled": True})
+    token = r_share.json()["share_token"]
+
+    # direction=before from chapter 3 (returns chapters preceding target)
+    resp = await client.get(f"/public/{token}/preview?around={ch_ids[2]}&limit=2&direction=before")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["chapters"]) == 2
+    assert [ch["title"] for ch in data["chapters"]] == ["第1章", "第2章"]
+
+
 async def test_share_status_requires_owner(client: AsyncClient) -> None:
     h1 = await auth_headers(client, "owner@example.com")
     h2 = await auth_headers(client, "other@example.com")

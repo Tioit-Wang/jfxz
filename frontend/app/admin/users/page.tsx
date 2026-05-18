@@ -4,7 +4,7 @@ import { Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { type AdminBalanceAdjustInput, type AdminUserListItem, type ApiUser, type UserProfile } from "@/api";
-import { AdminHeading, AdminPage, AdminPagination, StatusBadge } from "../_components";
+import { AdminPage, AdminPagination, StatusBadge } from "../_components";
 import { adminClient, formatDate } from "../admin-utils";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
@@ -75,7 +75,7 @@ export default function AdminUsersPage() {
 
   return (
     <AdminPage>
-      <AdminHeading title="用户管理" description="查看用户资料、账户状态、订阅和积分。" />
+
 
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-sm">

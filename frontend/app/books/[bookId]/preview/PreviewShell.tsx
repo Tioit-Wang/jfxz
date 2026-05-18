@@ -8,7 +8,7 @@ import { ApiClient } from "@/api";
 import type { Chapter } from "@/domain";
 import { userLoginPath } from "@/auth";
 import { cn } from "@/lib/utils";
-import { ChapterListView, type LoadDirection } from "./ChapterListView";
+import { ChapterListView } from "./ChapterListView";
 
 const FONT_PRESETS = [
   { label: "小", value: 14 },
@@ -19,7 +19,6 @@ const FONT_PRESETS = [
 
 const FONT_MIN = 12;
 const FONT_MAX = 28;
-const CHAPTER_BATCH = 1;
 
 export default function PreviewShell({ bookId }: { bookId: string }) {
   const router = useRouter();
@@ -28,21 +27,14 @@ export default function PreviewShell({ bookId }: { bookId: string }) {
 
   const [mode, setMode] = useState<"pc" | "mobile">("pc");
   const [fontSize, setFontSize] = useState(() => mode === "mobile" ? 14 : 18);
-  const [chapters, setChapters] = useState<Chapter[]>([]);
+  const [chapter, setChapter] = useState<Chapter | null>(null);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState<LoadDirection | null>(null);
+  const [navigating, setNavigating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [workTitle, setWorkTitle] = useState("");
 
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const topSentinelRef = useRef<HTMLDivElement>(null);
-  const bottomSentinelRef = useRef<HTMLDivElement>(null);
-  const loadedIdsRef = useRef<Set<string>>(new Set());
-  const jumpTargetRef = useRef<string | null>(null);
   const loadingRef = useRef(false);
-  const reachedStartRef = useRef(false);
-  const reachedEndRef = useRef(false);
 
   const client = useMemo(
     () =>
@@ -52,118 +44,86 @@ export default function PreviewShell({ bookId }: { bookId: string }) {
     [router, bookId]
   );
 
-  const loadChapters = useCallback(
-    async (around: string | undefined, direction: LoadDirection | "jump") => {
-      if (loadingRef.current) return;
-      if (direction === "up" && reachedStartRef.current) return;
-      if (direction === "down" && reachedEndRef.current) return;
-      loadingRef.current = true;
-      if (direction !== "jump") setLoadingMore(direction);
-
-      try {
-        const apiDir = direction === "down" ? "after" : direction === "up" ? "before" : undefined;
-        const result = await client.previewChapters(bookId, around, CHAPTER_BATCH, apiDir);
-
-        setChapters((prev) => {
-          const existing = new Map(prev.map((c) => [c.id, c]));
-          const incoming = result.chapters.filter((c) => !existing.has(c.id));
-
-          if (direction === "jump") return result.chapters;
-          if (incoming.length === 0) {
-            if (direction === "up") reachedStartRef.current = true;
-            if (direction === "down") reachedEndRef.current = true;
-            return prev;
-          }
-          if (direction === "down") return [...prev, ...incoming];
-          return [...incoming, ...prev];
-        });
-
-        setTotal(result.total);
-        if (direction === "jump") jumpTargetRef.current = around || null;
-
-        for (const ch of result.chapters) loadedIdsRef.current.add(ch.id);
-        if (direction === "jump" && result.chapters.length >= result.total) {
-          reachedStartRef.current = true;
-          reachedEndRef.current = true;
-        }
-        setError(null);
-      } catch (err: unknown) {
-        if (err && typeof err === "object" && "status" in err && (err as { status: number }).status === 401) return;
-        setError("加载预览数据失败，请检查网络后重试");
-      } finally {
-        loadingRef.current = false;
-        setLoadingMore(null);
-        if (direction === "jump") setLoading(false);
-      }
-    },
-    [client, bookId]
-  );
-
-  // Bootstrap: load work info + initial chapters
+  // Initial load: fetch work info and first/target chapter
   useEffect(() => {
     let cancelled = false;
     async function init() {
       try {
-        const bootstrap = await client.getWorkspaceBootstrap(bookId, 1, 0);
+        const bootstrap = await client.getWorkspaceBootstrap(bookId, 1, 1);
         if (cancelled) return;
         setWorkTitle(bootstrap.work.title);
-        await loadChapters(initialChapterId ?? undefined, "jump");
+        // Load 1 chapter — if initialChapterId is set, load that chapter; otherwise first chapter
+        const result = await client.previewChapters(bookId, initialChapterId ?? undefined, 1);
+        if (cancelled) return;
+        if (result.chapters.length > 0) {
+          setChapter(result.chapters[0]);
+        }
+        setTotal(result.total);
+        setLoading(false);
+        setError(null);
       } catch (err: unknown) {
         if (cancelled) return;
         if (err && typeof err === "object" && "status" in err && (err as { status: number }).status === 401) return;
-        setError("加载失败，请重试");
+        setError("加载预览数据失败，请检查网络后重试");
         setLoading(false);
       }
     }
     init();
     return () => { cancelled = true; };
-  }, [bookId, initialChapterId, client, loadChapters]);
+  }, [bookId, initialChapterId, client]);
 
-  // Scroll to jump target after chapters load
+  // Global copy prevention
   useEffect(() => {
-    if (loading || !jumpTargetRef.current) return;
-    const targetId = jumpTargetRef.current;
-    jumpTargetRef.current = null;
-    requestAnimationFrame(() => {
-      const el = document.getElementById(`ch-${targetId}`);
-      if (el) {
-        el.scrollIntoView({ behavior: "instant", block: "start" });
-        window.scrollBy(0, -80);
+    const prevent = (e: Event) => e.preventDefault();
+    document.addEventListener("copy", prevent);
+    document.addEventListener("cut", prevent);
+    document.addEventListener("contextmenu", prevent);
+    return () => {
+      document.removeEventListener("copy", prevent);
+      document.removeEventListener("cut", prevent);
+      document.removeEventListener("contextmenu", prevent);
+    };
+  }, []);
+
+  const goPrev = useCallback(async () => {
+    if (navigating || loadingRef.current || !chapter) return;
+    setNavigating(true);
+    loadingRef.current = true;
+    try {
+      const result = await client.previewChapters(bookId, chapter.id, 1, "before");
+      if (result.chapters.length > 0) {
+        setChapter(result.chapters[0]);
+        setTotal(result.total);
       }
-    });
-  }, [loading, chapters]);
+    } catch {
+      setError("加载失败，请重试");
+    } finally {
+      setNavigating(false);
+      loadingRef.current = false;
+    }
+  }, [client, bookId, chapter, navigating]);
 
-  // IntersectionObserver for scroll preloading
-  useEffect(() => {
-    if (loading || chapters.length === 0) return;
-    const container = scrollRef.current;
-    if (!container) return;
+  const goNext = useCallback(async () => {
+    if (navigating || loadingRef.current || !chapter) return;
+    setNavigating(true);
+    loadingRef.current = true;
+    try {
+      const result = await client.previewChapters(bookId, chapter.id, 1, "after");
+      if (result.chapters.length > 0) {
+        setChapter(result.chapters[0]);
+        setTotal(result.total);
+      }
+    } catch {
+      setError("加载失败，请重试");
+    } finally {
+      setNavigating(false);
+      loadingRef.current = false;
+    }
+  }, [client, bookId, chapter, navigating]);
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (!entry.isIntersecting) continue;
-          if (entry.target === topSentinelRef.current) {
-            const firstId = chapters[0]?.id;
-            if (firstId && !loadingRef.current && !reachedStartRef.current) {
-              loadChapters(firstId, "up");
-            }
-          } else if (entry.target === bottomSentinelRef.current) {
-            const lastId = chapters[chapters.length - 1]?.id;
-            if (lastId && !loadingRef.current && !reachedEndRef.current) {
-              loadChapters(lastId, "down");
-            }
-          }
-        }
-      },
-      { root: container, rootMargin: "800px", threshold: 0 }
-    );
-
-    if (topSentinelRef.current) observer.observe(topSentinelRef.current);
-    if (bottomSentinelRef.current) observer.observe(bottomSentinelRef.current);
-
-    return () => observer.disconnect();
-  }, [loading, chapters, loadChapters]);
+  const currentOrder = chapter?.order ?? 0;
+  const hasPrev = currentOrder > 1;
+  const hasNext = currentOrder < total;
 
   function handleModeChange(newMode: "pc" | "mobile") {
     setMode(newMode);
@@ -175,10 +135,9 @@ export default function PreviewShell({ bookId }: { bookId: string }) {
   }
 
   const isMobile = mode === "mobile";
-  const loadedCount = chapters.length;
 
   return (
-    <div className="flex h-screen flex-col bg-[#f5f1eb] font-sans text-neutral-900">
+    <div className="flex h-screen select-none flex-col bg-[#f5f1eb] font-sans text-neutral-900">
       {/* Toolbar */}
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-neutral-200 bg-white/90 px-4 backdrop-blur">
         <div className="flex items-center gap-3">
@@ -277,10 +236,20 @@ export default function PreviewShell({ bookId }: { bookId: string }) {
             <p className="mb-3 text-neutral-500">{error}</p>
             <button
               className="rounded-full bg-neutral-800 px-5 py-2 text-sm text-white transition-colors hover:bg-neutral-700"
-              onClick={() => {
+              onClick={async () => {
                 setError(null);
                 setLoading(true);
-                loadChapters(initialChapterId ?? undefined, "jump");
+                try {
+                  const bootstrap = await client.getWorkspaceBootstrap(bookId, 1, 1);
+                  setWorkTitle(bootstrap.work.title);
+                  const result = await client.previewChapters(bookId, initialChapterId ?? undefined, 1);
+                  if (result.chapters.length > 0) setChapter(result.chapters[0]);
+                  setTotal(result.total);
+                  setLoading(false);
+                } catch {
+                  setError("加载预览数据失败，请检查网络后重试");
+                  setLoading(false);
+                }
               }}
             >
               重试
@@ -294,7 +263,7 @@ export default function PreviewShell({ bookId }: { bookId: string }) {
             <p className="text-sm text-neutral-400">加载预览...</p>
           </div>
         </div>
-      ) : chapters.length === 0 ? (
+      ) : !chapter ? (
         <div className="flex flex-1 items-center justify-center">
           <div className="text-center">
             <BookOpen size={48} className="mx-auto mb-4 text-neutral-300" />
@@ -303,25 +272,24 @@ export default function PreviewShell({ bookId }: { bookId: string }) {
           </div>
         </div>
       ) : (
-        <div
-          ref={scrollRef}
-          className={cn("flex-1 overflow-y-auto", isMobile && "flex items-start justify-center py-8")}
-        >
+        <div className={cn("flex-1 overflow-y-auto", isMobile && "flex items-start justify-center py-8")}>
           <div className={cn(isMobile ? "relative" : "mx-auto max-w-[800px] px-6 py-8")}>
             {/* iPhone 15 Pro frame — mobile mode */}
             {isMobile && (
               <div className="relative mx-auto overflow-hidden rounded-[44px] border-[6px] border-neutral-800 bg-white shadow-2xl" style={{ width: 393, minHeight: 852 }}>
-                {/* Dynamic Island */}
                 <div className="absolute left-1/2 top-1.5 z-20 h-[26px] w-[100px] -translate-x-1/2 rounded-full bg-neutral-800" />
                 <div className="h-full overflow-y-auto px-5 pb-10 pt-12" style={{ maxHeight: 852 }}>
                   <ChapterListView
-                    chapters={chapters}
+                    chapter={chapter}
                     fontSize={fontSize}
-                    loadingMore={loadingMore}
+                    currentOrder={currentOrder}
                     total={total}
-                    loadedCount={loadedCount}
-                    topSentinelRef={topSentinelRef}
-                    bottomSentinelRef={bottomSentinelRef}
+                    hasPrev={hasPrev}
+                    hasNext={hasNext}
+                    onPrev={goPrev}
+                    onNext={goNext}
+                    loadingPrev={navigating}
+                    loadingNext={navigating}
                   />
                 </div>
               </div>
@@ -330,13 +298,16 @@ export default function PreviewShell({ bookId }: { bookId: string }) {
             {/* PC mode */}
             {!isMobile && (
               <ChapterListView
-                chapters={chapters}
+                chapter={chapter}
                 fontSize={fontSize}
-                loadingMore={loadingMore}
+                currentOrder={currentOrder}
                 total={total}
-                loadedCount={loadedCount}
-                topSentinelRef={topSentinelRef}
-                bottomSentinelRef={bottomSentinelRef}
+                hasPrev={hasPrev}
+                hasNext={hasNext}
+                onPrev={goPrev}
+                onNext={goNext}
+                loadingPrev={navigating}
+                loadingNext={navigating}
               />
             )}
           </div>

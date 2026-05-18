@@ -54,6 +54,8 @@ from app.models import (
     Volume,
     Work,
     WritingGoal,
+    WritingPrompt,
+    WritingPromptCategory,
     now,
 )
 from app.services.workspace_structure import move_volume_to_order, ordered_chapters_statement
@@ -227,6 +229,20 @@ class AdminBalanceAdjustRequest(BaseModel):
     change_type: str = Field(..., pattern="^(grant|deduct)$")
     amount: Decimal = Field(..., gt=0, decimal_places=2, max_digits=12)
     reason: str | None = Field(default=None, max_length=500)
+
+
+class PromptCategoryIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    sort_order: int = Field(ge=0, default=0)
+    is_active: bool = True
+
+
+class WritingPromptIn(BaseModel):
+    title: str = Field(min_length=1, max_length=100)
+    description: str = Field(min_length=1, max_length=500)
+    detail_prompt: str = Field(min_length=1, max_length=10000)
+    category_id: str = Field(min_length=1)
+    is_active: bool = True
 
 
 async def paginated(
@@ -2438,6 +2454,9 @@ _TOOL_DISPLAY_NAMES = {
     "update_chapter": "更新章节",
     "get_work_info": "查询作品信息",
     "update_work_info": "更新作品信息",
+    "list_prompt_categories": "查询写作提示",
+    "list_prompts_by_category": "查询写作提示",
+    "get_prompt_detail": "查询写作提示",
 }
 
 _TOOL_ACTION_TYPES = {
@@ -2461,6 +2480,8 @@ _TOOL_ACTION_TYPES = {
 
 # 详情查询工具返回完整数据，需要截断以节省 token
 _DETAIL_TOOLS = {"get_chapter", "get_character", "get_setting", "get_work_info"}
+
+_HIDDEN_TOOLS = {"list_prompt_categories", "list_prompts_by_category", "get_prompt_detail"}
 
 
 def tool_action(tool_name: str) -> dict[str, str] | None:
@@ -2658,25 +2679,41 @@ async def send_chat_message(
                         )
                     elif event.event == RunEvent.tool_call_completed:
                         tool_name = event.tool.tool_name if event.tool else ""
-                        display = _TOOL_DISPLAY_NAMES.get(tool_name, tool_name)
-                        result_text = ""
-                        if event.tool and hasattr(event.tool, "result") and event.tool.result:
-                            raw = str(event.tool.result)
-                            result_text = raw[:1000] if tool_name in _DETAIL_TOOLS else raw
-                        status = _tool_result_status(result_text)
-                        tool_results.append(
-                            {"tool": tool_name, "display": display, "result": result_text}
-                        )
-                        complete_tool_block(blocks, tool_name, display, result_text)
-                        yield encode_sse(
-                            "tool_result",
-                            {
-                                "tool": tool_name,
-                                "display": display,
-                                "status": status,
-                                "result": result_text,
-                            },
-                        )
+                        if tool_name in _HIDDEN_TOOLS:
+                            display = "查询写作提示"
+                            tool_results.append(
+                                {"tool": tool_name, "display": display, "result": ""}
+                            )
+                            complete_tool_block(blocks, tool_name, display, "")
+                            yield encode_sse(
+                                "tool_result",
+                                {
+                                    "tool": tool_name,
+                                    "display": display,
+                                    "status": "completed",
+                                    "result": "获取成功",
+                                },
+                            )
+                        else:
+                            display = _TOOL_DISPLAY_NAMES.get(tool_name, tool_name)
+                            result_text = ""
+                            if event.tool and hasattr(event.tool, "result") and event.tool.result:
+                                raw = str(event.tool.result)
+                                result_text = raw[:1000] if tool_name in _DETAIL_TOOLS else raw
+                            status = _tool_result_status(result_text)
+                            tool_results.append(
+                                {"tool": tool_name, "display": display, "result": result_text}
+                            )
+                            complete_tool_block(blocks, tool_name, display, result_text)
+                            yield encode_sse(
+                                "tool_result",
+                                {
+                                    "tool": tool_name,
+                                    "display": display,
+                                    "status": status,
+                                    "result": result_text,
+                                },
+                            )
                     elif event.event == RunEvent.run_error:
                         error_msg = str(event.content) if event.content else "Agent run failed"
                         logger.error("agent run error for chat %s: %s", chat.id, error_msg)
@@ -2685,28 +2722,50 @@ async def send_chat_message(
                     elif event.event == RunEvent.tool_call_error:
                         tool_name = event.tool.tool_name if event.tool else ""
                         raw_error = str(event.content) if event.content else "Tool call failed"
-                        display = _TOOL_DISPLAY_NAMES.get(tool_name, tool_name)
-                        clean_msg = _clean_tool_error(raw_error)
-                        logger.error(
-                            "tool call error for chat %s, tool=%s: %s",
-                            chat.id,
-                            tool_name,
-                            raw_error,
-                        )
-                        error_result = json.dumps({"error": clean_msg}, ensure_ascii=False)
-                        tool_results.append(
-                            {"tool": tool_name, "display": display, "result": error_result}
-                        )
-                        complete_tool_block(blocks, tool_name, display, error_result)
-                        yield encode_sse(
-                            "tool_result",
-                            {
-                                "tool": tool_name,
-                                "display": display,
-                                "status": "error",
-                                "result": error_result,
-                            },
-                        )
+                        if tool_name in _HIDDEN_TOOLS:
+                            display = "查询写作提示"
+                            logger.error(
+                                "tool call error for chat %s, tool=%s: %s",
+                                chat.id,
+                                tool_name,
+                                raw_error,
+                            )
+                            tool_results.append(
+                                {"tool": tool_name, "display": display, "result": ""}
+                            )
+                            complete_tool_block(blocks, tool_name, display, "")
+                            yield encode_sse(
+                                "tool_result",
+                                {
+                                    "tool": tool_name,
+                                    "display": display,
+                                    "status": "error",
+                                    "result": "获取提示词失败，请稍后重试",
+                                },
+                            )
+                        else:
+                            display = _TOOL_DISPLAY_NAMES.get(tool_name, tool_name)
+                            clean_msg = _clean_tool_error(raw_error)
+                            logger.error(
+                                "tool call error for chat %s, tool=%s: %s",
+                                chat.id,
+                                tool_name,
+                                raw_error,
+                            )
+                            error_result = json.dumps({"error": clean_msg}, ensure_ascii=False)
+                            tool_results.append(
+                                {"tool": tool_name, "display": display, "result": error_result}
+                            )
+                            complete_tool_block(blocks, tool_name, display, error_result)
+                            yield encode_sse(
+                                "tool_result",
+                                {
+                                    "tool": tool_name,
+                                    "display": display,
+                                    "status": "error",
+                                    "result": error_result,
+                                },
+                            )
                     elif event.event == RunEvent.run_completed:  # pragma: no branch
                         completed_event = event
                         continue
@@ -4077,3 +4136,189 @@ async def public_preview_chapters(
         "total": total,
         "around_index": around_index,
     }
+
+
+# ---------------------------------------------------------------------------
+# Admin: Writing Prompt Categories
+# ---------------------------------------------------------------------------
+
+
+@router.get("/admin/prompt-categories")
+async def admin_prompt_categories(
+    _admin: User = Depends(current_admin),
+    session: AsyncSession = Depends(get_session),
+    q: Annotated[str | None, Query(max_length=100)] = None,
+    is_active: Annotated[bool | None, Query()] = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> dict[str, Any]:
+    statement = select(WritingPromptCategory)
+    if q:
+        statement = statement.where(WritingPromptCategory.name.ilike(f"%{q}%"))
+    if is_active is not None:
+        statement = statement.where(WritingPromptCategory.is_active == is_active)
+    rows, total = await paginated(
+        session,
+        statement.order_by(WritingPromptCategory.sort_order, WritingPromptCategory.created_at),
+        page,
+        page_size,
+    )
+    cat_ids = [row[0].id for row in rows]
+    count_rows = (await session.execute(
+        select(WritingPrompt.category_id, func.count())
+        .where(WritingPrompt.category_id.in_(cat_ids), WritingPrompt.is_active.is_(True))
+        .group_by(WritingPrompt.category_id)
+    )).all() if cat_ids else []
+    counts = {cid: c for cid, c in count_rows}
+    items = []
+    for row in rows:
+        data = public(row[0])
+        data["prompt_count"] = counts.get(row[0].id, 0)
+        items.append(data)
+    return page_response(items, total, page, page_size)
+
+
+@router.post("/admin/prompt-categories")
+async def admin_create_prompt_category(
+    payload: PromptCategoryIn,
+    _admin: User = Depends(current_admin),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    item = WritingPromptCategory(**payload.model_dump())
+    session.add(item)
+    await session.commit()
+    return public(item)
+
+
+@router.patch("/admin/prompt-categories/{category_id}")
+async def admin_update_prompt_category(
+    category_id: str,
+    payload: PromptCategoryIn,
+    _admin: User = Depends(current_admin),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    item = await must_get(session, WritingPromptCategory, category_id)
+    for key, value in payload.model_dump().items():
+        setattr(item, key, value)
+    await session.commit()
+    return public(item)
+
+
+@router.delete("/admin/prompt-categories/{category_id}")
+async def admin_delete_prompt_category(
+    category_id: str,
+    _admin: User = Depends(current_admin),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    item = await must_get(session, WritingPromptCategory, category_id)
+    count = await session.scalar(
+        select(func.count()).select_from(
+            select(WritingPrompt)
+            .where(WritingPrompt.category_id == category_id)
+            .subquery()
+        )
+    )
+    if count and count > 0:
+        raise HTTPException(
+            status_code=409, detail="category has associated prompts, remove them first"
+        )
+    await session.delete(item)
+    await session.commit()
+    return {"success": True}
+
+
+# ---------------------------------------------------------------------------
+# Admin: Writing Prompts
+# ---------------------------------------------------------------------------
+
+
+@router.get("/admin/prompts")
+async def admin_prompts(
+    _admin: User = Depends(current_admin),
+    session: AsyncSession = Depends(get_session),
+    category_id: Annotated[str | None, Query(max_length=36)] = None,
+    is_active: Annotated[bool | None, Query()] = None,
+    q: Annotated[str | None, Query(max_length=100)] = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> dict[str, Any]:
+    statement = select(WritingPrompt)
+    if category_id:
+        statement = statement.where(WritingPrompt.category_id == category_id)
+    if is_active is not None:
+        statement = statement.where(WritingPrompt.is_active == is_active)
+    if q:
+        like = f"%{q}%"
+        statement = statement.where(
+            or_(WritingPrompt.title.ilike(like), WritingPrompt.description.ilike(like))
+        )
+    rows, total = await paginated(
+        session,
+        statement.order_by(WritingPrompt.created_at.desc()),
+        page,
+        page_size,
+    )
+    items = []
+    for row in rows:
+        data = public(row[0])
+        data.pop("detail_prompt", None)
+        items.append(data)
+    return page_response(items, total, page, page_size)
+
+
+@router.get("/admin/prompts/{prompt_id}")
+async def admin_get_prompt(
+    prompt_id: str,
+    _admin: User = Depends(current_admin),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    item = await must_get(session, WritingPrompt, prompt_id)
+    data = public(item)
+    cat = await session.get(WritingPromptCategory, item.category_id)
+    data["category_name"] = cat.name if cat else ""
+    return data
+
+
+@router.post("/admin/prompts")
+async def admin_create_prompt(
+    payload: WritingPromptIn,
+    _admin: User = Depends(current_admin),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    cat = await session.get(WritingPromptCategory, payload.category_id)
+    if cat is None:
+        raise HTTPException(status_code=400, detail="category not found")
+    item = WritingPrompt(**payload.model_dump())
+    session.add(item)
+    await session.commit()
+    return public(item)
+
+
+@router.patch("/admin/prompts/{prompt_id}")
+async def admin_update_prompt(
+    prompt_id: str,
+    payload: WritingPromptIn,
+    _admin: User = Depends(current_admin),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    item = await must_get(session, WritingPrompt, prompt_id)
+    if payload.category_id != item.category_id:
+        cat = await session.get(WritingPromptCategory, payload.category_id)
+        if cat is None:
+            raise HTTPException(status_code=400, detail="category not found")
+    for key, value in payload.model_dump().items():
+        setattr(item, key, value)
+    await session.commit()
+    return public(item)
+
+
+@router.delete("/admin/prompts/{prompt_id}")
+async def admin_delete_prompt(
+    prompt_id: str,
+    _admin: User = Depends(current_admin),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    item = await must_get(session, WritingPrompt, prompt_id)
+    await session.delete(item)
+    await session.commit()
+    return {"success": True}

@@ -13,6 +13,7 @@ import {
   Receipt,
   Settings2,
   Users,
+  Lightbulb,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -49,6 +50,12 @@ const menu = [
     ],
   },
   {
+    label: "内容管理",
+    items: [
+      { title: "写作提示词", url: "/admin/prompts", icon: Lightbulb },
+    ],
+  },
+  {
     label: "系统",
     items: [{ title: "配置", url: "/admin/configs", icon: Settings2 }],
   },
@@ -74,8 +81,8 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
                   <BookOpenText className="size-4" />
                 </span>
                 <span className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-semibold tracking-tight">妙蛙写作</span>
-                  <span className="truncate text-xs text-sidebar-foreground/50">管理后台</span>
+                  <span className="truncate font-semibold tracking-tight transition-opacity duration-200 ease-linear group-data-[collapsible=icon]:opacity-0">妙蛙写作</span>
+                  <span className="truncate text-xs text-sidebar-foreground/50 transition-opacity duration-200 ease-linear group-data-[collapsible=icon]:opacity-0">管理后台</span>
                 </span>
               </Link>
             </SidebarMenuButton>
@@ -98,11 +105,11 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
                         asChild
                         isActive={isActive}
                         tooltip={item.title}
-                        className="group relative font-medium tracking-[-0.01em]"
+                        className="group relative font-medium tracking-[-0.01em] pl-8"
                       >
                         <Link href={item.url}>
                           <item.icon className="size-4" />
-                          <span>{item.title}</span>
+                          <span className="transition-opacity duration-200 ease-linear group-data-[collapsible=icon]:opacity-0">{item.title}</span>
                         </Link>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
@@ -122,7 +129,7 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
               className="font-medium tracking-[-0.01em] text-sidebar-foreground/60 hover:text-sidebar-foreground"
             >
               <LogOut className="size-4" />
-              <span>退出登录</span>
+              <span className="transition-opacity duration-200 ease-linear group-data-[collapsible=icon]:opacity-0">退出登录</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>

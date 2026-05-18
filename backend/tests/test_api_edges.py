@@ -535,6 +535,124 @@ async def test_preview_chapters_target_not_found_falls_back(session: AsyncSessio
     assert result["chapters"][0]["title"] == "唯一章"
 
 
+async def test_preview_direction_after(session: AsyncSession) -> None:
+    """direction=after returns chapters after the target."""
+    user = await create_user_account(session, "dir-after@example.com", "user12345", "DirAfter")
+    work = Work(user_id=user.id, title="方向测试")
+    session.add(work)
+    await session.flush()
+    chapters_data = [
+        Chapter(work_id=work.id, order_index=i, title=f"章{i}", content=f"内容{i}", summary="")
+        for i in range(1, 11)
+    ]
+    session.add_all(chapters_data)
+    await session.commit()
+
+    target = chapters_data[4]  # chapter 5 (index 4)
+    result = await preview_chapters(work.id, around=target.id, direction="after", limit=5, user=user, session=session)
+    assert len(result["chapters"]) == 5
+    assert result["total"] == 10
+    assert [ch["title"] for ch in result["chapters"]] == ["章6", "章7", "章8", "章9", "章10"]
+    for ch in result["chapters"]:
+        assert "content" in ch
+
+
+async def test_preview_direction_before(session: AsyncSession) -> None:
+    """direction=before returns limit chapters ending at the target."""
+    user = await create_user_account(session, "dir-before@example.com", "user12345", "DirBefore")
+    work = Work(user_id=user.id, title="方向测试前")
+    session.add(work)
+    await session.flush()
+    chapters_data = [
+        Chapter(work_id=work.id, order_index=i, title=f"章{i}", content=f"内容{i}", summary="")
+        for i in range(1, 11)
+    ]
+    session.add_all(chapters_data)
+    await session.commit()
+
+    target = chapters_data[4]  # chapter 5 (index 4)
+    result = await preview_chapters(work.id, around=target.id, direction="before", limit=5, user=user, session=session)
+    assert len(result["chapters"]) == 5
+    assert result["total"] == 10
+    assert [ch["title"] for ch in result["chapters"]] == ["章1", "章2", "章3", "章4", "章5"]
+
+
+async def test_preview_direction_after_limit_1(session: AsyncSession) -> None:
+    """direction=after with limit=1 returns the immediate next chapter. (B1 core scenario)"""
+    user = await create_user_account(session, "dir-after1@example.com", "user12345", "DirAfter1")
+    work = Work(user_id=user.id, title="单章后")
+    session.add(work)
+    await session.flush()
+    chapters_data = [
+        Chapter(work_id=work.id, order_index=i, title=f"章{i}", content=f"内容{i}", summary="")
+        for i in range(1, 6)
+    ]
+    session.add_all(chapters_data)
+    await session.commit()
+
+    target = chapters_data[2]  # chapter 3 (index 2)
+    result = await preview_chapters(work.id, around=target.id, direction="after", limit=1, user=user, session=session)
+    assert len(result["chapters"]) == 1
+    assert result["chapters"][0]["title"] == "章4"
+
+
+async def test_preview_direction_before_limit_1(session: AsyncSession) -> None:
+    """direction=before with limit=1 returns the immediate previous chapter. (B1 core scenario)"""
+    user = await create_user_account(session, "dir-before1@example.com", "user12345", "DirBefore1")
+    work = Work(user_id=user.id, title="单章前")
+    session.add(work)
+    await session.flush()
+    chapters_data = [
+        Chapter(work_id=work.id, order_index=i, title=f"章{i}", content=f"内容{i}", summary="")
+        for i in range(1, 6)
+    ]
+    session.add_all(chapters_data)
+    await session.commit()
+
+    target = chapters_data[2]  # chapter 3 (index 2)
+    result = await preview_chapters(work.id, around=target.id, direction="before", limit=1, user=user, session=session)
+    assert len(result["chapters"]) == 1
+    assert result["chapters"][0]["title"] == "章2"
+
+
+async def test_preview_direction_after_no_more(session: AsyncSession) -> None:
+    """direction=after on the last chapter returns empty list."""
+    user = await create_user_account(session, "dir-after-end@example.com", "user12345", "DirAfterEnd")
+    work = Work(user_id=user.id, title="末章后")
+    session.add(work)
+    await session.flush()
+    chapters_data = [
+        Chapter(work_id=work.id, order_index=i, title=f"章{i}", content=f"内容{i}", summary="")
+        for i in range(1, 4)
+    ]
+    session.add_all(chapters_data)
+    await session.commit()
+
+    target = chapters_data[-1]  # last chapter
+    result = await preview_chapters(work.id, around=target.id, direction="after", limit=5, user=user, session=session)
+    assert len(result["chapters"]) == 0
+    assert result["total"] == 3
+
+
+async def test_preview_direction_before_at_start(session: AsyncSession) -> None:
+    """direction=before on the first chapter returns from the beginning."""
+    user = await create_user_account(session, "dir-before-start@example.com", "user12345", "DirBeforeStart")
+    work = Work(user_id=user.id, title="首章前")
+    session.add(work)
+    await session.flush()
+    chapters_data = [
+        Chapter(work_id=work.id, order_index=i, title=f"章{i}", content=f"内容{i}", summary="")
+        for i in range(1, 6)
+    ]
+    session.add_all(chapters_data)
+    await session.commit()
+
+    target = chapters_data[0]  # first chapter
+    result = await preview_chapters(work.id, around=target.id, direction="before", limit=3, user=user, session=session)
+    assert len(result["chapters"]) == 3
+    assert [ch["title"] for ch in result["chapters"]] == ["章1", "章2", "章3"]
+
+
 async def test_inspiration_goal_routes_and_daily_progress(session: AsyncSession) -> None:
     user = await create_user_account(session, "inspiration@example.com", "user12345", "Inspiration")
     await session.commit()

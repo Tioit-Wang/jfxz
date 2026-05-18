@@ -79,6 +79,11 @@ class Work(Base, TimestampMixin):
     share_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     share_token: Mapped[str | None] = mapped_column(String(36), unique=True, index=True)
 
+    estimated_word_count: Mapped[int] = mapped_column(Integer, default=600000)
+    estimated_chapter_word_count: Mapped[int] = mapped_column(Integer, default=2000)
+    target_audience: Mapped[str] = mapped_column(String(100), default="")
+    writing_style: Mapped[str] = mapped_column(String(500), default="")
+
     volumes: Mapped[list["Volume"]] = relationship(cascade="all, delete-orphan")
     chapters: Mapped[list["Chapter"]] = relationship(cascade="all, delete-orphan")
     inspiration_notes: Mapped[list["InspirationNote"]] = relationship(cascade="all, delete-orphan")

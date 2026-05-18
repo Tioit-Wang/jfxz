@@ -10,6 +10,10 @@ export type Work = {
   shareEnabled: boolean;
   shareToken: string | null;
   updatedAt: string;
+  estimatedWordCount: number;
+  estimatedChapterWordCount: number;
+  targetAudience: string;
+  writingStyle: string;
 };
 
 export type Chapter = {
@@ -64,7 +68,11 @@ export const works: Work[] = [
     tags: ["奇幻", "群像"],
     shareEnabled: false,
     shareToken: null,
-    updatedAt: ""
+    updatedAt: "",
+    estimatedWordCount: 600000,
+    estimatedChapterWordCount: 2000,
+    targetAudience: "",
+    writingStyle: ""
   },
   {
     id: "book-2",
@@ -77,7 +85,11 @@ export const works: Work[] = [
     tags: ["科幻", "冒险"],
     shareEnabled: false,
     shareToken: null,
-    updatedAt: ""
+    updatedAt: "",
+    estimatedWordCount: 600000,
+    estimatedChapterWordCount: 2000,
+    targetAudience: "",
+    writingStyle: ""
   }
 ];
 

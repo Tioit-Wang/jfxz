@@ -21,6 +21,10 @@ export type ApiWork = {
   share_enabled?: boolean;
   share_token?: string | null;
   updated_at?: string | null;
+  estimated_word_count: number;
+  estimated_chapter_word_count: number;
+  target_audience: string;
+  writing_style: string;
 };
 
 export type ShareStatus = {
@@ -634,6 +638,10 @@ export type WorkDraft = {
   backgroundRules: string;
   focusRequirements: string;
   forbiddenRequirements: string;
+  estimatedWordCount: number;
+  estimatedChapterWordCount: number;
+  targetAudience: string;
+  writingStyle: string;
 };
 
 export class ApiError extends Error {
@@ -683,7 +691,11 @@ export function mapWork(work: ApiWork): Work {
     tags: work.genre_tags,
     shareEnabled: work.share_enabled ?? false,
     shareToken: work.share_token ?? null,
-    updatedAt: work.updated_at ?? ""
+    updatedAt: work.updated_at ?? "",
+    estimatedWordCount: work.estimated_word_count,
+    estimatedChapterWordCount: work.estimated_chapter_word_count,
+    targetAudience: work.target_audience,
+    writingStyle: work.writing_style,
   };
 }
 
@@ -695,7 +707,11 @@ function workPayload(work: WorkDraft): Record<string, unknown> {
     genre_tags: work.tags,
     background_rules: work.backgroundRules,
     focus_requirements: work.focusRequirements,
-    forbidden_requirements: work.forbiddenRequirements
+    forbidden_requirements: work.forbiddenRequirements,
+    estimated_word_count: work.estimatedWordCount,
+    estimated_chapter_word_count: work.estimatedChapterWordCount,
+    target_audience: work.targetAudience,
+    writing_style: work.writingStyle
   };
 }
 
@@ -987,7 +1003,11 @@ export class ApiClient {
             tags: [],
             backgroundRules: "",
             focusRequirements: "",
-            forbiddenRequirements: ""
+            forbiddenRequirements: "",
+            estimatedWordCount: 600000,
+            estimatedChapterWordCount: 2000,
+            targetAudience: "",
+            writingStyle: ""
           }
         : {
             title: input.title ?? "",
@@ -996,7 +1016,11 @@ export class ApiClient {
             tags: input.tags ?? [],
             backgroundRules: input.backgroundRules ?? "",
             focusRequirements: input.focusRequirements ?? "",
-            forbiddenRequirements: input.forbiddenRequirements ?? ""
+            forbiddenRequirements: input.forbiddenRequirements ?? "",
+            estimatedWordCount: input.estimatedWordCount ?? 600000,
+            estimatedChapterWordCount: input.estimatedChapterWordCount ?? 2000,
+            targetAudience: input.targetAudience ?? "",
+            writingStyle: input.writingStyle ?? ""
           };
     const data = await this.request<ApiWork>("/works", {
       method: "POST",

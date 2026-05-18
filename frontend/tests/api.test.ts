@@ -50,7 +50,11 @@ describe("api client", () => {
         short_intro: "简介",
         synopsis: "梗概",
         genre_tags: ["奇幻"],
-        background_rules: "规则"
+        background_rules: "规则",
+        estimated_word_count: 600000,
+        estimated_chapter_word_count: 2000,
+        target_audience: "",
+        writing_style: ""
       })
     ).toEqual({
       id: "w1",
@@ -63,7 +67,11 @@ describe("api client", () => {
       updatedAt: "",
       shareEnabled: false,
       shareToken: null,
-      tags: ["奇幻"]
+      tags: ["奇幻"],
+      estimatedWordCount: 600000,
+      estimatedChapterWordCount: 2000,
+      targetAudience: "",
+      writingStyle: ""
     });
     expect(mapChapter({ id: "c1", order_index: 1, title: "章", summary: null, content: "正文" })).toEqual({
       id: "c1",
@@ -275,7 +283,11 @@ describe("api client", () => {
         forbiddenRequirements: "",
         shareEnabled: false,
         shareToken: null,
-        updatedAt: ""
+        updatedAt: "",
+        estimatedWordCount: 600000,
+        estimatedChapterWordCount: 2000,
+        targetAudience: "",
+        writingStyle: ""
       })
     ).resolves.toMatchObject({ title: "作品改", backgroundRules: "规则" });
     await expect(client.deleteWork("w1")).resolves.toBeUndefined();

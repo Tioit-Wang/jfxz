@@ -24,7 +24,11 @@ const emptyDraft: WorkDraft = {
   tags: [],
   backgroundRules: "",
   focusRequirements: "",
-  forbiddenRequirements: ""
+  forbiddenRequirements: "",
+  estimatedWordCount: 600000,
+  estimatedChapterWordCount: 2000,
+  targetAudience: "",
+  writingStyle: ""
 };
 
 function formatUpdatedAt(value: string): string {
@@ -55,6 +59,8 @@ export default function BooksClient() {
   const [draftTags, setDraftTags] = useState("");
   const [formError, setFormError] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [selectedAudiences, setSelectedAudiences] = useState<string[]>([]);
+  const [selectedStyles, setSelectedStyles] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [deletingId, setDeletingId] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Work | null>(null);
@@ -103,11 +109,13 @@ export default function BooksClient() {
     setDraftTags("");
     setFormError("");
     setAdvancedOpen(false);
+    setSelectedAudiences([]);
+    setSelectedStyles([]);
     setCreateOpen(true);
   }
 
   async function createWork() {
-    const nextDraft = { ...draft, tags: draftTags.split(/[，,\s]+/).map((item) => item.trim()).filter(Boolean) };
+    const nextDraft = { ...draft, tags: draftTags.split(/[，,\s]+/).map((item) => item.trim()).filter(Boolean), targetAudience: selectedAudiences.join(","), writingStyle: selectedStyles.join(",") };
     setSubmitting(true);
     setFormError("");
     try {
@@ -544,6 +552,35 @@ export default function BooksClient() {
                   <Field>
                     <FieldLabel style={{ color: "var(--lp-ink)", fontWeight: 600 }}>禁忌要求</FieldLabel>
                     <Textarea aria-label="禁忌要求" value={draft.forbiddenRequirements} onChange={(event) => setDraft((value) => ({ ...value, forbiddenRequirements: event.target.value }))} placeholder="可选" className="rounded-xl" style={{ borderColor: "var(--lp-border)", background: "var(--lp-bg)" }} />
+                  </Field>
+
+                  <Field>
+                    <FieldLabel style={{ color: "var(--lp-ink)", fontWeight: 600 }}>预计字数篇幅</FieldLabel>
+                    <Input type="number" min={0} step={10000} value={draft.estimatedWordCount} onChange={(event) => setDraft((value) => ({ ...value, estimatedWordCount: Number(event.target.value) }))} className="rounded-xl" style={{ borderColor: "var(--lp-border)", background: "var(--lp-bg)" }} />
+                  </Field>
+                  <Field>
+                    <FieldLabel style={{ color: "var(--lp-ink)", fontWeight: 600 }}>预计每章字数</FieldLabel>
+                    <Input type="number" min={0} step={500} value={draft.estimatedChapterWordCount} onChange={(event) => setDraft((value) => ({ ...value, estimatedChapterWordCount: Number(event.target.value) }))} className="rounded-xl" style={{ borderColor: "var(--lp-border)", background: "var(--lp-bg)" }} />
+                  </Field>
+                  <Field>
+                    <FieldLabel style={{ color: "var(--lp-ink)", fontWeight: 600 }}>作品受众</FieldLabel>
+                    <div className="flex flex-wrap gap-2">
+                      {["男频", "女频", "耽美"].map((item) => (
+                        <Badge key={item} variant={selectedAudiences.includes(item) ? "secondary" : "outline"} className="cursor-pointer select-none rounded-md px-3 py-1.5 text-sm" onClick={() => setSelectedAudiences((prev) => prev.includes(item) ? prev.filter((a) => a !== item) : [...prev, item])}>
+                          {item}
+                        </Badge>
+                      ))}
+                    </div>
+                  </Field>
+                  <Field>
+                    <FieldLabel style={{ color: "var(--lp-ink)", fontWeight: 600 }}>作品风格</FieldLabel>
+                    <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto">
+                      {["爽文", "快节奏", "慢热", "轻松", "幽默", "甜宠", "虐心", "烧脑", "悬疑", "热血", "暗黑", "写实", "文艺", "史诗", "治愈", "致郁", "硬核", "吐槽", "群像", "无限反转", "温馨", "恐怖", "探险", "脑洞", "种田"].map((item) => (
+                        <Badge key={item} variant={selectedStyles.includes(item) ? "secondary" : "outline"} className="cursor-pointer select-none rounded-md px-3 py-1.5 text-sm" onClick={() => setSelectedStyles((prev) => prev.includes(item) ? prev.filter((a) => a !== item) : [...prev, item])}>
+                          {item}
+                        </Badge>
+                      ))}
+                    </div>
                   </Field>
                 </FieldGroup>
               ) : null}

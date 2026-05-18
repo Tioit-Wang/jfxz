@@ -63,6 +63,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -381,8 +382,10 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const [accountStatus, setAccountStatus] = useState<"idle" | "loading" | "saving" | "error">("idle");
 
   const [workEditOpen, setWorkEditOpen] = useState(false);
-  const [workDraft, setWorkDraft] = useState({ title: "", shortIntro: "", synopsis: "", backgroundRules: "", focusRequirements: "", forbiddenRequirements: "", tags: "" });
+  const [workDraft, setWorkDraft] = useState({ title: "", shortIntro: "", synopsis: "", backgroundRules: "", focusRequirements: "", forbiddenRequirements: "", tags: "", estimatedWordCount: 600000, estimatedChapterWordCount: 2000, targetAudience: "", writingStyle: "" });
   const [workSaveStatus, setWorkSaveStatus] = useState<"idle" | "saving" | "error">("idle");
+  const [editAudience, setEditAudience] = useState<string[]>([]);
+  const [editStyle, setEditStyle] = useState<string[]>([]);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [billingProducts, setBillingProducts] = useState<BillingProducts>({ plans: [], creditPacks: [] });
   const [billingOrder, setBillingOrder] = useState<BillingOrder | null>(null);
@@ -1569,6 +1572,10 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
         focusRequirements: workDraft.focusRequirements.trim(),
         forbiddenRequirements: workDraft.forbiddenRequirements.trim(),
         tags: workDraft.tags.split(",").map((t) => t.trim()).filter(Boolean),
+        estimatedWordCount: workDraft.estimatedWordCount,
+        estimatedChapterWordCount: workDraft.estimatedChapterWordCount,
+        targetAudience: editAudience.join(","),
+        writingStyle: editStyle.join(","),
       });
       setWork(updated);
       setWorkEditOpen(false);
@@ -2038,7 +2045,13 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                   focusRequirements: work.focusRequirements,
                   forbiddenRequirements: work.forbiddenRequirements,
                   tags: (work.tags ?? []).join(", "),
+                  estimatedWordCount: work.estimatedWordCount,
+                  estimatedChapterWordCount: work.estimatedChapterWordCount,
+                  targetAudience: work.targetAudience,
+                  writingStyle: work.writingStyle,
                 });
+                setEditAudience(work.targetAudience ? work.targetAudience.split(",").filter(Boolean) : []);
+                setEditStyle(work.writingStyle ? work.writingStyle.split(",").filter(Boolean) : []);
               }
               setWorkEditOpen(true);
             }}
@@ -3138,6 +3151,40 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
                         className="min-h-36 resize-none rounded-sm border-[#ebebeb] bg-white leading-6"
                         placeholder="不要出现的桥段、语气、设定冲突或风格偏差。"
                       />
+                    </Field>
+                  </div>
+
+                  <div className="grid gap-4 xl:grid-cols-2">
+                    <Field>
+                      <FieldLabel>预计字数篇幅</FieldLabel>
+                      <Input type="number" min={0} step={10000} value={workDraft.estimatedWordCount} onChange={(e) => setWorkDraft((d) => ({ ...d, estimatedWordCount: Number(e.target.value) }))} className="h-12 rounded-sm border-[#ebebeb] bg-[#fafafa]" />
+                    </Field>
+                    <Field>
+                      <FieldLabel>预计每章字数</FieldLabel>
+                      <Input type="number" min={0} step={500} value={workDraft.estimatedChapterWordCount} onChange={(e) => setWorkDraft((d) => ({ ...d, estimatedChapterWordCount: Number(e.target.value) }))} className="h-12 rounded-sm border-[#ebebeb] bg-[#fafafa]" />
+                    </Field>
+                  </div>
+
+                  <div className="grid gap-4 xl:grid-cols-2">
+                    <Field>
+                      <FieldLabel>作品受众</FieldLabel>
+                      <div className="flex flex-wrap gap-2">
+                        {["男频", "女频", "耽美"].map((item) => (
+                          <Badge key={item} variant={editAudience.includes(item) ? "secondary" : "outline"} className="cursor-pointer select-none rounded-md px-3 py-1.5 text-sm" onClick={() => setEditAudience((prev) => prev.includes(item) ? prev.filter((a) => a !== item) : [...prev, item])}>
+                            {item}
+                          </Badge>
+                        ))}
+                      </div>
+                    </Field>
+                    <Field>
+                      <FieldLabel>作品风格</FieldLabel>
+                      <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto">
+                        {["爽文", "快节奏", "慢热", "轻松", "幽默", "甜宠", "虐心", "烧脑", "悬疑", "热血", "暗黑", "写实", "文艺", "史诗", "治愈", "致郁", "硬核", "吐槽", "群像", "无限反转", "温馨", "恐怖", "探险", "脑洞", "种田"].map((item) => (
+                          <Badge key={item} variant={editStyle.includes(item) ? "secondary" : "outline"} className="cursor-pointer select-none rounded-md px-3 py-1.5 text-sm" onClick={() => setEditStyle((prev) => prev.includes(item) ? prev.filter((a) => a !== item) : [...prev, item])}>
+                            {item}
+                          </Badge>
+                        ))}
+                      </div>
                     </Field>
                   </div>
 

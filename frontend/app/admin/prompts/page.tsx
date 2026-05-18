@@ -3,7 +3,7 @@
 import { Eye, Lightbulb, Plus, Search, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { ApiError, type PromptCategory, type PromptCategoryInput, type WritingPrompt, type WritingPromptDetail, type WritingPromptInput } from "@/api";
+import { ApiError, type PromptCategory, type PromptCategoryInput, type PromptListParams, type WritingPrompt, type WritingPromptDetail, type WritingPromptInput } from "@/api";
 import { AdminPage, AdminPagination, StatusBadge } from "../_components";
 import { adminClient } from "../admin-utils";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -95,10 +95,10 @@ export default function AdminPromptsPage() {
   async function loadPrompts(nextPage = page) {
     setPromptLoading(true);
     try {
-      const params: Record<string, unknown> = { page: nextPage, pageSize };
+      const params: PromptListParams = { page: nextPage, pageSize };
       if (selectedCatId !== "all") params.category_id = selectedCatId;
       if (promptQuery.trim()) params.q = promptQuery.trim();
-      const data = await client.listAdminPrompts(params as any);
+      const data = await client.listAdminPrompts(params);
       setPrompts(data.items);
       setTotal(data.total);
       setPage(data.page);

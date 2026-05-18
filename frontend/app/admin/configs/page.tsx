@@ -253,7 +253,7 @@ function PromptDescriptionPanel({
   }
 
   function insertPlaceholder(p: string) {
-    if (!promptRef.current) return;
+    if (!promptRef.current || !cfg) return;
     const start = promptRef.current.selectionStart;
     const end = promptRef.current.selectionEnd;
     const before = cfg.prompt.slice(0, start);

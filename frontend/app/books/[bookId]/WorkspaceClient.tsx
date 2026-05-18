@@ -309,7 +309,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const [summaryModalOpen, setSummaryModalOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<ApiSuggestion[]>([]);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState<number | null>(null);
-  const [analysisNotice, setAnalysisNotice] = useState("");
   const [activeChatTab, setActiveChatTab] = useState<"chat" | "suggestions">("chat");
   const [persistedAnalysis, setPersistedAnalysis] = useState<PersistedAnalysis | null>(null);
   const [status, setStatus] = useState<SaveStatus>("loading");
@@ -509,7 +508,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const clearAnalysis = useCallback(() => {
     setSuggestions([]);
     setActiveSuggestionIndex(null);
-    setAnalysisNotice("");
     setStaleSet(new Set());
   }, []);
 
@@ -531,7 +529,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     pendingAddedWordsRef.current = 0;
     setSuggestions([]);
     setActiveSuggestionIndex(null);
-    setAnalysisNotice("");
     setStaleSet(new Set());
     if (chapter) {
       try {
@@ -841,7 +838,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     try {
       await saveCurrentChapter();
     } catch {
-      setAnalysisNotice("当前章节保存失败，暂未切换章节");
       return;
     }
     setActiveChapterId(next.id);
@@ -852,7 +848,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     try {
       await saveCurrentChapter();
     } catch {
-      setAnalysisNotice("当前章节保存失败，暂未新建章节");
       return;
     }
     const volumeChapterCount = chapters.filter((chapter) => chapter.volumeId === volumeId).length;
@@ -880,7 +875,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       setStatus("saved");
     } catch {
       setStatus("error");
-      setAnalysisNotice("新建章节失败，请稍后重试");
     }
   }
 
@@ -889,7 +883,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     try {
       await saveCurrentChapter();
     } catch {
-      setAnalysisNotice("当前章节保存失败，暂未删除章节");
       return;
     }
     setStatus("saving");
@@ -923,13 +916,11 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
 
   async function analyze() {
     if (!content.trim()) {
-      setAnalysisNotice("当前章节暂无正文，无法检测");
       setStatus("analyzed");
       return;
     }
     try { await saveCurrentChapter(); } catch { /* proceed */ }
     setStatus("analyzing");
-    setAnalysisNotice("");
     const chapterId = activeChapterIdRef.current;
 
     let checks: CheckInfo[] = [];
@@ -937,14 +928,12 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       const res = await client.getAnalysisChecks(bookId);
       checks = res.checks;
     } catch {
-      setAnalysisNotice("获取检查配置失败");
       setStatus("error");
       return;
     }
     const active = checks.filter((c) => c.has_model);
     setEnabledChecks(active);
     if (!active.length) {
-      setAnalysisNotice("没有启用且已配置模型的检查项");
       setStatus("analyzed");
       return;
     }
@@ -989,7 +978,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       localStorage.setItem(`jfxz_analysis_${bookId}_${chapterId}`, JSON.stringify(analysis));
     } catch { /* storage full, ignore */ }
     setActiveChatTab("suggestions");
-    setAnalysisNotice(totalSuggestions ? `发现 ${totalSuggestions} 处可检查内容` : "未发现明显问题");
     setStatus("analyzed");
     setAbortController(null);
   }
@@ -1005,7 +993,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       setSummary(summaryDraft);
       setSummaryModalOpen(false);
     } catch {
-      setAnalysisNotice("章节提要保存失败，请稍后重试");
     }
   }
 
@@ -1019,7 +1006,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     try {
       await saveCurrentChapter({ content: nextContent });
     } catch {
-      setAnalysisNotice("建议已替换，但保存失败，请稍后重试");
     }
   }
 
@@ -1669,7 +1655,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
     } catch {
       setVolumeStatus("error");
       setStatus("error");
-      setAnalysisNotice("新建卷失败，请稍后重试");
     }
   }
 
@@ -1692,7 +1677,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       setStatus("saved");
     } catch {
       setStatus("error");
-      setAnalysisNotice("重命名卷失败，请稍后重试");
     }
   }
 
@@ -1711,7 +1695,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       setStatus("saved");
     } catch {
       setStatus("error");
-      setAnalysisNotice("删除卷失败，请稍后重试");
     }
   }
 
@@ -1752,7 +1735,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
       );
     } catch {
       setChapters(prevChapters);
-      setAnalysisNotice("章节排序保存失败，已还原");
     }
   }
 
@@ -2098,7 +2080,6 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
             StatusIcon={StatusIcon}
             count={count}
             todayCount={todayCount}
-            analysisNotice={analysisNotice}
             suggestions={suggestions}
             activeSuggestionIndex={activeSuggestionIndex}
             accountLabel={profile?.user.nickname || "账户中心"}

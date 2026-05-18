@@ -20,7 +20,6 @@ type WorkspaceEditorPanelProps = {
   StatusIcon: LucideIcon;
   count: number;
   todayCount: number;
-  analysisNotice: string;
   suggestions: ApiSuggestion[];
   activeSuggestionIndex: number | null;
   showSuggestions?: boolean;
@@ -61,7 +60,6 @@ export function WorkspaceEditorPanel({
   StatusIcon,
   count,
   todayCount,
-  analysisNotice,
   suggestions,
   activeSuggestionIndex,
   showSuggestions,
@@ -175,15 +173,6 @@ export function WorkspaceEditorPanel({
                   </button>
                 </div>
               </div>
-
-              {analysisNotice ? (
-                <div className="mb-5 rounded-lg border border-[#ebebeb] bg-[#f5f5f5] px-4 py-3 text-sm leading-6 text-[#171717]">
-                  <span className="flex items-center font-medium">
-                    <AlertCircle size={15} className="mr-1.5" />
-                    {analysisNotice}
-                  </span>
-                </div>
-              ) : null}
 
               {remoteUpdateNotice ? (
                 <div className="mb-5 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">

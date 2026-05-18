@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, Brain, ChevronDown, ChevronRight, ClipboardCheck, Clock3, History, MessageSquare, PenLine, Sparkles, Users, Wand2 } from "lucide-react";
+import { AlertCircle, Brain, Check, ClipboardCheck, Clock3, History, MessageSquare, PenLine, Sparkles, Users, Wand2 } from "lucide-react";
 import { type ReactNode, type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import type {
   AiModelOption,
@@ -481,7 +481,7 @@ function AnalysisSuggestionsTab({
   onAcceptSuggestion: (index: number) => void;
   onSendSuggestionToChat: (index: number) => void;
 }) {
-  const [collapsedRounds, setCollapsedRounds] = useState<Record<string, boolean>>({});
+  const [activeSubTab, setActiveSubTab] = useState(0);
 
   if (!persistedAnalysis || !persistedAnalysis.rounds.length) {
     return (
@@ -507,16 +507,16 @@ function AnalysisSuggestionsTab({
     }
   })();
 
+  const rounds = persistedAnalysis.rounds;
+  const currentRound = rounds[activeSubTab] ?? rounds[0];
+
   const roundOffsets: number[] = [];
   let offset = 0;
-  for (const round of persistedAnalysis.rounds) {
+  for (const round of rounds) {
     roundOffsets.push(offset);
     offset += round.suggestions.length;
   }
-
-  const toggleRound = (round: string) => {
-    setCollapsedRounds((prev) => ({ ...prev, [round]: !prev[round] }));
-  };
+  const currentOffset = roundOffsets[activeSubTab] ?? 0;
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
@@ -530,67 +530,76 @@ function AnalysisSuggestionsTab({
           </span>
         </div>
       </div>
-      <div className="flex-1 space-y-3 overflow-y-auto p-4">
-        {persistedAnalysis.rounds.map((round, roundIdx) => {
-          const isCollapsed = collapsedRounds[round.round] ?? false;
-          const flatOffset = roundOffsets[roundIdx];
-          return (
-            <div key={round.round}>
-              <button
-                className="mb-2 flex w-full items-center gap-1.5 text-left"
-                onClick={() => toggleRound(round.round)}
-              >
-                {isCollapsed ? <ChevronRight size={14} className="text-[#888888]" /> : <ChevronDown size={14} className="text-[#888888]" />}
-                <span className="text-sm font-semibold text-[#171717]">{round.title}</span>
-                {round.summary ? <span className="text-xs text-[#888888]">— {round.summary}</span> : null}
-                <span className="ml-auto rounded-full bg-[#f5f5f5] px-1.5 py-0.5 text-[11px] text-[#888888]">{round.suggestions.length}</span>
-              </button>
-              {!isCollapsed ? (
-                <div className="space-y-3">
-                  {round.suggestions.map((suggestion, localIdx) => {
-                    const flatIdx = flatOffset + localIdx;
-                    const selected = flatIdx === activeSuggestionIndex;
-                    return (
-                      <div
-                        key={`${suggestion.quote}-${flatIdx}`}
-                        className={cn("flex flex-col overflow-hidden rounded-xl border bg-white shadow-[0px_1px_1px_rgba(0,0,0,0.02),0px_2px_2px_rgba(0,0,0,0.04)]", selected ? "border-[#171717]" : "border-[#ebebeb]")}
+      <div className="shrink-0 flex border-b border-[#ebebeb] px-4 pt-1">
+        {rounds.map((round, idx) => (
+          <button
+            key={round.round}
+            onClick={() => setActiveSubTab(idx)}
+            className={cn(
+              "relative px-3 py-2 text-sm font-medium transition-colors",
+              idx === activeSubTab ? "text-[#171717]" : "text-[#888888] hover:text-[#171717]"
+            )}
+          >
+            {round.title}
+            <span className={cn(
+              "ml-1.5 inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none",
+              idx === activeSubTab ? "bg-[#171717] text-white" : "bg-[#f5f5f5] text-[#888888]"
+            )}>
+              {round.suggestions.length}
+            </span>
+            {idx === activeSubTab ? <span className="absolute bottom-0 left-1/2 h-0.5 w-5 -translate-x-1/2 rounded-full bg-[#171717]" /> : null}
+          </button>
+        ))}
+      </div>
+      <div className="flex-1 overflow-y-auto p-4">
+        {currentRound.suggestions.length > 0 ? (
+          <div className="space-y-3">
+            {currentRound.suggestions.map((suggestion, localIdx) => {
+              const flatIdx = currentOffset + localIdx;
+              const selected = flatIdx === activeSuggestionIndex;
+              return (
+                <div
+                  key={`${suggestion.quote}-${flatIdx}`}
+                  className={cn("flex flex-col overflow-hidden rounded-xl border bg-white shadow-[0px_1px_1px_rgba(0,0,0,0.02),0px_2px_2px_rgba(0,0,0,0.04)]", selected ? "border-[#171717]" : "border-[#ebebeb]")}
+                >
+                  <button className="border-b border-[#ebebeb] bg-[#fafafa] p-4 text-left" onClick={() => onSelectSuggestion(flatIdx)}>
+                    <span className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-[#888888]">原文引用</span>
+                    <p className="line-clamp-3 text-sm leading-5 text-[#888888]">{suggestion.quote}</p>
+                  </button>
+                  <div className="border-b border-[#ebebeb] p-4">
+                    <div className="flex items-start text-sm leading-5">
+                      <AlertCircle size={16} className="mr-2 mt-0.5 shrink-0 text-[#171717]" />
+                      <span className="text-[#171717]">{suggestion.issue}</span>
+                    </div>
+                  </div>
+                  <div className="bg-white p-4">
+                    <span className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-[#888888]">推荐修改方案</span>
+                    <p className="mb-5 text-sm leading-5 text-[#171717]">{suggestion.options[0]}</p>
+                    <div className="flex gap-3">
+                      <button
+                        className="flex-1 rounded-full bg-[#171717] py-2 text-sm font-medium text-white transition-colors hover:bg-[#171717]/90"
+                        onClick={() => onAcceptSuggestion(flatIdx)}
                       >
-                        <button className="border-b border-[#ebebeb] bg-[#fafafa] p-4 text-left" onClick={() => onSelectSuggestion(flatIdx)}>
-                          <span className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-[#888888]">原文引用</span>
-                          <p className="line-clamp-3 text-sm leading-5 text-[#888888]">{suggestion.quote}</p>
-                        </button>
-                        <div className="border-b border-[#ebebeb] p-4">
-                          <div className="flex items-start text-sm leading-5">
-                            <AlertCircle size={16} className="mr-2 mt-0.5 shrink-0 text-[#171717]" />
-                            <span className="text-[#171717]">{suggestion.issue}</span>
-                          </div>
-                        </div>
-                        <div className="bg-white p-4">
-                          <span className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-[#888888]">推荐修改方案</span>
-                          <p className="mb-5 text-sm leading-5 text-[#171717]">{suggestion.options[0]}</p>
-                          <div className="flex gap-3">
-                            <button
-                              className="flex-1 rounded-full bg-[#171717] py-2 text-sm font-medium text-white transition-colors hover:bg-[#171717]/90"
-                              onClick={() => onAcceptSuggestion(flatIdx)}
-                            >
-                              采纳替换
-                            </button>
-                            <button
-                              className="flex-1 rounded-full border border-[#ebebeb] bg-white py-2 text-sm font-medium text-[#171717] transition-colors hover:bg-[#fafafa]"
-                              onClick={() => onSendSuggestionToChat(flatIdx)}
-                            >
-                              发送至对话
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
+                        采纳替换
+                      </button>
+                      <button
+                        className="flex-1 rounded-full border border-[#ebebeb] bg-white py-2 text-sm font-medium text-[#171717] transition-colors hover:bg-[#fafafa]"
+                        onClick={() => onSendSuggestionToChat(flatIdx)}
+                      >
+                        发送至对话
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              ) : null}
-            </div>
-          );
-        })}
+              );
+            })}
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <Check size={32} className="text-emerald-400" />
+            <p className="mt-3 text-sm text-[#888888]">{currentRound.title}未发现问题</p>
+          </div>
+        )}
       </div>
     </div>
   );

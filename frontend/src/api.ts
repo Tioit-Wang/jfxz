@@ -1536,6 +1536,13 @@ export class ApiClient {
     await this.request(`/admin/prompts/${id}`, { method: "DELETE" });
   }
 
+  async generatePromptDescription(detailPrompt: string): Promise<{ description: string }> {
+    return this.request<{ description: string }>("/admin/prompts/generate-description", {
+      method: "POST",
+      body: JSON.stringify({ detail_prompt: detailPrompt })
+    });
+  }
+
   async listAdminProducts(): Promise<{
     plans: Array<Record<string, unknown>>;
     credit_packs: Array<Record<string, unknown>>;

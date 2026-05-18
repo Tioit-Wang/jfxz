@@ -245,6 +245,10 @@ class WritingPromptIn(BaseModel):
     is_active: bool = True
 
 
+class GenerateDescriptionIn(BaseModel):
+    detail_prompt: str = Field(min_length=1, max_length=10000)
+
+
 async def paginated(
     session: AsyncSession,
     statement: Select[tuple[Any, ...]],
@@ -4342,3 +4346,84 @@ async def admin_delete_prompt(
     await session.delete(item)
     await session.commit()
     return {"success": True}
+
+
+@router.post("/admin/prompts/generate-description")
+async def admin_generate_prompt_description(
+    payload: GenerateDescriptionIn,
+    _admin: User = Depends(current_admin),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """基于 detail_prompt 调用 AI 模型生成简要描述。"""
+    config = await one(
+        session,
+        select(GlobalConfig).where(
+            GlobalConfig.config_group == "ai.prompt_description",
+            GlobalConfig.config_key == "config",
+        ),
+    )
+    if config is None or not config.string_value:
+        raise HTTPException(
+            status_code=400,
+            detail="请先在「系统配置-AI 描述」中配置模型和提示词",
+        )
+    try:
+        cfg = json.loads(config.string_value)
+    except (json.JSONDecodeError, TypeError):
+        raise HTTPException(status_code=500, detail="配置文件格式错误")
+
+    model_id = cfg.get("model_id", "__none")
+    thinking = cfg.get("thinking", "medium")
+    prompt_template = cfg.get("prompt", "")
+
+    if model_id == "__none" or not model_id:
+        raise HTTPException(
+            status_code=400,
+            detail="请先在「系统配置-AI 描述」中选择 AI 模型",
+        )
+    if not prompt_template:
+        raise HTTPException(
+            status_code=400,
+            detail="请先在「系统配置-AI 描述」中配置提示词模板",
+        )
+    if "{{detail_prompt}}" not in prompt_template:
+        raise HTTPException(
+            status_code=400,
+            detail="提示词模板必须包含 {{detail_prompt}} 占位符",
+        )
+
+    model = await session.get(AiModel, model_id)
+    if model is None or model.status != "active":
+        raise HTTPException(status_code=400, detail="所选模型不存在或未激活")
+
+    filled_prompt = prompt_template.replace("{{detail_prompt}}", payload.detail_prompt)
+
+    settings = get_settings()
+    reasoning_effort = {"none": None, "low": "low", "medium": "medium", "high": "high", "xhigh": "max"}.get(thinking)
+
+    request_body: dict[str, Any] = {
+        "model": model.provider_model_id,
+        "messages": [{"role": "user", "content": filled_prompt}],
+        "max_tokens": 500,
+        "temperature": 0.3,
+    }
+    if reasoning_effort:
+        request_body["reasoning_effort"] = reasoning_effort
+
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                f"{settings.ai_provider_base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {settings.ai_provider_api_key}"},
+                json=request_body,
+            )
+            resp.raise_for_status()
+            result = resp.json()
+            description = result["choices"][0]["message"]["content"].strip()
+            return {"description": description}
+    except httpx.HTTPStatusError as e:
+        logger.error("AI description generation failed: %s - %s", e.response.status_code, e.response.text)
+        raise HTTPException(status_code=502, detail="AI 模型调用失败")
+    except Exception as e:
+        logger.error("AI description generation error: %s", str(e))
+        raise HTTPException(status_code=500, detail="生成描述时出错")

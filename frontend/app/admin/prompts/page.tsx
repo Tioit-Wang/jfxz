@@ -1,6 +1,6 @@
 "use client";
 
-import { Eye, Lightbulb, Plus, Search, Trash2 } from "lucide-react";
+import { Eye, Lightbulb, Plus, Search, Settings2, Sparkles, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ApiError, type PromptCategory, type PromptCategoryInput, type PromptListParams, type WritingPrompt, type WritingPromptDetail, type WritingPromptInput } from "@/api";
@@ -12,26 +12,12 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { RichTextEditor } from "@/components/RichTextEditor";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-
-// ---- Category Form ----
-
-type CategoryForm = {
-  id?: string;
-  name: string;
-  sort_order: string;
-  is_active: boolean;
-};
-
-const emptyCategoryForm: CategoryForm = { name: "", sort_order: "0", is_active: true };
-
-function categoryToForm(cat: PromptCategory): CategoryForm {
-  return { id: cat.id, name: cat.name, sort_order: String(cat.sort_order), is_active: cat.is_active };
-}
 
 // ---- Prompt Form ----
 
@@ -50,16 +36,25 @@ function promptToForm(p: WritingPrompt | WritingPromptDetail): PromptForm {
   return { id: p.id, title: p.title, description: p.description, detail_prompt: "detail_prompt" in p ? p.detail_prompt : "", category_id: p.category_id, is_active: p.is_active };
 }
 
+// ---- Category Form ----
+
+type CategoryForm = {
+  id?: string;
+  name: string;
+  sort_order: string;
+  is_active: boolean;
+};
+
+const emptyCategoryForm: CategoryForm = { name: "", sort_order: "0", is_active: true };
+
+function categoryToForm(cat: PromptCategory): CategoryForm {
+  return { id: cat.id, name: cat.name, sort_order: String(cat.sort_order), is_active: cat.is_active };
+}
+
 // ---- Main Page ----
 
 export default function AdminPromptsPage() {
   const client = useMemo(() => adminClient(), []);
-
-  // Category state
-  const [categories, setCategories] = useState<PromptCategory[]>([]);
-  const [catLoading, setCatLoading] = useState(true);
-  const [catForm, setCatForm] = useState<CategoryForm | null>(null);
-  const [deleteCatTarget, setDeleteCatTarget] = useState<PromptCategory | null>(null);
 
   // Prompt state
   const [prompts, setPrompts] = useState<WritingPrompt[]>([]);
@@ -68,9 +63,16 @@ export default function AdminPromptsPage() {
   const [deletePromptTarget, setDeletePromptTarget] = useState<WritingPrompt | null>(null);
   const [viewDetailTarget, setViewDetailTarget] = useState<WritingPromptDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [generating, setGenerating] = useState(false);
+
+  // Category state (for the management dialog inside prompt form)
+  const [categories, setCategories] = useState<PromptCategory[]>([]);
+  const [catLoading, setCatLoading] = useState(false);
+  const [catManagerOpen, setCatManagerOpen] = useState(false);
+  const [catForm, setCatForm] = useState<CategoryForm | null>(null);
+  const [deleteCatTarget, setDeleteCatTarget] = useState<PromptCategory | null>(null);
 
   // Filters
-  const [selectedCatId, setSelectedCatId] = useState<string>("all");
   const [promptQuery, setPromptQuery] = useState("");
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -96,7 +98,6 @@ export default function AdminPromptsPage() {
     setPromptLoading(true);
     try {
       const params: PromptListParams = { page: nextPage, pageSize };
-      if (selectedCatId !== "all") params.category_id = selectedCatId;
       if (promptQuery.trim()) params.q = promptQuery.trim();
       const data = await client.listAdminPrompts(params);
       setPrompts(data.items);
@@ -111,39 +112,7 @@ export default function AdminPromptsPage() {
     }
   }
 
-  useEffect(() => { void loadPrompts(1); }, [selectedCatId, promptQuery]);
-
-  // ---- Category CRUD ----
-  async function saveCategory() {
-    if (!catForm) return;
-    if (!catForm.name.trim()) { toast.error("请填写分类名称"); return; }
-    try {
-      const payload: PromptCategoryInput = { name: catForm.name.trim(), sort_order: Number(catForm.sort_order) || 0, is_active: catForm.is_active };
-      if (catForm.id) await client.updateAdminPromptCategory(catForm.id, payload);
-      else await client.createAdminPromptCategory(payload);
-      setCatForm(null);
-      await loadCategories();
-      toast.success("分类已保存");
-    } catch {
-      toast.error("分类保存失败");
-    }
-  }
-
-  async function deleteCategory() {
-    if (!deleteCatTarget) return;
-    try {
-      await client.deleteAdminPromptCategory(deleteCatTarget.id);
-      setDeleteCatTarget(null);
-      await loadCategories();
-      if (selectedCatId === deleteCatTarget.id) setSelectedCatId("all");
-      toast.success("分类已删除");
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 409) toast.error("该分类下存在提示词，请先移除");
-      else toast.error("分类删除失败");
-    } finally {
-      setDeleteCatTarget(null);
-    }
-  }
+  useEffect(() => { void loadPrompts(1); }, [promptQuery]);
 
   // ---- Prompt CRUD ----
   async function savePrompt() {
@@ -196,54 +165,64 @@ export default function AdminPromptsPage() {
     }
   }
 
+  async function generateDescription() {
+    if (!promptForm || !promptForm.detail_prompt.trim()) {
+      toast.error("请先填写详细提示词");
+      return;
+    }
+    setGenerating(true);
+    try {
+      const result = await client.generatePromptDescription(promptForm.detail_prompt);
+      setPromptForm({ ...promptForm, description: result.description });
+      toast.success("描述已生成");
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 400) {
+        toast.error(e.message || "请先在系统配置中完成 AI 描述设置");
+      } else {
+        toast.error("生成描述失败，请稍后重试");
+      }
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  // ---- Category CRUD ----
+  async function saveCategory() {
+    if (!catForm) return;
+    if (!catForm.name.trim()) { toast.error("请填写分类名称"); return; }
+    try {
+      const payload: PromptCategoryInput = { name: catForm.name.trim(), sort_order: Number(catForm.sort_order) || 0, is_active: catForm.is_active };
+      if (catForm.id) await client.updateAdminPromptCategory(catForm.id, payload);
+      else await client.createAdminPromptCategory(payload);
+      setCatForm(null);
+      await loadCategories();
+      toast.success("分类已保存");
+    } catch {
+      toast.error("分类保存失败");
+    }
+  }
+
+  async function deleteCategory() {
+    if (!deleteCatTarget) return;
+    try {
+      await client.deleteAdminPromptCategory(deleteCatTarget.id);
+      setDeleteCatTarget(null);
+      await loadCategories();
+      // Update selected category in prompt form if needed
+      if (promptForm && promptForm.category_id === deleteCatTarget.id) {
+        setPromptForm({ ...promptForm, category_id: "" });
+      }
+      toast.success("分类已删除");
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) toast.error("该分类下存在提示词，请先移除");
+      else toast.error("分类删除失败");
+    } finally {
+      setDeleteCatTarget(null);
+    }
+  }
+
   return (
     <AdminPage>
-      {/* Category section */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold tracking-[-0.01em]">提示词分类</h2>
-          <Button size="sm" className="gap-1.5" onClick={() => setCatForm({ ...emptyCategoryForm })}>
-            <Plus className="size-3.5" />新建分类
-          </Button>
-        </div>
-        {catLoading ? (
-          <div className="flex gap-2"><Skeleton className="h-8 w-24" /><Skeleton className="h-8 w-24" /><Skeleton className="h-8 w-24" /></div>
-        ) : categories.length === 0 ? (
-          <p className="text-xs text-muted-foreground py-4 text-center">暂无分类，请新建一个分类开始</p>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {categories.map((cat) => (
-              <div
-                key={cat.id}
-                className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm transition-colors cursor-pointer ${
-                  selectedCatId === cat.id ? "border-primary bg-primary/5 text-primary" : "border-border bg-card hover:bg-muted/50"
-                }`}
-                onClick={() => setSelectedCatId(cat.id)}
-              >
-                <Lightbulb className="size-3.5" />
-                <span className="font-medium">{cat.name}</span>
-                <span className="text-xs text-muted-foreground">({cat.prompt_count})</span>
-                {!cat.is_active && <span className="text-[10px] text-muted-foreground">(停用)</span>}
-                <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={(e) => { e.stopPropagation(); setCatForm(categoryToForm(cat)); }}>
-                  <span className="text-xs">编辑</span>
-                </Button>
-                <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-destructive hover:text-destructive" onClick={(e) => { e.stopPropagation(); setDeleteCatTarget(cat); }}>
-                  <Trash2 className="size-3" />
-                </Button>
-              </div>
-            ))}
-            {selectedCatId !== "all" && (
-              <button
-                className="inline-flex items-center gap-1 rounded-lg border border-dashed border-border px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted/50 transition-colors"
-                onClick={() => setSelectedCatId("all")}
-              >
-                全部
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-
       {/* Prompt list section */}
       <div className="space-y-4">
         <div className="flex items-center gap-2">
@@ -251,7 +230,7 @@ export default function AdminPromptsPage() {
             <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
             <Input className="h-9 pl-9" value={promptQuery} onChange={(e) => setPromptQuery(e.target.value)} placeholder="搜索标题或描述…" />
           </div>
-          <Button size="sm" className="ml-auto gap-1.5" onClick={() => setPromptForm({ ...emptyPromptForm, category_id: selectedCatId !== "all" ? selectedCatId : (categories[0]?.id ?? "") })}>
+          <Button size="sm" className="ml-auto gap-1.5" onClick={() => setPromptForm({ ...emptyPromptForm, category_id: categories[0]?.id ?? "" })}>
             <Plus className="size-3.5" />新建提示词
           </Button>
         </div>
@@ -262,7 +241,7 @@ export default function AdminPromptsPage() {
           <div className="rounded-lg border border-border bg-card p-12 shadow-card">
             <Empty><EmptyHeader>
               <div className="mx-auto mb-2 flex size-9 items-center justify-center rounded-full bg-muted text-muted-foreground"><Lightbulb className="size-4" /></div>
-              <EmptyTitle>暂无提示词</EmptyTitle><EmptyDescription>选择一个分类后新建提示词。</EmptyDescription>
+              <EmptyTitle>暂无提示词</EmptyTitle><EmptyDescription>点击「新建提示词」开始。</EmptyDescription>
             </EmptyHeader></Empty>
           </div>
         ) : (
@@ -311,7 +290,101 @@ export default function AdminPromptsPage() {
         )}
       </div>
 
-      {/* Category Dialog */}
+      {/* Prompt Dialog */}
+      <Dialog open={promptForm !== null} onOpenChange={(open) => { if (!open) setPromptForm(null); }}>
+        <DialogContent className="sm:max-w-xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>{promptForm?.id ? "编辑提示词" : "新建提示词"}</DialogTitle></DialogHeader>
+          {promptForm && (
+            <div className="space-y-4">
+              <Field><FieldLabel>标题</FieldLabel><Input value={promptForm.title} onChange={(e) => setPromptForm({ ...promptForm, title: e.target.value })} placeholder="提示词标题" maxLength={100} /></Field>
+              <Field>
+                <div className="flex items-center justify-between">
+                  <FieldLabel>分类</FieldLabel>
+                  <Button variant="link" size="sm" className="h-auto p-0 text-xs gap-1" onClick={() => setCatManagerOpen(true)}>
+                    <Settings2 className="size-3" />管理分类
+                  </Button>
+                </div>
+                <Select value={promptForm.category_id} onValueChange={(v) => setPromptForm({ ...promptForm, category_id: v })}>
+                  <SelectTrigger><SelectValue placeholder="选择分类" /></SelectTrigger>
+                  <SelectContent><SelectGroup>
+                    {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                  </SelectGroup></SelectContent>
+                </Select>
+              </Field>
+              <Field>
+                <div className="flex items-center justify-between">
+                  <FieldLabel>简要描述</FieldLabel>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-xs gap-1"
+                    disabled={!promptForm.detail_prompt.trim() || generating}
+                    onClick={() => void generateDescription()}
+                  >
+                    <Sparkles className="size-3" />
+                    {generating ? "生成中…" : "AI 生成"}
+                  </Button>
+                </div>
+                <Textarea value={promptForm.description} onChange={(e) => setPromptForm({ ...promptForm, description: e.target.value })} placeholder="用于Agent识别和选取，最长500字符" maxLength={500} rows={2} />
+              </Field>
+              <Field>
+                <FieldLabel>详细提示词</FieldLabel>
+                <RichTextEditor
+                  value={promptForm.detail_prompt}
+                  onChange={(v) => setPromptForm({ ...promptForm, detail_prompt: v })}
+                  minHeight={300}
+                />
+              </Field>
+              <div className="flex items-center gap-2">
+                <Switch checked={promptForm.is_active} onCheckedChange={(v) => setPromptForm({ ...promptForm, is_active: v })} />
+                <span className="text-sm">{promptForm.is_active ? "已激活" : "已停用"}</span>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPromptForm(null)}>取消</Button>
+            <Button onClick={() => void savePrompt()}>保存</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Category Management Dialog */}
+      <Dialog open={catManagerOpen} onOpenChange={(open) => { if (!open) setCatManagerOpen(false); }}>
+        <DialogContent className="sm:max-w-lg max-h-[70vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>管理分类</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {catLoading ? (
+              <div className="space-y-2"><Skeleton className="h-8 w-full" /><Skeleton className="h-8 w-full" /></div>
+            ) : categories.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">暂无分类</p>
+            ) : (
+              <div className="divide-y divide-border">
+                {categories.map((cat) => (
+                  <div key={cat.id} className="flex items-center justify-between py-2.5">
+                    <div className="flex items-center gap-2">
+                      <Lightbulb className="size-4 text-muted-foreground" />
+                      <span className="text-sm font-medium">{cat.name}</span>
+                      <span className="text-xs text-muted-foreground">({cat.prompt_count})</span>
+                      {!cat.is_active && <StatusBadge status="inactive" />}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setCatForm(categoryToForm(cat))}>编辑</Button>
+                      <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive hover:text-destructive" onClick={() => setDeleteCatTarget(cat)}>删除</Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <Button size="sm" className="w-full gap-1.5" onClick={() => setCatForm({ ...emptyCategoryForm })}>
+              <Plus className="size-3.5" />新建分类
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Category inline edit/create Dialog */}
       <Dialog open={catForm !== null} onOpenChange={(open) => { if (!open) setCatForm(null); }}>
         <DialogContent>
           <DialogHeader><DialogTitle>{catForm?.id ? "编辑分类" : "新建分类"}</DialogTitle></DialogHeader>
@@ -332,40 +405,9 @@ export default function AdminPromptsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Prompt Dialog */}
-      <Dialog open={promptForm !== null} onOpenChange={(open) => { if (!open) setPromptForm(null); }}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>{promptForm?.id ? "编辑提示词" : "新建提示词"}</DialogTitle></DialogHeader>
-          {promptForm && (
-            <div className="space-y-4">
-              <Field><FieldLabel>标题</FieldLabel><Input value={promptForm.title} onChange={(e) => setPromptForm({ ...promptForm, title: e.target.value })} placeholder="提示词标题" maxLength={100} /></Field>
-              <Field>
-                <FieldLabel>分类</FieldLabel>
-                <Select value={promptForm.category_id} onValueChange={(v) => setPromptForm({ ...promptForm, category_id: v })}>
-                  <SelectTrigger><SelectValue placeholder="选择分类" /></SelectTrigger>
-                  <SelectContent><SelectGroup>
-                    {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                  </SelectGroup></SelectContent>
-                </Select>
-              </Field>
-              <Field><FieldLabel>简要描述</FieldLabel><Textarea value={promptForm.description} onChange={(e) => setPromptForm({ ...promptForm, description: e.target.value })} placeholder="用于Agent识别和选取，最长500字符" maxLength={500} rows={2} /></Field>
-              <Field><FieldLabel>详细提示词</FieldLabel><Textarea value={promptForm.detail_prompt} onChange={(e) => setPromptForm({ ...promptForm, detail_prompt: e.target.value })} placeholder="支持Markdown，最长10000字符" maxLength={10000} rows={12} className="font-mono text-xs" /></Field>
-              <div className="flex items-center gap-2">
-                <Switch checked={promptForm.is_active} onCheckedChange={(v) => setPromptForm({ ...promptForm, is_active: v })} />
-                <span className="text-sm">{promptForm.is_active ? "已激活" : "已停用"}</span>
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setPromptForm(null)}>取消</Button>
-            <Button onClick={() => void savePrompt()}>保存</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* View Detail Dialog */}
       <Dialog open={viewDetailTarget !== null} onOpenChange={(open) => { if (!open) setViewDetailTarget(null); }}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-xl max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{viewDetailTarget?.title ?? "提示词详情"}</DialogTitle></DialogHeader>
           {detailLoading ? (
             <div className="space-y-2"><Skeleton className="h-4 w-full" /><Skeleton className="h-32 w-full" /></div>

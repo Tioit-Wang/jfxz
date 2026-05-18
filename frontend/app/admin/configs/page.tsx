@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, Edit, Eye, EyeOff, Save, Settings2 } from "lucide-react";
+import { AlertCircle, Edit, Eye, EyeOff, Save, Settings2, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { type AdminConfig, type AdminConfigValue, type AiModelOption } from "@/api";
@@ -30,12 +30,14 @@ const labelMap: Record<string, string> = {
   character_enabled: "启用角色检查", logic_enabled: "启用逻辑检查", style_enabled: "启用风格检查",
   character_prompt: "角色检查提示词", logic_prompt: "逻辑检查提示词", style_prompt: "风格检查提示词",
   logic_chapter_count: "逻辑检查参考前N章", style_chapter_count: "风格检查参考前N章",
+  config: "AI 描述配置",
 };
 
 function configLabel(config: AdminConfig) { return labelMap[config.config_key] ?? config.config_key.replaceAll("_", " "); }
 function groupLabel(group: string) {
   if (group === "payment.alipay_f2f") return "支付宝当面付";
   if (group === "ai.editor_check") return "AI 检查";
+  if (group === "ai.prompt_description") return "AI 描述";
   return group;
 }
 
@@ -216,6 +218,156 @@ function PromptEditorModal({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+const PROMPT_DESC_PLACEHOLDERS = [
+  { key: "detail_prompt", label: "详细提示词" },
+];
+
+function PromptDescriptionPanel({
+  configs,
+  models,
+}: {
+  configs: AdminConfig[];
+  models: AiModelOption[];
+}) {
+  const client = useMemo(() => adminClient(), []);
+  const config = configs.find((c) => c.config_key === "config");
+  const [cfg, setCfg] = useState<{ model_id: string; thinking: string; prompt: string } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (config?.string_value) {
+      try { setCfg(JSON.parse(config.string_value)); } catch { /* ignore */ }
+    }
+  }, [config?.string_value]);
+
+  if (!config || !cfg) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <Empty><EmptyHeader><EmptyTitle>暂无配置</EmptyTitle></EmptyHeader></Empty>
+      </div>
+    );
+  }
+
+  function insertPlaceholder(p: string) {
+    if (!promptRef.current) return;
+    const start = promptRef.current.selectionStart;
+    const end = promptRef.current.selectionEnd;
+    const before = cfg.prompt.slice(0, start);
+    const after = cfg.prompt.slice(end);
+    setCfg({ ...cfg, prompt: before + `{{${p}}}` + after });
+    setTimeout(() => {
+      const pos = start + p.length + 4;
+      promptRef.current?.setSelectionRange(pos, pos);
+      promptRef.current?.focus();
+    }, 0);
+  }
+
+  async function save() {
+    setSaving(true);
+    try {
+      await client.updateAdminConfig(config.id, { string_value: JSON.stringify(cfg) });
+      toast.success("配置已保存");
+    } catch { toast.error("保存失败"); }
+    finally { setSaving(false); }
+  }
+
+  const currentIdx = THINKING_LEVELS_ADMIN.indexOf(cfg.thinking as ThinkingLevelAdmin);
+  const checkModelMissing = cfg.model_id !== "__none" && !models.some((m) => m.id === cfg.model_id);
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card shadow-card">
+      <div className="flex-1 space-y-6 p-5">
+        {/* Model selector */}
+        <div className="space-y-2">
+          <label className="text-sm font-medium">AI 模型</label>
+          <Select value={cfg.model_id} onValueChange={(v) => setCfg({ ...cfg, model_id: v })}>
+            <SelectTrigger><SelectValue placeholder="选择模型" /></SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="__none">未选择</SelectItem>
+                {checkModelMissing && (
+                  <SelectItem value={cfg.model_id}>当前不可用模型</SelectItem>
+                )}
+                {models.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>{m.display_name}</SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Thinking level */}
+        <div className="space-y-2">
+          <label className="text-sm font-medium">思考强度</label>
+          <div className="flex items-center gap-3">
+            <div className="flex flex-1 gap-1">
+              {THINKING_LEVELS_ADMIN.map((level, idx) => {
+                const isFilled = cfg.thinking !== "none" && idx <= Math.max(0, currentIdx);
+                return (
+                  <button
+                    key={level}
+                    type="button"
+                    className={cn(
+                      "h-2 flex-1 rounded-full transition-all",
+                      isFilled
+                        ? cfg.thinking === "xhigh" ? "bg-cyan-600"
+                          : cfg.thinking === "high" ? "bg-cyan-500"
+                          : cfg.thinking === "medium" ? "bg-cyan-400"
+                          : "bg-cyan-300"
+                        : "bg-[#ebebeb]"
+                    )}
+                    onClick={() => setCfg({ ...cfg, thinking: level })}
+                  />
+                );
+              })}
+            </div>
+            <span className="w-12 text-xs font-medium text-muted-foreground text-right">
+              {THINKING_LABELS_ADMIN[cfg.thinking as ThinkingLevelAdmin] ?? cfg.thinking}
+            </span>
+          </div>
+        </div>
+
+        {/* Prompt editor */}
+        <div className="space-y-2">
+          <label className="text-sm font-medium">生成描述提示词</label>
+          <p className="text-xs text-muted-foreground">提示词中必须包含 <code className="text-foreground bg-muted px-1 rounded">{'{{detail_prompt}}'}</code> 占位符。</p>
+          <div className="flex flex-wrap gap-1.5">
+            {PROMPT_DESC_PLACEHOLDERS.map((ph) => (
+              <Button
+                key={ph.key}
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                onClick={() => insertPlaceholder(ph.key)}
+              >
+                {'{{'}{ph.key}{'}}'}
+              </Button>
+            ))}
+          </div>
+          <Textarea
+            ref={promptRef}
+            value={cfg.prompt}
+            onChange={(e) => setCfg({ ...cfg, prompt: e.target.value })}
+            rows={8}
+            className="font-mono text-xs"
+            placeholder="输入提示词模板…"
+          />
+          {!cfg.prompt.includes("{{detail_prompt}}") && (
+            <p className="text-xs text-destructive">提示词模板必须包含 {'{{detail_prompt}}'} 占位符</p>
+          )}
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border px-5 py-3">
+        <Button size="sm" onClick={() => void save()} disabled={saving || !cfg.prompt.includes("{{detail_prompt}}")}>
+          <Sparkles className="size-3.5 mr-1" />
+          {saving ? "保存中…" : "保存配置"}
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -657,7 +809,9 @@ export default function AdminConfigsPage() {
           </div>
           {groups.map((group) => (
             <TabsContent key={group} value={group} className="mt-4 flex flex-1 flex-col overflow-hidden data-[state=inactive]:hidden">
-              {activeGroup === group && group === "ai.editor_check" ? (
+              {activeGroup === group && group === "ai.prompt_description" ? (
+                <PromptDescriptionPanel configs={configs} models={models} />
+              ) : activeGroup === group && group === "ai.editor_check" ? (
                 <AiCheckPanel
                   configs={configs}
                   checkDrafts={checkDrafts}

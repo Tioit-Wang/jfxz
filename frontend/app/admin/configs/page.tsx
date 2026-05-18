@@ -267,6 +267,7 @@ function PromptDescriptionPanel({
   }
 
   async function save() {
+    if (!config || !cfg) return;
     setSaving(true);
     try {
       await client.updateAdminConfig(config.id, { string_value: JSON.stringify(cfg) });

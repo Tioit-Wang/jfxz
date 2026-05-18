@@ -144,7 +144,7 @@ class WritingGoalIn(BaseModel):
 
 
 class ChatIn(BaseModel):
-    message: str = Field(min_length=1, max_length=4000)
+    message: str = Field(min_length=1, max_length=100000)
     model_id: str | None = Field(default=None, max_length=100)
     thinking_intensity: float | None = Field(default=None, ge=0.0, le=1.0)
 

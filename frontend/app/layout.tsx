@@ -1,18 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "streamdown/styles.css";
-import { Geist } from "next/font/google";
-import { Playfair_Display } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
-
-const geist = Geist({ subsets: ["latin"], variable: "--font-sans" });
-const playfair = Playfair_Display({
-  subsets: ["latin"],
-  variable: "--font-display",
-  display: "swap",
-});
 
 export const metadata: Metadata = {
   title: "妙蛙写作",
@@ -21,7 +11,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="zh-CN" className={cn("font-sans", geist.variable, playfair.variable)}>
+    <html lang="zh-CN">
       <body>
         <TooltipProvider>
           {children}

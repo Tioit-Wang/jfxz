@@ -28,6 +28,8 @@ export default function PublicPreviewShell({ shareToken }: { shareToken: string 
   const [workTitle, setWorkTitle] = useState("");
 
   const loadingRef = useRef(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const mobileInnerRef = useRef<HTMLDivElement>(null);
 
   const client = useMemo(() => new ApiClient(), []);
 
@@ -62,6 +64,16 @@ export default function PublicPreviewShell({ shareToken }: { shareToken: string 
     init();
     return () => { cancelled = true; };
   }, [loadChapter]);
+
+  // Scroll to top when chapter changes
+  useEffect(() => {
+    const mobile = mode === "mobile";
+    if (mobile && mobileInnerRef.current) {
+      mobileInnerRef.current.scrollTop = 0;
+    } else if (!mobile && scrollRef.current) {
+      scrollRef.current.scrollTop = 0;
+    }
+  }, [chapter?.id, mode]);
 
   // Global copy prevention
   useEffect(() => {
@@ -218,12 +230,12 @@ export default function PublicPreviewShell({ shareToken }: { shareToken: string 
           </div>
         </div>
       ) : (
-        <div className={cn("flex-1 overflow-y-auto", isMobile && "flex items-start justify-center py-8")}>
+        <div ref={scrollRef} className={cn("flex-1 overflow-y-auto", isMobile && "flex items-start justify-center py-8")}>
           <div className={cn(isMobile ? "relative" : "mx-auto max-w-[800px] px-6 py-8")}>
             {isMobile && (
               <div className="relative mx-auto overflow-hidden rounded-[44px] border-[6px] border-neutral-800 bg-white shadow-2xl" style={{ width: 393, minHeight: 852 }}>
                 <div className="absolute left-1/2 top-1.5 z-20 h-[26px] w-[100px] -translate-x-1/2 rounded-full bg-neutral-800" />
-                <div className="h-full overflow-y-auto px-5 pb-10 pt-12" style={{ maxHeight: 852 }}>
+                <div ref={mobileInnerRef} className="h-full overflow-y-auto px-5 pb-10 pt-12" style={{ maxHeight: 852 }}>
                   <ChapterListView
                     chapter={chapter}
                     fontSize={fontSize}

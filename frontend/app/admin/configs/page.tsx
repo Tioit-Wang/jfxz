@@ -16,6 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { RichTextEditor, type RichTextEditorHandle } from "@/components/RichTextEditor";
 import { cn } from "@/lib/utils";
 
 type DraftValue = string | boolean;
@@ -141,22 +142,11 @@ function PromptEditorModal({
   getCheckDraft: (key: string) => DraftValue;
   setCheckDraft: (key: string, value: DraftValue) => void;
 }) {
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const editorRef = useRef<RichTextEditorHandle>(null);
 
   const insertPlaceholder = useCallback((key: string) => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-    const text = `{{${key}}}`;
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const current = String(getCheckDraft(`${checkId}_prompt`) || "");
-    const nextValue = current.slice(0, start) + text + current.slice(end);
-    setCheckDraft(`${checkId}_prompt`, nextValue);
-    requestAnimationFrame(() => {
-      textarea.focus();
-      textarea.setSelectionRange(start + text.length, start + text.length);
-    });
-  }, [checkId, getCheckDraft, setCheckDraft]);
+    editorRef.current?.insertText(`{{${key}}}`);
+  }, []);
 
   const validationError = (() => {
     const required = CHECK_REQUIRED[checkId] || [];
@@ -198,11 +188,11 @@ function PromptEditorModal({
             })}
           </div>
           {/* Markdown 编辑器 */}
-          <Textarea
-            ref={(el) => { textareaRef.current = el; }}
-            className="min-h-[320px] font-mono text-sm leading-relaxed"
+          <RichTextEditor
+            ref={editorRef}
             value={promptText}
-            onChange={(e) => setCheckDraft(`${checkId}_prompt`, e.target.value)}
+            onChange={(v) => setCheckDraft(`${checkId}_prompt`, v)}
+            minHeight={320}
           />
           {validationError ? (
             <span className="text-xs text-destructive flex items-center gap-1">
@@ -210,6 +200,74 @@ function PromptEditorModal({
               {validationError}
             </span>
           ) : null}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} className="rounded-full">
+            完成
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function PromptDescEditorModal({
+  open, onOpenChange, prompt, onChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  prompt: string;
+  onChange: (value: string) => void;
+}) {
+  const editorRef = useRef<RichTextEditorHandle>(null);
+
+  const insertPlaceholder = useCallback((key: string) => {
+    editorRef.current?.insertText(`{{${key}}}`);
+  }, []);
+
+  const missingPlaceholder = !prompt.includes("{{detail_prompt}}");
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-3xl" showCloseButton>
+        <DialogHeader>
+          <DialogTitle>编辑提示词 — AI 描述</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-1.5 pb-3 border-b border-border">
+            <span className="text-xs text-muted-foreground shrink-0 mr-1">插入占位符：</span>
+            {PROMPT_DESC_PLACEHOLDERS.map((ph) => {
+              const isUsed = prompt.includes(`{{${ph.key}}}`);
+              return (
+                <button
+                  key={ph.key}
+                  disabled={isUsed}
+                  className={cn(
+                    "rounded-full px-2.5 py-1 text-xs border transition-colors",
+                    isUsed
+                      ? "border-[#ebebeb] bg-[#f5f5f5] text-[#d4d4d4] cursor-default"
+                      : "border-amber-200 bg-[#fef3c7] text-[#92400e] hover:bg-[#fde68a] cursor-pointer"
+                  )}
+                  onClick={() => insertPlaceholder(ph.key)}
+                  title={ph.label}
+                >
+                  {`{{${ph.key}}}`}
+                </button>
+              );
+            })}
+          </div>
+          <RichTextEditor
+            ref={editorRef}
+            value={prompt}
+            onChange={onChange}
+            minHeight={320}
+          />
+          {missingPlaceholder && (
+            <p className="text-xs text-destructive flex items-center gap-1">
+              <AlertCircle size={12} />
+              提示词模板必须包含 {'{{detail_prompt}}'} 占位符
+            </p>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} className="rounded-full">
@@ -236,7 +294,7 @@ function PromptDescriptionPanel({
   const config = configs.find((c) => c.config_key === "config");
   const [cfg, setCfg] = useState<{ model_id: string; thinking: string; prompt: string } | null>(null);
   const [saving, setSaving] = useState(false);
-  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   useEffect(() => {
     if (config?.string_value) {
@@ -250,20 +308,6 @@ function PromptDescriptionPanel({
         <Empty><EmptyHeader><EmptyTitle>暂无配置</EmptyTitle></EmptyHeader></Empty>
       </div>
     );
-  }
-
-  function insertPlaceholder(p: string) {
-    if (!promptRef.current || !cfg) return;
-    const start = promptRef.current.selectionStart;
-    const end = promptRef.current.selectionEnd;
-    const before = cfg.prompt.slice(0, start);
-    const after = cfg.prompt.slice(end);
-    setCfg({ ...cfg, prompt: before + `{{${p}}}` + after });
-    setTimeout(() => {
-      const pos = start + p.length + 4;
-      promptRef.current?.setSelectionRange(pos, pos);
-      promptRef.current?.focus();
-    }, 0);
   }
 
   async function save() {
@@ -332,33 +376,33 @@ function PromptDescriptionPanel({
           </div>
         </div>
 
-        {/* Prompt editor */}
+        {/* Prompt preview */}
         <div className="space-y-2">
-          <label className="text-sm font-medium">生成描述提示词</label>
-          <p className="text-xs text-muted-foreground">提示词中必须包含 <code className="text-foreground bg-muted px-1 rounded">{'{{detail_prompt}}'}</code> 占位符。</p>
-          <div className="flex flex-wrap gap-1.5">
-            {PROMPT_DESC_PLACEHOLDERS.map((ph) => (
-              <Button
-                key={ph.key}
-                size="sm"
-                variant="outline"
-                className="h-7 text-xs"
-                onClick={() => insertPlaceholder(ph.key)}
-              >
-                {'{{'}{ph.key}{'}}'}
-              </Button>
-            ))}
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-0.5">
+              <span className="text-sm font-medium">提示词预览</span>
+              <p className="text-xs text-muted-foreground">提示词中必须包含 <code className="text-foreground bg-muted px-1 rounded">{'{{detail_prompt}}'}</code> 占位符。</p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPreviewOpen(true)}
+              className="rounded-full shrink-0"
+            >
+              <Edit className="size-3.5 mr-1" />
+              编辑
+            </Button>
           </div>
-          <Textarea
-            ref={promptRef}
-            value={cfg.prompt}
-            onChange={(e) => setCfg({ ...cfg, prompt: e.target.value })}
-            rows={8}
-            className="font-mono text-xs"
-            placeholder="输入提示词模板…"
-          />
+          <div className="rounded-lg border border-border bg-muted/30 p-3">
+            <pre className="max-h-[160px] overflow-y-auto font-mono text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
+              {cfg.prompt ? cfg.prompt : <span className="italic text-muted-foreground/50">暂无提示词</span>}
+            </pre>
+          </div>
           {!cfg.prompt.includes("{{detail_prompt}}") && (
-            <p className="text-xs text-destructive">提示词模板必须包含 {'{{detail_prompt}}'} 占位符</p>
+            <p className="text-xs text-destructive flex items-center gap-1">
+              <AlertCircle size={12} />
+              提示词模板必须包含 {'{{detail_prompt}}'} 占位符
+            </p>
           )}
         </div>
       </div>
@@ -368,6 +412,13 @@ function PromptDescriptionPanel({
           {saving ? "保存中…" : "保存配置"}
         </Button>
       </div>
+
+      <PromptDescEditorModal
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        prompt={cfg.prompt}
+        onChange={(v) => setCfg({ ...cfg, prompt: v })}
+      />
     </div>
   );
 }

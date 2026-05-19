@@ -1,7 +1,7 @@
 "use client";
 
 import { Bold, Code, Heading3, Italic, LinkIcon, List, ListChecks, ListOrdered, Minus, Quote, Strikethrough } from "lucide-react";
-import type { ReactNode } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, type ReactNode } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "@tiptap/markdown";
@@ -37,15 +37,17 @@ function ToolbarBtn({
   );
 }
 
-export function RichTextEditor({
-  value,
-  onChange,
-  minHeight = 380,
-}: {
+export type RichTextEditorHandle = {
+  insertText: (text: string) => void;
+};
+
+export const RichTextEditor = forwardRef<RichTextEditorHandle, {
   value: string;
   onChange: (value: string) => void;
   minHeight?: number;
-}) {
+}>(function RichTextEditor({ value, onChange, minHeight = 380 }, ref) {
+  const prevValueRef = useRef(value);
+
   const editor = useEditor({
     immediatelyRender: false,
     extensions: [StarterKit, Markdown, TipTapLink, TaskList, TaskItem],
@@ -57,9 +59,25 @@ export function RichTextEditor({
       },
     },
     onUpdate: ({ editor }) => {
-      onChange(editor.getMarkdown());
+      const md = editor.getMarkdown();
+      prevValueRef.current = md;
+      onChange(md);
     },
   });
+
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    if (value !== prevValueRef.current) {
+      editor.commands.setContent(value, { emitUpdate: false });
+      prevValueRef.current = value;
+    }
+  }, [value, editor]);
+
+  useImperativeHandle(ref, () => ({
+    insertText(text: string) {
+      editor?.chain().focus().insertContent(text).run();
+    },
+  }), [editor]);
 
   if (!editor) {
     return (
@@ -169,4 +187,4 @@ export function RichTextEditor({
       </div>
     </div>
   );
-}
+});

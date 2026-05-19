@@ -250,7 +250,7 @@ export function ChapterPlainTextEditor({
     if (!editor) return;
     const current = plainText(editor);
     if (current === value) return;
-    editor.commands.setContent(value ? textDoc(value) : emptyDoc(), { emitUpdate: false });
+    editor.chain().setContent(value ? textDoc(value) : emptyDoc(), { emitUpdate: false }).setTextSelection(0).run();
   }, [editor, value]);
 
   useEffect(() => {

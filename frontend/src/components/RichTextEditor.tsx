@@ -68,7 +68,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, {
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
     if (value !== prevValueRef.current) {
-      editor.commands.setContent(value, { emitUpdate: false });
+      editor.chain().setContent(value, { emitUpdate: false }).setTextSelection(0).run();
       prevValueRef.current = value;
     }
   }, [value, editor]);

@@ -826,6 +826,74 @@ class TestGoodguaTools:
         result = json.loads(await tools.get_chapter(chapter.id))
         assert result.get("status") == "unchanged"
 
+    async def test_delete_chapter_gap_does_not_break_listing_order(self, tools: GoodguaTools, session: AsyncSession) -> None:
+        """删除中间章节产生 order_index gap 后，列表排序仍然正确。"""
+        for i in range(4):
+            session.add(Chapter(work_id=tools.work_id, order_index=i, title=f"章节{i}", content="", summary=""))
+        await session.commit()
+
+        # 删除 order_index=1 的章节，产生 gap [0, 2, 3]
+        ch1 = (await session.execute(
+            select(Chapter).where(Chapter.work_id == tools.work_id, Chapter.order_index == 1)
+        )).scalar_one()
+        await session.delete(ch1)
+        await session.commit()
+
+        listed = json.loads(await tools.list_chapters())
+        titles = [c["title"] for c in listed["items"]]
+        assert titles == ["章节0", "章节2", "章节3"]
+        assert [c["order_index"] for c in listed["items"]] == [0, 2, 3]
+
+    async def test_delete_then_create_chapter_uses_max_order_index(self, tools: GoodguaTools, session: AsyncSession) -> None:
+        """删除产生 gap 后，create_chapter 使用 max(order_index)+1 而非 count+1，避免 UniqueConstraint 冲突。"""
+        for i in range(3):
+            session.add(Chapter(work_id=tools.work_id, order_index=i, title=f"章节{i}", content="", summary=""))
+        await session.commit()
+
+        # 删除 order_index=1，剩余 [0, 2]
+        ch1 = (await session.execute(
+            select(Chapter).where(Chapter.work_id == tools.work_id, Chapter.order_index == 1)
+        )).scalar_one()
+        await session.delete(ch1)
+        await session.commit()
+
+        # 通过 agent tools 创建新章节，应使用 max+1 = 3
+        created = json.loads(await tools.create_chapter("新章节"))
+        assert created["order_index"] == 3
+
+        # 再创建一个，order_index = 4
+        created2 = json.loads(await tools.create_chapter("又一章节"))
+        assert created2["order_index"] == 4
+
+    async def test_multiple_deletes_with_gap_then_create(self, tools: GoodguaTools, session: AsyncSession) -> None:
+        """多次删除产生 gap 后，创建新章节不会触发 UniqueConstraint 冲突。"""
+        for i in range(3):
+            session.add(Chapter(work_id=tools.work_id, order_index=i, title=f"章节{i}", content="", summary=""))
+        await session.commit()
+
+        # 删除 order_index=1，剩余 [0, 2]
+        ch1 = (await session.execute(
+            select(Chapter).where(Chapter.work_id == tools.work_id, Chapter.order_index == 1)
+        )).scalar_one()
+        await session.delete(ch1)
+        await session.commit()
+
+        # 删除 order_index=0，剩余 [2]
+        ch0 = (await session.execute(
+            select(Chapter).where(Chapter.work_id == tools.work_id, Chapter.order_index == 0)
+        )).scalar_one()
+        await session.delete(ch0)
+        await session.commit()
+
+        # count=1, max=2 → new order_index should be 3 (max+1), not 2 (count+1)
+        created = json.loads(await tools.create_chapter("安全创建"))
+        assert created["order_index"] == 3
+
+        # 验证列表顺序正确
+        listed = json.loads(await tools.list_chapters())
+        assert len(listed["items"]) == 2
+        assert [c["title"] for c in listed["items"]] == ["章节2", "安全创建"]
+
 
 # ---- billing_service tests ----
 

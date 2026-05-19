@@ -1649,8 +1649,8 @@ async def create_chapter(
     )
     order_index = payload.order_index
     if order_index is None:
-        count = await one(session, select(func.count(Chapter.id)).where(Chapter.volume_id == volume.id))
-        order_index = int(count) + 1
+        max_result = await one(session, select(func.max(Chapter.order_index)).where(Chapter.volume_id == volume.id))
+        order_index = int(max_result or 0) + 1
     values = payload.model_dump(exclude={"order_index", "volume_id", "words_added"})
     chapter = Chapter(
         work_id=work_id,

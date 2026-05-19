@@ -187,7 +187,7 @@ function renderNamedList(resultStr: string, emptyText: string) {
           const id = stringValue(item.id);
           const title = stringValue(item.name ?? item.title) || "未命名";
           const summary = stringValue(item.summary ?? item.detail ?? item.content);
-          const order = numberValue(item.order_index ?? item.order);
+          const order = numberValue(item.display_order ?? item.order_index ?? item.order);
           const volumeId = stringValue(item.volume_id);
           return (
             <div key={id || `${title}-${index}`} className="rounded-xl border border-neutral-200 bg-white px-3 py-2">
@@ -243,6 +243,72 @@ function renderDelete(resultStr: string, label: string, idKey: string) {
   );
 }
 
+function renderChapterDetail(resultStr: string) {
+  const data = asRecord(parseJson(resultStr));
+  const error = stringValue(data.error);
+  if (error) return <p className="rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700">{error}</p>;
+  if (!Object.keys(data).length) return renderPlain(resultStr);
+
+  const status = stringValue(data.status);
+  if (status === "unchanged") {
+    return (
+      <div className="space-y-2 rounded-xl border border-neutral-200 bg-white p-3">
+        <span className="truncate text-sm font-bold text-neutral-950">{stringValue(data.title)}</span>
+        <p className="text-xs text-neutral-500">{stringValue(data.message)}</p>
+      </div>
+    );
+  }
+
+  const title = stringValue(data.title) || "未命名章节";
+  const id = stringValue(data.id ?? data.chapter_id);
+  const summary = stringValue(data.summary);
+  const content = stringValue(data.content);
+  const wordCount = numberValue(data.word_count);
+  const totalLines = numberValue(data.total_lines);
+
+  const metaParts: string[] = [];
+  if (wordCount != null) metaParts.push(`${wordCount} 字`);
+  if (totalLines != null) metaParts.push(`${totalLines} 段`);
+
+  return (
+    <div className="space-y-3 rounded-xl border border-neutral-200 bg-white p-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="truncate text-sm font-bold text-neutral-950">{title}</span>
+        {id ? <span className="shrink-0 rounded-full bg-neutral-100 px-2 py-0.5 font-mono text-[10px] text-neutral-500">{id.slice(0, 8)}</span> : null}
+      </div>
+
+      {metaParts.length > 0 ? (
+        <div className="flex flex-wrap gap-2">
+          {metaParts.map((part, i) => (
+            <span key={i} className="rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] font-medium text-neutral-600">{part}</span>
+          ))}
+        </div>
+      ) : null}
+
+      {summary ? (
+        <div>
+          <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-neutral-400">提要</span>
+          <p className="mt-1 whitespace-pre-wrap text-[12px] leading-5 text-neutral-700">{summary}</p>
+        </div>
+      ) : null}
+
+      {content ? (
+        <div>
+          <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-neutral-400">正文</span>
+          <div className="mt-1 max-h-48 overflow-auto rounded-lg bg-neutral-50 p-2 font-mono text-[11px] leading-relaxed text-neutral-800">
+            {content.split("\n").map((line, i) => (
+              <div key={i} className="flex">
+                <span className="mr-2 shrink-0 select-none text-neutral-300">{i + 1}</span>
+                <span className="whitespace-pre-wrap">{line.replace(/^\d+\s/, "")}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function renderToolResult(block: ToolCallBlock) {
   if (!block.result) return null;
   if (block.tool === "update_chapter") {
@@ -260,7 +326,7 @@ function renderToolResult(block: ToolCallBlock) {
   if (block.tool === "list_volumes") return renderNamedList(block.result, "暂无卷");
   if (block.tool === "get_character") return renderDetail(block.result, ["name"], [["summary", "简介"], ["detail", "详细描述"]]);
   if (block.tool === "get_setting") return renderDetail(block.result, ["name"], [["type", "类型"], ["summary", "简介"], ["detail", "详情"]]);
-  if (block.tool === "get_chapter") return renderDetail(block.result, ["title"], [["summary", "提要"], ["content", "正文"], ["volume_id", "卷 ID"]]);
+  if (block.tool === "get_chapter") return renderChapterDetail(block.result);
   if (block.tool === "get_work_info" || block.tool === "update_work_info") {
     return renderDetail(block.result, ["title"], [["short_intro", "简介"], ["synopsis", "大纲"], ["background_rules", "背景规则"], ["focus_requirements", "创作重点"], ["forbidden_requirements", "禁忌要求"]]);
   }

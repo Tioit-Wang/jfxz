@@ -765,9 +765,10 @@ class GoodguaTools(Toolkit):
             items = [
                 {
                     **_serialize_lite(c, ["id", "volume_id", "order_index", "title", "summary"]),
+                    "display_order": offset + idx + 1,
                     "word_count": _count_words(c.content or ""),
                 }
-                for c in chapters
+                for idx, c in enumerate(chapters)
             ]
             return json.dumps({
                 "items": items,

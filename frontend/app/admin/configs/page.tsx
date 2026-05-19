@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { type AdminConfig, type AdminConfigValue, type AiModelOption } from "@/api";
 import { AdminPage } from "../_components";
 import { adminClient } from "../admin-utils";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -162,6 +162,7 @@ function PromptEditorModal({
       <DialogContent className="sm:max-w-3xl" showCloseButton>
         <DialogHeader>
           <DialogTitle>编辑提示词 — {CHECK_NAMES[checkId]}</DialogTitle>
+          <DialogDescription>编辑检查项的提示词模板，支持占位符插入。</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           {/* 顶部工具栏 — 占位符插入按钮 */}
@@ -232,6 +233,7 @@ function PromptDescEditorModal({
       <DialogContent className="sm:max-w-3xl" showCloseButton>
         <DialogHeader>
           <DialogTitle>编辑提示词 — AI 描述</DialogTitle>
+          <DialogDescription>编辑 AI 描述提示词模板，支持占位符插入。</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <div className="flex flex-wrap items-center gap-1.5 pb-3 border-b border-border">

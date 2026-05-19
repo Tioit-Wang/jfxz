@@ -8,7 +8,7 @@ import { AdminPage, AdminPagination, StatusBadge } from "../_components";
 import { adminClient } from "../admin-utils";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -293,7 +293,10 @@ export default function AdminPromptsPage() {
       {/* Prompt Dialog */}
       <Dialog open={promptForm !== null} onOpenChange={(open) => { if (!open) setPromptForm(null); }}>
         <DialogContent className="sm:max-w-xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>{promptForm?.id ? "编辑提示词" : "新建提示词"}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>{promptForm?.id ? "编辑提示词" : "新建提示词"}</DialogTitle>
+            <DialogDescription>{promptForm?.id ? "编辑已有的写作提示词。" : "创建新的写作提示词。"}</DialogDescription>
+          </DialogHeader>
           {promptForm && (
             <div className="space-y-4">
               <Field><FieldLabel>标题</FieldLabel><Input value={promptForm.title} onChange={(e) => setPromptForm({ ...promptForm, title: e.target.value })} placeholder="提示词标题" maxLength={100} /></Field>

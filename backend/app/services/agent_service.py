@@ -1,5 +1,7 @@
 import asyncio
+import hashlib
 import json
+import time
 from datetime import datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
@@ -29,6 +31,26 @@ from app.services.workspace_structure import move_volume_to_order, ordered_chapt
 _db: BaseDb | None = None
 _work_db_locks: dict[tuple[int, str], asyncio.Lock] = {}
 SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
+
+# Session-scoped read state for chapter edit guard (R1-R7)
+_read_sessions: dict[str, dict] = {}
+_READ_SESSION_TTL = 7200  # 2 hours
+
+
+def _content_hash(content: str) -> str:
+    return hashlib.md5(content.encode("utf-8")).hexdigest()
+
+
+def _get_read_chapters(session_id: str) -> dict[str, str]:
+    now = time.time()
+    expired = [sid for sid, e in _read_sessions.items() if now - e["last_access"] > _READ_SESSION_TTL]
+    for sid in expired:
+        del _read_sessions[sid]
+    if session_id not in _read_sessions:
+        _read_sessions[session_id] = {"chapters": {}, "last_access": now}
+    entry = _read_sessions[session_id]
+    entry["last_access"] = now
+    return entry["chapters"]
 
 
 def _work_db_lock(work_id: str) -> asyncio.Lock:
@@ -390,12 +412,12 @@ async def _ensure_default_volume(db: AsyncSession, work_id: str) -> Volume:
 
 
 class GoodguaTools(Toolkit):
-    def __init__(self, db: AsyncSession, work_id: str):
+    def __init__(self, db: AsyncSession, work_id: str, session_id: str):
         super().__init__(name="goodgua_tools")
         self.db = db
         self.work_id = work_id
         self._db_lock = _work_db_lock(work_id)
-        self._read_chapters: set[str] = set()  # 本会话中已通过 get_chapter 读取过的章节 ID
+        self._session_id = session_id
         self.register(self.get_character)
         self.register(self.list_characters)
         self.register(self.create_or_update_character)
@@ -709,12 +731,24 @@ class GoodguaTools(Toolkit):
             chapter = result.scalar_one_or_none()
             if chapter is None:
                 return json.dumps({"error": "chapter not found"}, ensure_ascii=False)
+
+            read_map = _get_read_chapters(self._session_id)
+            current_hash = _content_hash(chapter.content or "")
+
+            if chapter_id in read_map and read_map[chapter_id] == current_hash:
+                return json.dumps({
+                    "chapter_id": chapter_id,
+                    "title": chapter.title,
+                    "status": "unchanged",
+                    "message": "章节内容与上次读取一致，无需重新获取。请参考之前的读取结果进行操作。",
+                }, ensure_ascii=False)
+
             data = _serialize(chapter)
             numbered, total_lines = _add_line_numbers(chapter.content or "")
             data["content"] = numbered
             data["total_lines"] = total_lines
             data["word_count"] = _count_words(chapter.content or "")
-            self._read_chapters.add(chapter_id)
+            read_map[chapter_id] = current_hash
             return json.dumps(data, ensure_ascii=False)
 
     async def list_chapters(self, limit: int = 20, offset: int = 0) -> str:
@@ -819,7 +853,7 @@ class GoodguaTools(Toolkit):
                 self.db.add(chapter)
                 await self.db.commit()
                 await self.db.refresh(chapter)
-                self._read_chapters.add(chapter.id)
+                _get_read_chapters(self._session_id)[chapter.id] = _content_hash("")
                 return json.dumps(
                     {
                         **_serialize_lite(
@@ -868,11 +902,19 @@ class GoodguaTools(Toolkit):
                     chapter.summary = summary
                 response["summary"] = chapter.summary
 
-                if content is not None and chapter_id not in self._read_chapters:
-                    return json.dumps(
-                        {"error": "必须先读取本章节内容才能修改正文，请先调用 get_chapter 查看当前内容"},
-                        ensure_ascii=False,
-                    )
+                if content is not None:
+                    read_map = _get_read_chapters(self._session_id)
+                    if chapter_id not in read_map:
+                        return json.dumps(
+                            {"error": "必须先读取本章节内容才能修改正文，请先调用 get_chapter 查看当前内容"},
+                            ensure_ascii=False,
+                        )
+                    current_hash = _content_hash(chapter.content or "")
+                    if current_hash != read_map[chapter_id]:
+                        return json.dumps(
+                            {"error": "章节内容在读取后被修改过（可能是你在网页端编辑或恢复了历史版本），请重新调用 get_chapter 查看最新内容后再修改"},
+                            ensure_ascii=False,
+                        )
 
                 if content is not None and start_line is not None:
                     # --- 部分更新模式 ---
@@ -927,6 +969,7 @@ class GoodguaTools(Toolkit):
                     response["preview_truncated"] = len(old_preview) > 500 or len(new_preview) > 500
                     response["content_changed"] = old_content != new_content
                     response["changed_range"] = {"start": start_line, "end": effective_end}
+                    _get_read_chapters(self._session_id)[chapter_id] = _content_hash(new_content)
 
                 elif content is not None:
                     # --- 全量替换模式 ---
@@ -940,6 +983,7 @@ class GoodguaTools(Toolkit):
                     response["new_content_length"] = len(content)
                     response["preview_truncated"] = len(old_content) > 200 or len(content) > 200
                     response["content_changed"] = old_content != content
+                    _get_read_chapters(self._session_id)[chapter_id] = _content_hash(content)
 
                 response["status"] = "updated"
                 if response.get("content_changed", True):
@@ -1055,7 +1099,7 @@ def create_agent(
     thinking_intensity: float | None = None,
 ) -> Agent:
     settings = get_settings()
-    toolkit = GoodguaTools(db=tool_db_session or db_session, work_id=work_id)
+    toolkit = GoodguaTools(db=tool_db_session or db_session, work_id=work_id, session_id=agno_session_id)
     prompt = build_system_prompt(work)
     model_cls = DeepSeek if "deepseek" in model.provider_model_id.lower() else OpenAIChat
     model_kwargs: dict = dict(

@@ -22,7 +22,7 @@ from app.models import (
     Volume,
     Work,
 )
-from app.services.agent_service import GoodguaTools, _count_words, _serialize, build_system_prompt
+from app.services.agent_service import GoodguaTools, _count_words, _read_sessions, _serialize, build_system_prompt
 from app.services.billing_service import (
     MIN_COST,
     _calculate_cost,
@@ -275,7 +275,7 @@ class TestGoodguaTools:
         user_id = "u-tools"
         work = await _make_work(session, user_id)
         await session.commit()
-        return GoodguaTools(db=session, work_id=work.id)
+        return GoodguaTools(db=session, work_id=work.id, session_id="test-session")
 
     async def test_character_crud(self, tools: GoodguaTools, session: AsyncSession) -> None:
         result = json.loads(await tools.list_characters())
@@ -378,6 +378,7 @@ class TestGoodguaTools:
         # 先写入多行内容
         multi_line = "第一行\n\n第三行\n第四行\n第五行"
         await tools.update_chapter(chapter.id, content=multi_line)
+        _read_sessions["test-session"]["chapters"].pop(chapter.id, None)
         fetched = json.loads(await tools.get_chapter(chapter.id))
         assert fetched["total_lines"] == 5
         assert fetched["content"] == "1 第一行\n2 \n3 第三行\n4 第四行\n5 第五行"
@@ -386,12 +387,14 @@ class TestGoodguaTools:
         partial = json.loads(await tools.update_chapter(chapter.id, content="新的第三行", start_line=3))
         assert partial["content_changed"] is True
         assert partial["changed_range"] == {"start": 3, "end": 3}
+        _read_sessions["test-session"]["chapters"].pop(chapter.id, None)
         fetched = json.loads(await tools.get_chapter(chapter.id))
         assert fetched["content"] == "1 第一行\n2 \n3 新的第三行\n4 第四行\n5 第五行"
 
         # 局部替换多行
         partial = json.loads(await tools.update_chapter(chapter.id, content="合并行", start_line=3, end_line=4))
         assert partial["changed_range"] == {"start": 3, "end": 4}
+        _read_sessions["test-session"]["chapters"].pop(chapter.id, None)
         fetched = json.loads(await tools.get_chapter(chapter.id))
         assert fetched["total_lines"] == 4
         assert fetched["content"] == "1 第一行\n2 \n3 合并行\n4 第五行"
@@ -399,12 +402,14 @@ class TestGoodguaTools:
         # 局部插入
         partial = json.loads(await tools.update_chapter(chapter.id, content="插入行A\n插入行B", start_line=2, end_line=1))
         assert partial["content_changed"] is True
+        _read_sessions["test-session"]["chapters"].pop(chapter.id, None)
         fetched = json.loads(await tools.get_chapter(chapter.id))
         assert fetched["total_lines"] == 6
         assert fetched["content"] == "1 第一行\n2 插入行A\n3 插入行B\n4 \n5 合并行\n6 第五行"
 
         # 局部删除
         partial = json.loads(await tools.update_chapter(chapter.id, content="", start_line=4, end_line=5))
+        _read_sessions["test-session"]["chapters"].pop(chapter.id, None)
         fetched = json.loads(await tools.get_chapter(chapter.id))
         assert fetched["total_lines"] == 4
         assert fetched["content"] == "1 第一行\n2 插入行A\n3 插入行B\n4 第五行"
@@ -592,7 +597,7 @@ class TestGoodguaTools:
         await session.flush()
         await session.commit()
 
-        tools = GoodguaTools(db=session, work_id="nonexistent-work")
+        tools = GoodguaTools(db=session, work_id="nonexistent-work", session_id="test-other")
         result = json.loads(await tools.list_chapters())
         assert result["items"] == []
 
@@ -615,12 +620,12 @@ class TestGoodguaTools:
         assert json.loads(await tools.delete_character(created["id"]))["error"].startswith("未找到角色")
 
     async def test_get_work_info_not_found(self, session: AsyncSession) -> None:
-        tools = GoodguaTools(db=session, work_id="nonexistent-work")
+        tools = GoodguaTools(db=session, work_id="nonexistent-work", session_id="test-other")
         result = json.loads(await tools.get_work_info())
         assert "error" in result
 
     async def test_update_work_info_not_found(self, session: AsyncSession) -> None:
-        tools = GoodguaTools(db=session, work_id="nonexistent-work")
+        tools = GoodguaTools(db=session, work_id="nonexistent-work", session_id="test-other")
         result = json.loads(await tools.update_work_info("short_intro", "x"))
         assert "error" in result
 
@@ -666,6 +671,160 @@ class TestGoodguaTools:
             await tools.update_work_info("short_intro", "新简介")
 
         assert rollback.await_count == 7
+
+    async def test_get_chapter_unchanged_returns_shortcut(self, tools: GoodguaTools, session: AsyncSession) -> None:
+        """R3: 重复读取未变化的章节返回 unchanged 提示，不返回全量内容。"""
+        chapter = Chapter(work_id=tools.work_id, order_index=1, title="测试章", content="正文内容")
+        session.add(chapter)
+        await session.flush()
+
+        # 第一次读取 → 返回全量
+        first = json.loads(await tools.get_chapter(chapter.id))
+        assert "content" in first
+        assert first["word_count"] > 0
+
+        # 第二次读取 → 返回 unchanged
+        second = json.loads(await tools.get_chapter(chapter.id))
+        assert second.get("status") == "unchanged"
+        assert "content" not in second
+        assert "message" in second
+
+    async def test_get_chapter_returns_full_after_external_change(self, tools: GoodguaTools, session: AsyncSession) -> None:
+        """R3: 外部修改后重新读取返回全量新内容。"""
+        chapter = Chapter(work_id=tools.work_id, order_index=1, title="测试章", content="原文")
+        session.add(chapter)
+        await session.flush()
+
+        # 第一次读取
+        await tools.get_chapter(chapter.id)
+
+        # 模拟外部修改（直接改 DB）
+        chapter.content = "被外部修改的内容"
+        await session.flush()
+
+        # 再次读取 → 应返回全量新内容（不是 unchanged）
+        result = json.loads(await tools.get_chapter(chapter.id))
+        assert "content" in result
+        assert "被外部修改的内容" in result["content"]
+
+    async def test_read_state_persists_across_toolkit_instances(self, session: AsyncSession) -> None:
+        """R2: 同一 session_id 下，重建 GoodguaTools 实例后读取状态保持。"""
+        user_id = "u-persist"
+        work = await _make_work(session, user_id)
+        chapter = Chapter(work_id=work.id, order_index=1, title="测试章", content="原文")
+        session.add(chapter)
+        await session.commit()
+
+        # 第一个实例读取
+        tools1 = GoodguaTools(db=session, work_id=work.id, session_id="same-session")
+        await tools1.get_chapter(chapter.id)
+
+        # 模拟新消息轮次：创建新实例（同一 session_id）
+        tools2 = GoodguaTools(db=session, work_id=work.id, session_id="same-session")
+
+        # 新实例可以直接修改正文（读取状态跨实例保持）
+        result = json.loads(await tools2.update_chapter(chapter.id, content="新内容"))
+        assert "error" not in result
+        assert result["status"] == "updated"
+
+    async def test_read_state_isolated_between_sessions(self, session: AsyncSession) -> None:
+        """不同 session_id 的读取状态互相隔离。"""
+        user_id = "u-isolate"
+        work = await _make_work(session, user_id)
+        chapter = Chapter(work_id=work.id, order_index=1, title="测试章", content="原文")
+        session.add(chapter)
+        await session.commit()
+
+        # session A 读取
+        tools_a = GoodguaTools(db=session, work_id=work.id, session_id="session-a")
+        await tools_a.get_chapter(chapter.id)
+
+        # session B 未读取 → 应拒绝
+        tools_b = GoodguaTools(db=session, work_id=work.id, session_id="session-b")
+        result = json.loads(await tools_b.update_chapter(chapter.id, content="新内容"))
+        assert "error" in result
+        assert "get_chapter" in result["error"]
+
+    async def test_update_rejected_after_external_change(self, tools: GoodguaTools, session: AsyncSession) -> None:
+        """R4: 读取后内容被外部修改，update_chapter 应拒绝。"""
+        chapter = Chapter(work_id=tools.work_id, order_index=1, title="测试章", content="原文")
+        session.add(chapter)
+        await session.flush()
+
+        await tools.get_chapter(chapter.id)
+
+        # 模拟外部修改
+        chapter.content = "被外部修改了"
+        await session.flush()
+
+        result = json.loads(await tools.update_chapter(chapter.id, content="尝试修改"))
+        assert "error" in result
+        assert "修改过" in result["error"]
+
+    async def test_consecutive_edits_after_read(self, tools: GoodguaTools, session: AsyncSession) -> None:
+        """R5: 读取后可连续多次 update_chapter，自编辑自动刷新指纹。"""
+        chapter = Chapter(work_id=tools.work_id, order_index=1, title="测试章", content="第一行\n第二行\n第三行")
+        session.add(chapter)
+        await session.flush()
+
+        await tools.get_chapter(chapter.id)
+
+        # 第一次编辑
+        r1 = json.loads(await tools.update_chapter(chapter.id, content="新第二行", start_line=2))
+        assert r1["status"] == "updated"
+
+        # 第二次编辑（无需重新读取）
+        r2 = json.loads(await tools.update_chapter(chapter.id, content="新第三行", start_line=3))
+        assert r2["status"] == "updated"
+
+        # 第三次编辑
+        r3 = json.loads(await tools.update_chapter(chapter.id, content="全新第三行", start_line=3))
+        assert r3["status"] == "updated"
+
+    async def test_cache_expiration(self, session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
+        """R7: 缓存过期后读取状态清除。"""
+        from app.services import agent_service
+
+        user_id = "u-expire"
+        work = await _make_work(session, user_id)
+        chapter = Chapter(work_id=work.id, order_index=1, title="测试章", content="原文")
+        session.add(chapter)
+        await session.commit()
+
+        sid = "expiring-session"
+
+        # 清空缓存
+        agent_service._read_sessions.clear()
+
+        tools = GoodguaTools(db=session, work_id=work.id, session_id=sid)
+        await tools.get_chapter(chapter.id)
+
+        # 此时可以编辑
+        ok = json.loads(await tools.update_chapter(chapter.id, content="新内容"))
+        assert "error" not in ok
+
+        # 模拟时间流逝超过 TTL
+        monkeypatch.setattr(agent_service, "_READ_SESSION_TTL", 0)
+        # 触发惰性清理（通过新实例访问）
+        tools2 = GoodguaTools(db=session, work_id=work.id, session_id=sid)
+        result = json.loads(await tools2.update_chapter(chapter.id, content="再改"))
+        assert "error" in result
+
+        # 恢复
+        monkeypatch.setattr(agent_service, "_READ_SESSION_TTL", 7200)
+
+    async def test_re_read_after_edit_shows_unchanged(self, tools: GoodguaTools, session: AsyncSession) -> None:
+        """R5 + R3: 自编辑后再 get_chapter 应返回 unchanged（指纹已刷新）。"""
+        chapter = Chapter(work_id=tools.work_id, order_index=1, title="测试章", content="原文")
+        session.add(chapter)
+        await session.flush()
+
+        await tools.get_chapter(chapter.id)
+        await tools.update_chapter(chapter.id, content="编辑后的内容")
+
+        # 再读取 → 指纹已刷新为编辑后的内容 → unchanged
+        result = json.loads(await tools.get_chapter(chapter.id))
+        assert result.get("status") == "unchanged"
 
 
 # ---- billing_service tests ----

@@ -235,7 +235,9 @@ async def test_character_setting_chapter_and_analysis(client: AsyncClient) -> No
         )
     ).json()["category"] == "灵感"
     assert (await client.post(f"/works/{work_id}/analyze", headers=headers, json={"content": ""})).json() == {
-        "suggestions": []
+        "suggestions": [],
+        "rounds": [],
+        "total_suggestions": 0,
     }
     products = (await client.get("/billing/products")).json()
     order = (

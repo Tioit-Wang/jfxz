@@ -1,10 +1,12 @@
 "use client";
 
-import { AlertCircle, Clock, Edit3, Eye, Loader2, RefreshCw, Settings, Trash2, UserCircle, Wand2, type LucideIcon } from "lucide-react";
+import { AlertCircle, Clock, Edit3, Eye, Loader2, RefreshCw, Settings, Trash2, Type, UserCircle, Wand2, type LucideIcon } from "lucide-react";
 import type { ApiSuggestion } from "@/api";
 import { ChapterPlainTextEditor } from "@/components/ChapterPlainTextEditor";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import type { Chapter } from "@/domain";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type SaveStatus = "loading" | "dirty" | "saving" | "saved" | "offline" | "error" | "analyzing" | "analyzed";
 
@@ -48,6 +50,101 @@ type WorkspaceEditorPanelProps = {
   onAcceptRemoteUpdate: () => void;
 };
 
+type FormatOptions = {
+  removeBlankLines: boolean;
+  splitBySemicolon: boolean;
+  splitByPeriod: boolean;
+  englishToChinesePunctuation: boolean;
+  removeExtraSpaces: boolean;
+  convertCornerBrackets: boolean;
+  fullwidthToHalfwidth: boolean;
+  mergeBlankLines: boolean;
+  deduplicatePunctuation: boolean;
+  cleanQuotedTerminalPunct: boolean;
+};
+
+function applyFormatting(text: string, options: FormatOptions): string {
+  let result = text;
+
+  // 1. Full-width → half-width (digits and letters)
+  if (options.fullwidthToHalfwidth) {
+    result = result.replace(/[０-９]/g, (ch) =>
+      String.fromCharCode(ch.charCodeAt(0) - 0xFEE0)
+    );
+    result = result.replace(/[Ａ-Ｚ]/g, (ch) =>
+      String.fromCharCode(ch.charCodeAt(0) - 0xFEE0)
+    );
+    result = result.replace(/[ａ-ｚ]/g, (ch) =>
+      String.fromCharCode(ch.charCodeAt(0) - 0xFEE0)
+    );
+  }
+
+  // 2. English → Chinese punctuation
+  if (options.englishToChinesePunctuation) {
+    result = result.replace(/\./g, "。").replace(/,/g, "，").replace(/;/g, "；");
+  }
+
+  // 3. Corner brackets → Chinese double quotes
+  if (options.convertCornerBrackets) {
+    result = result.replace(/「/g, "“").replace(/」/g, "”");
+  }
+
+  // 4. Clean terminal punctuation inside quotes (delete, not move)
+  if (options.cleanQuotedTerminalPunct) {
+    result = result.replace(/“([^”]*?)[。！？](?=”|$)/g, (_, content) => `“${content}`);
+    result = result.replace(/[「]([^」]*?)[。！？](?=」|$)/g, (_, content) => `「${content}`);
+    result = result.replace(/“([^”]*?)[。！？](?=”|$)/g, (_, content) => `“${content}`);
+  }
+
+  // 5. Split by Chinese semicolons (add newline after each)
+  if (options.splitBySemicolon) {
+    result = result.replace(/；/g, "；\n");
+  }
+
+  // 6. Split by Chinese periods (add newline after each, skip quoted periods)
+  if (options.splitByPeriod) {
+    const chars = [...result];
+    let inDoubleQuote = false;
+    let inCornerBracket = false;
+    for (let i = 0; i < chars.length; i++) {
+      const ch = chars[i];
+      if (ch === '"' || ch === "“" || ch === "”") inDoubleQuote = !inDoubleQuote;
+      if (ch === "「") inCornerBracket = true;
+      if (ch === "」") inCornerBracket = false;
+      if (ch === "。" && !inDoubleQuote && !inCornerBracket) {
+        chars[i] = "。\n";
+      }
+    }
+    result = chars.join("");
+  }
+
+  // 7. Remove extra spaces between Chinese characters
+  if (options.removeExtraSpaces) {
+    result = result.replace(/([一-鿿])\s+([一-鿿])/g, "$1$2");
+  }
+
+  // 8. Deduplicate punctuation
+  if (options.deduplicatePunctuation) {
+    result = result.replace(/([，、；：])\1+/g, "$1");
+    result = result.replace(/([^，、；：。.!！])\1{2,}/g, "$1");
+  }
+
+  // 9. Merge consecutive blank lines (multiple blank lines → one)
+  if (options.mergeBlankLines) {
+    result = result.replace(/\n{3,}/g, "\n\n");
+  }
+
+  // 10. Remove all blank lines
+  if (options.removeBlankLines) {
+    result = result
+      .split("\n")
+      .filter((line) => line.trim().length > 0)
+      .join("\n");
+  }
+
+  return result;
+}
+
 export function WorkspaceEditorPanel({
   activeChapter,
   chapterOrder,
@@ -82,6 +179,40 @@ export function WorkspaceEditorPanel({
   onAcceptRemoteUpdate,
 }: WorkspaceEditorPanelProps) {
   const readingMinutes = count > 0 ? Math.max(1, Math.ceil(count / 500)) : 0;
+  const [formatPopupOpen, setFormatPopupOpen] = useState(false);
+  const [formatOptions, setFormatOptions] = useState<FormatOptions>({
+    removeBlankLines: false,
+    splitBySemicolon: false,
+    splitByPeriod: false,
+    englishToChinesePunctuation: false,
+    removeExtraSpaces: false,
+    convertCornerBrackets: false,
+    fullwidthToHalfwidth: false,
+    mergeBlankLines: false,
+    deduplicatePunctuation: false,
+    cleanQuotedTerminalPunct: false,
+  });
+  const formatPopupRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        formatPopupOpen &&
+        formatPopupRef.current &&
+        !formatPopupRef.current.contains(event.target as Node)
+      ) {
+        setFormatPopupOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [formatPopupOpen]);
+
+  const handleFormat = useCallback(() => {
+    const formatted = applyFormatting(content, formatOptions);
+    onContentChange(formatted);
+    setFormatPopupOpen(false);
+  }, [content, formatOptions, onContentChange]);
 
   return (
     <main data-testid="workspace-editor-panel" className="relative z-0 flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-white">
@@ -117,6 +248,55 @@ export function WorkspaceEditorPanel({
           >
             <Clock size={16} />
           </button>
+          <div className="relative">
+            <button
+              className="rounded-full p-1.5 text-[#888888] transition-colors hover:bg-[#f5f5f5] hover:text-[#171717]"
+              onClick={() => setFormatPopupOpen((prev) => !prev)}
+              aria-label="文本格式化"
+              title="文本格式化"
+            >
+              <Type size={16} />
+            </button>
+            {formatPopupOpen && (
+              <div
+                ref={formatPopupRef}
+                className="absolute left-0 top-full z-50 mt-2 w-64 rounded-xl bg-white p-4 shadow-[0px_8px_16px_-4px_rgba(0,0,0,0.06),0px_24px_32px_-8px_rgba(0,0,0,0.06)] ring-1 ring-inset ring-[#00000014]"
+              >
+                {([
+                  ["removeBlankLines", "移除空白行"],
+                  ["splitBySemicolon", "按；换行"],
+                  ["splitByPeriod", "按。换行"],
+                  ["englishToChinesePunctuation", "英文标点→中文标点"],
+                  ["removeExtraSpaces", "清除多余空格"],
+                  ["convertCornerBrackets", "「」→“”"],
+                  ["fullwidthToHalfwidth", "全角半角转换"],
+                  ["mergeBlankLines", "合并连续空行"],
+                  ["deduplicatePunctuation", "去除重复标点"],
+                  ["cleanQuotedTerminalPunct", "双号内终止符号清理"],
+                ] as const).map(([key, label]) => (
+                  <div key={key} className="flex items-center justify-between py-1.5">
+                    <span className="text-sm text-[#171717]">{label}</span>
+                    <Switch
+                      checked={formatOptions[key]}
+                      onCheckedChange={(checked) =>
+                        setFormatOptions((prev) => ({ ...prev, [key]: checked }))
+                      }
+                      size="sm"
+                      aria-label={label}
+                    />
+                  </div>
+                ))}
+                <div className="my-3 border-t border-[#ebebeb]" />
+                <button
+                  onClick={handleFormat}
+                  className="w-full rounded-full bg-[#171717] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#171717]/90"
+                  aria-label="格式化"
+                >
+                  格式化
+                </button>
+              </div>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button

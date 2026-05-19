@@ -21,6 +21,8 @@ from app.models import (
     SettingItem,
     Volume,
     Work,
+    WritingPrompt,
+    WritingPromptCategory,
 )
 from app.services.agent_service import GoodguaTools, _count_words, _read_sessions, _serialize, build_system_prompt
 from app.services.billing_service import (
@@ -894,6 +896,102 @@ class TestGoodguaTools:
         assert len(listed["items"]) == 2
         assert [c["title"] for c in listed["items"]] == ["章节2", "安全创建"]
 
+    async def test_update_chapter_with_title(self, tools: GoodguaTools, session: AsyncSession) -> None:
+        volume = Volume(work_id=tools.work_id, order_index=1, title="V")
+        session.add(volume)
+        await session.flush()
+        ch = Chapter(work_id=tools.work_id, volume_id=volume.id, order_index=1, title="旧标题", content="正文")
+        session.add(ch)
+        await session.flush()
+        _read_sessions[tools._session_id]["chapters"][ch.id] = "abc"
+
+        result = json.loads(await tools.update_chapter(ch.id, title="新标题"))
+        assert result["title"] == "新标题"
+        assert result["status"] == "updated"
+
+    async def test_update_chapter_end_line_out_of_range(self, tools: GoodguaTools, session: AsyncSession) -> None:
+        import hashlib
+        volume = Volume(work_id=tools.work_id, order_index=1, title="V")
+        session.add(volume)
+        await session.flush()
+        content = "第一行\n第二行\n"
+        ch = Chapter(work_id=tools.work_id, volume_id=volume.id, order_index=1, title="T", content=content)
+        session.add(ch)
+        await session.flush()
+        from app.services.agent_service import _get_read_chapters
+        _get_read_chapters(tools._session_id)[ch.id] = hashlib.md5(content.encode("utf-8")).hexdigest()
+
+        result = json.loads(await tools.update_chapter(ch.id, content="新", start_line=1, end_line=999))
+        assert "error" in result
+        assert "end_line" in result["error"]
+
+    async def test_update_chapter_creates_version_snapshot(self, tools: GoodguaTools, session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
+        volume = Volume(work_id=tools.work_id, order_index=1, title="V")
+        session.add(volume)
+        await session.flush()
+        ch = Chapter(work_id=tools.work_id, volume_id=volume.id, order_index=1, title="T", content="旧内容")
+        session.add(ch)
+        await session.flush()
+        import hashlib
+        _read_sessions[tools._session_id]["chapters"][ch.id] = hashlib.md5("旧内容".encode("utf-8")).hexdigest()
+
+        snap_called = False
+        async def mock_snapshot(*args, **kwargs):
+            nonlocal snap_called
+            snap_called = True
+        import app.services.version_service as _vs
+        monkeypatch.setattr(_vs, "create_version_snapshot", mock_snapshot)
+
+        await tools.update_chapter(ch.id, content="新内容")
+        assert snap_called
+
+    async def test_list_prompt_categories_empty(self, tools: GoodguaTools, session: AsyncSession) -> None:
+        result = json.loads(await tools.list_prompt_categories())
+        assert isinstance(result, list)
+        assert result == []
+
+    async def test_list_prompt_categories_with_data(self, tools: GoodguaTools, session: AsyncSession) -> None:
+        cat = WritingPromptCategory(name="角色塑造", is_active=True, sort_order=1)
+        session.add(cat)
+        await session.flush()
+
+        result = json.loads(await tools.list_prompt_categories())
+        assert len(result) == 1
+        assert result[0]["name"] == "角色塑造"
+        assert result[0]["prompt_count"] == 0
+
+    async def test_list_prompts_by_category_not_found(self, tools: GoodguaTools) -> None:
+        result = json.loads(await tools.list_prompts_by_category("nonexistent"))
+        assert "error" in result
+
+    async def test_list_prompts_by_category_with_data(self, tools: GoodguaTools, session: AsyncSession) -> None:
+        cat = WritingPromptCategory(name="风格", is_active=True, sort_order=1)
+        session.add(cat)
+        await session.flush()
+        prompt = WritingPrompt(category_id=cat.id, title="对话规范", description="对话标点规则", detail_prompt="详细规则", is_active=True)
+        session.add(prompt)
+        await session.flush()
+
+        result = json.loads(await tools.list_prompts_by_category(cat.id))
+        assert len(result) == 1
+        assert result[0]["title"] == "对话规范"
+
+    async def test_get_prompt_detail_found(self, tools: GoodguaTools, session: AsyncSession) -> None:
+        cat = WritingPromptCategory(name="剧情", is_active=True, sort_order=1)
+        session.add(cat)
+        await session.flush()
+        prompt = WritingPrompt(category_id=cat.id, title="伏笔", description="伏笔技巧", detail_prompt="详细伏笔技巧", is_active=True)
+        session.add(prompt)
+        await session.flush()
+
+        result = json.loads(await tools.get_prompt_detail(prompt.id))
+        assert result["title"] == "伏笔"
+        assert result["detail_prompt"] == "详细伏笔技巧"
+
+    async def test_get_prompt_detail_not_found(self, tools: GoodguaTools) -> None:
+        result = json.loads(await tools.get_prompt_detail("nonexistent"))
+        assert "error" in result
+
 
 # ---- billing_service tests ----
 
@@ -1275,7 +1373,7 @@ class TestPointGrantExpireAndAdminAdjust:
 
 class TestResolveEditorModel:
     async def test_returns_none_when_no_config(self, session: AsyncSession) -> None:
-        result = await _real_resolve_editor_model(session)
+        result = await _real_resolve_editor_model(session, "character")
         assert result is None
 
     async def test_returns_model_when_configured(self, session: AsyncSession) -> None:
@@ -1285,14 +1383,14 @@ class TestResolveEditorModel:
             await session.execute(
                 select(GlobalConfig).where(
                     GlobalConfig.config_group == "ai.editor_check",
-                    GlobalConfig.config_key == "model_id",
+                    GlobalConfig.config_key == "character_model_id",
                 )
             )
         ).scalar_one()
         config.string_value = model.id
         await session.commit()
 
-        result = await _real_resolve_editor_model(session)
+        result = await _real_resolve_editor_model(session, "character")
         assert result is not None
         assert result.id == model.id
 
@@ -1304,14 +1402,14 @@ class TestResolveEditorModel:
             await session.execute(
                 select(GlobalConfig).where(
                     GlobalConfig.config_group == "ai.editor_check",
-                    GlobalConfig.config_key == "model_id",
+                    GlobalConfig.config_key == "character_model_id",
                 )
             )
         ).scalar_one()
         config.string_value = model.id
         await session.commit()
 
-        result = await _real_resolve_editor_model(session)
+        result = await _real_resolve_editor_model(session, "character")
         assert result is None
 
 
@@ -1325,3 +1423,15 @@ class TestEnsurePointAccount:
         assert account is not None
         assert account.vip_daily_points_balance == 0
         assert account.user_id == user.id
+
+
+class TestAgentServiceEdgeCoverage:
+    """Cover uncovered branches in agent_service.py: lines 160, 182."""
+
+    async def test_add_line_numbers_empty(self) -> None:
+        from app.services.agent_service import _add_line_numbers
+        assert _add_line_numbers("") == ("", 0)
+
+    async def test_lines_to_content_empty(self) -> None:
+        from app.services.agent_service import _lines_to_content
+        assert _lines_to_content([]) == ""

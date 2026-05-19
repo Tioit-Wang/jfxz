@@ -196,9 +196,8 @@ async def test_analyze_chapter_requires_editor_model(
         return None
 
     monkeypatch.setattr(routes_module, "_resolve_editor_model", _no_model)
-    with pytest.raises(HTTPException) as error:
-        await analyze_chapter(work["id"], AnalyzeIn(content="需要分析"), user, session)
-    assert error.value.status_code == 503
+    result = await analyze_chapter(work["id"], AnalyzeIn(content="需要分析"), user, session)
+    assert result.suggestions == []
 
 
 def test_append_and_complete_tool_blocks_and_normalized_run_flags() -> None:

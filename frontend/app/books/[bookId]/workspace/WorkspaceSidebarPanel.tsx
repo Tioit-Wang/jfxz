@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Clock3,
   Database,
+  Download,
   Edit3,
   Lightbulb,
   MoreVertical,
@@ -81,6 +82,7 @@ type WorkspaceSidebarPanelProps = {
   onEditVolume: (volume: Volume) => void;
   onDeleteVolume: (volume: Volume) => void;
   onReorderChapter: (chapterId: string, targetVolumeId: string, targetOrder: number) => void;
+  onOpenExport: () => void;
 };
 
 const characterAccents = [
@@ -150,6 +152,7 @@ export function WorkspaceSidebarPanel({
   onEditVolume,
   onDeleteVolume,
   onReorderChapter,
+  onOpenExport,
 }: WorkspaceSidebarPanelProps) {
   const [notesCollapsed, setNotesCollapsed] = useState(false);
   const [activeDropZone, setActiveDropZone] = useState<string | null>(null);
@@ -221,12 +224,21 @@ export function WorkspaceSidebarPanel({
               </div>
               <div className="flex items-center gap-1.5">
                 {activeTab === "chapters" ? (
-                  <button
-                    className="rounded-full border border-[#ebebeb] px-2.5 py-1.5 text-xs font-semibold text-[#171717] hover:bg-[#fafafa]"
-                    onClick={onCreateVolume}
-                  >
-                    新卷
-                  </button>
+                  <>
+                    <button
+                      className="rounded-full border border-[#ebebeb] px-2.5 py-1.5 text-xs font-semibold text-[#171717] hover:bg-[#fafafa]"
+                      onClick={onOpenExport}
+                    >
+                      <Download size={13} className="mr-1 inline-block" />
+                     导出
+                    </button>
+                    <button
+                      className="rounded-full border border-[#ebebeb] px-2.5 py-1.5 text-xs font-semibold text-[#171717] hover:bg-[#fafafa]"
+                      onClick={onCreateVolume}
+                    >
+                      新卷
+                    </button>
+                  </>
                 ) : null}
                 <button
                   className="inline-flex items-center gap-1 rounded-full bg-[#171717] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#171717]/90"

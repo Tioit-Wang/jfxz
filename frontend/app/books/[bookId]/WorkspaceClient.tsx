@@ -81,6 +81,7 @@ import { WorkspaceChatPanel } from "./workspace/WorkspaceChatPanel";
 import { WorkspaceEditorPanel } from "./workspace/WorkspaceEditorPanel";
 import ShareDialog from "./workspace/ShareDialog";
 import VersionHistoryDialog from "./workspace/VersionHistoryDialog";
+import ExportDialog from "./workspace/ExportDialog";
 import { WorkspaceSidebarPanel } from "./workspace/WorkspaceSidebarPanel";
 import { toolLabel, WorkspaceToolCall } from "./workspace/WorkspaceToolCall";
 import { WorkspaceThinkingBlock } from "./workspace/WorkspaceThinkingBlock";
@@ -397,6 +398,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
   const [shareEnabled, setShareEnabled] = useState(false);
   const [shareToken, setShareToken] = useState<string | null>(null);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [editorSettings, setEditorSettings] = useState<typeof DEFAULT_EDITOR_SETTINGS>(() => {
     if (typeof window === "undefined") return DEFAULT_EDITOR_SETTINGS;
     try {
@@ -2114,6 +2116,7 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
             onEditVolume={openEditVolume}
             onDeleteVolume={openDeleteVolume}
             onReorderChapter={handleReorderChapter}
+            onOpenExport={() => setExportDialogOpen(true)}
           />
         </ResizablePanel>
 
@@ -2843,6 +2846,14 @@ export default function WorkspaceClient({ bookId }: WorkspaceClientProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ExportDialog
+        open={exportDialogOpen}
+        onOpenChange={setExportDialogOpen}
+        volumes={volumes}
+        chapters={chapters}
+        workTitle={work?.title ?? ""}
+      />
 
       <ShareDialog
         open={shareDialogOpen}

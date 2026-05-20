@@ -159,12 +159,12 @@ function PromptEditorModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-3xl" showCloseButton>
+      <DialogContent className="sm:max-w-3xl flex flex-col max-h-[85vh]" showCloseButton>
         <DialogHeader>
           <DialogTitle>编辑提示词 — {CHECK_NAMES[checkId]}</DialogTitle>
           <DialogDescription>编辑检查项的提示词模板，支持占位符插入。</DialogDescription>
         </DialogHeader>
-        <div className="space-y-4">
+        <div className="flex-1 overflow-y-auto min-h-0 space-y-4">
           {/* 顶部工具栏 — 占位符插入按钮 */}
           <div className="flex flex-wrap items-center gap-1.5 pb-3 border-b border-border">
             <span className="text-xs text-muted-foreground shrink-0 mr-1">插入占位符：</span>
@@ -230,12 +230,12 @@ function PromptDescEditorModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-3xl" showCloseButton>
+      <DialogContent className="sm:max-w-3xl flex flex-col max-h-[85vh]" showCloseButton>
         <DialogHeader>
           <DialogTitle>编辑提示词 — AI 描述</DialogTitle>
           <DialogDescription>编辑 AI 描述提示词模板，支持占位符插入。</DialogDescription>
         </DialogHeader>
-        <div className="space-y-4">
+        <div className="flex-1 overflow-y-auto min-h-0 space-y-4">
           <div className="flex flex-wrap items-center gap-1.5 pb-3 border-b border-border">
             <span className="text-xs text-muted-foreground shrink-0 mr-1">插入占位符：</span>
             {PROMPT_DESC_PLACEHOLDERS.map((ph) => {

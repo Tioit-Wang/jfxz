@@ -2218,7 +2218,7 @@ async def analyze_chapter_check(
                 _get_surrounding_context(session, work_id, payload.chapter_id, count=cnt),
                 _get_previous_context(session, work_id, payload.chapter_id, count=0),  # not needed for logic
             )
-        elif check_id == "style":
+        else:  # must be "style" — validated by CHECK_TITLES at line 2172
             chapter_count_cfg = configs.get("style_chapter_count")
             cnt = chapter_count_cfg.integer_value if chapter_count_cfg and chapter_count_cfg.integer_value else 6
             char_ctx, prev_ctx = await asyncio.gather(

@@ -2317,6 +2317,157 @@ async def test_send_chat_billing_exception_during_deduction(
     assert "event: done" in body
 
 
+# ── Negative / Error-Path Tests ──
+
+
+async def test_cross_owner_access_returns_404(client: AsyncClient) -> None:
+    ha = await auth_headers(client, "owner@test.com")
+    hb = await auth_headers(client, "intruder@test.com")
+
+    wa = (await client.post("/works", headers=ha, json={"title": "OwnerWork"})).json()["id"]
+    va = (await client.post(f"/works/{wa}/volumes", headers=ha, json={"title": "V1"})).json()["id"]
+    cha = (await client.post(f"/works/{wa}/chapters", headers=ha, json={"title": "C1", "content": "text"})).json()["id"]
+    char_id = (await client.post(f"/works/{wa}/characters", headers=ha, json={"name": "Char1", "summary": "desc"})).json()["id"]
+    set_id = (await client.post(f"/works/{wa}/settings", headers=ha, json={"name": "Set1", "summary": "desc"})).json()["id"]
+    note_id = (await client.post(f"/works/{wa}/inspiration-notes", headers=ha, json={"title": "N1", "content": "Note1"})).json()["id"]
+
+    # GET — cross-owner should be 404
+    assert (await client.get(f"/works/{wa}/volumes", headers=hb)).status_code == 404
+    assert (await client.get(f"/works/{wa}/characters", headers=hb)).status_code == 404
+    assert (await client.get(f"/works/{wa}/settings", headers=hb)).status_code == 404
+    assert (await client.get(f"/works/{wa}/inspiration-notes", headers=hb)).status_code == 404
+    assert (await client.get(f"/works/{wa}/writing-goal", headers=hb)).status_code == 404
+    assert (await client.get(f"/works/{wa}/chapters", headers=hb)).status_code == 404
+    assert (await client.get(f"/works/{wa}/preview", headers=hb)).status_code == 404
+    assert (await client.get(f"/works/{wa}/analyze/checks", headers=hb)).status_code == 404
+    assert (await client.get(f"/works/{wa}/chapters/{cha}/versions", headers=hb)).status_code == 404
+
+    # POST — cross-owner should be 404
+    assert (await client.post(f"/works/{wa}/volumes", headers=hb, json={"title": "hack"})).status_code == 404
+    assert (await client.post(f"/works/{wa}/characters", headers=hb, json={"name": "hack", "summary": "desc"})).status_code == 404
+    assert (await client.post(f"/works/{wa}/settings", headers=hb, json={"name": "hack", "summary": "desc"})).status_code == 404
+    assert (await client.post(f"/works/{wa}/inspiration-notes", headers=hb, json={"title": "hack", "content": "desc"})).status_code == 404
+    assert (await client.post(f"/works/{wa}/chapters", headers=hb, json={"title": "hack"})).status_code == 404
+
+    # PATCH — cross-owner should be 404
+    assert (await client.patch(f"/works/{wa}/volumes/{va}", headers=hb, json={"title": "hack"})).status_code == 404
+    assert (await client.patch(f"/works/{wa}/characters/{char_id}", headers=hb, json={"name": "hack", "summary": "desc"})).status_code == 404
+    assert (await client.patch(f"/works/{wa}/settings/{set_id}", headers=hb, json={"name": "hack", "summary": "desc"})).status_code == 404
+    assert (await client.patch(f"/works/{wa}/inspiration-notes/{note_id}", headers=hb, json={"title": "hack", "content": "desc"})).status_code == 404
+    assert (await client.patch(f"/works/{wa}/writing-goal", headers=hb, json={"daily_word_goal": 1000})).status_code == 404
+    assert (await client.patch(f"/works/{wa}/chapters/{cha}", headers=hb, json={"title": "hack"})).status_code == 404
+
+
+async def test_cross_owner_delete_returns_404(client: AsyncClient) -> None:
+    ha = await auth_headers(client, "owner2@test.com")
+    hb = await auth_headers(client, "intruder2@test.com")
+    wa = (await client.post("/works", headers=ha, json={"title": "DelTest"})).json()["id"]
+    va = (await client.post(f"/works/{wa}/volumes", headers=ha, json={"title": "V"})).json()["id"]
+    cha = (await client.post(f"/works/{wa}/chapters", headers=ha, json={"title": "C", "content": "x"})).json()["id"]
+    cid = (await client.post(f"/works/{wa}/characters", headers=ha, json={"name": "C", "summary": "desc"})).json()["id"]
+    sid = (await client.post(f"/works/{wa}/settings", headers=ha, json={"name": "S", "summary": "desc"})).json()["id"]
+    nid = (await client.post(f"/works/{wa}/inspiration-notes", headers=ha, json={"title": "N", "content": "N"})).json()["id"]
+
+    # DELETE — cross-owner should be 404
+    assert (await client.delete(f"/works/{wa}/volumes/{va}", headers=hb)).status_code == 404
+    assert (await client.delete(f"/works/{wa}/characters/{cid}", headers=hb)).status_code == 404
+    assert (await client.delete(f"/works/{wa}/settings/{sid}", headers=hb)).status_code == 404
+    assert (await client.delete(f"/works/{wa}/inspiration-notes/{nid}", headers=hb)).status_code == 404
+    assert (await client.delete(f"/works/{wa}/chapters/{cha}", headers=hb)).status_code == 404
+
+
+async def test_unauthenticated_access_returns_401(client: AsyncClient) -> None:
+    ha = await auth_headers(client, "authuser@test.com")
+    wa = (await client.post("/works", headers=ha, json={"title": "AuthTest"})).json()["id"]
+    client.cookies.clear()
+    assert (await client.get("/works")).status_code == 401
+    assert (await client.post("/works", json={"title": "noauth"})).status_code == 401
+    assert (await client.patch(f"/works/{wa}", json={"title": "hack"})).status_code == 401
+    assert (await client.get("/me")).status_code == 401
+    assert (await client.post(f"/works/{wa}/workspace-bootstrap", json={})).status_code == 401
+
+
+async def test_non_admin_access_admin_routes_returns_403(client: AsyncClient) -> None:
+    response = await client.post("/auth/register", json={"email": "normaluser@test.com", "nickname": "Normal", "password": "user12345"})
+    assert response.status_code == 200
+    user = response.json()["user"]
+    token = issue_token(user["id"], "user", get_settings().jwt_secret, token_type="admin")
+    h = {"Authorization": f"Bearer {token}"}
+    assert (await client.get("/admin/stats", headers=h)).status_code == 403
+    assert (await client.get("/admin/orders", headers=h)).status_code == 403
+    assert (await client.get("/admin/subscriptions", headers=h)).status_code == 403
+    assert (await client.get("/admin/sessions", headers=h)).status_code == 403
+    assert (await client.get("/admin/configs", headers=h)).status_code == 403
+
+
+async def test_admin_resource_not_found_returns_404(client: AsyncClient) -> None:
+    ah = await admin_headers(client)
+    non_id = "00000000-0000-0000-0000-000000000000"
+    assert (await client.get(f"/admin/users/{non_id}", headers=ah)).status_code == 404
+    assert (await client.get(f"/admin/orders/{non_id}", headers=ah)).status_code == 404
+    assert (await client.get(f"/admin/sessions/{non_id}", headers=ah)).status_code == 404
+    assert (await client.patch(f"/admin/configs/{non_id}", headers=ah, json={"value_type": "string", "string_value": "x"})).status_code == 404
+
+
+async def test_chat_sessions_access_errors(client: AsyncClient) -> None:
+    ha = await auth_headers(client, "chatowner@test.com")
+    hb = await auth_headers(client, "chatinvader@test.com")
+    non_id = "00000000-0000-0000-0000-000000000000"
+    wa = (await client.post("/works", headers=ha, json={"title": "ChatTest"})).json()["id"]
+    # Non-owner cannot list or create chat sessions
+    assert (await client.get(f"/works/{wa}/chat-sessions", headers=hb)).status_code == 404
+    assert (await client.post(f"/works/{wa}/chat-sessions", headers=hb, json={})).status_code == 404
+
+    cs = (await client.post(f"/works/{wa}/chat-sessions", headers=ha, json={})).json()
+    # Non-existent session
+    assert (await client.get(f"/chat-sessions/{non_id}/messages", headers=ha)).status_code == 404
+    # Cross-owner cannot list messages
+    assert (await client.get(f"/chat-sessions/{cs['id']}/messages", headers=hb)).status_code == 404
+
+
+async def test_workspace_bootstrap_not_found(client: AsyncClient) -> None:
+    h = await auth_headers(client, "bootstrap@test.com")
+    non_id = "00000000-0000-0000-0000-000000000000"
+    assert (await client.post(f"/works/{non_id}/workspace-bootstrap", headers=h, json={})).status_code == 404
+
+
+async def test_preview_access_errors(client: AsyncClient) -> None:
+    ha = await auth_headers(client, "previewowner@test.com")
+    hb = await auth_headers(client, "previntruder@test.com")
+    wa = (await client.post("/works", headers=ha, json={"title": "PrevTest"})).json()["id"]
+    await client.post(f"/works/{wa}/chapters", headers=ha, json={"title": "C1", "content": "text"})
+    # Non-author cannot preview
+    assert (await client.get(f"/works/{wa}/preview", headers=hb)).status_code == 404
+
+
+async def test_admin_products_bad_kind(client: AsyncClient) -> None:
+    ah = await admin_headers(client)
+    r = await client.get("/admin/products?kind=invalid", headers=ah)
+    assert r.status_code != 200
+
+
+async def test_admin_cost_preview_bad_input(client: AsyncClient) -> None:
+    ah = await admin_headers(client)
+    r = await client.post("/admin/cost-preview", headers=ah, json={})
+    assert r.status_code in (400, 422)
+
+
+async def test_admin_prompt_crud_errors(client: AsyncClient) -> None:
+    ah = await admin_headers(client)
+    non_id = "00000000-0000-0000-0000-000000000000"
+    assert (await client.get(f"/admin/prompts/{non_id}", headers=ah)).status_code == 404
+    assert (await client.patch(f"/admin/prompts/{non_id}", headers=ah, json={"title": "x", "category_id": non_id})).status_code == 422
+    assert (await client.delete(f"/admin/prompts/{non_id}", headers=ah)).status_code == 404
+    assert (await client.patch(f"/admin/prompt-categories/{non_id}", headers=ah, json={"name": "x"})).status_code == 404
+
+
+async def test_delete_chapter_not_found(client: AsyncClient) -> None:
+    h = await auth_headers(client, "chapdel@test.com")
+    wa = (await client.post("/works", headers=h, json={"title": "ChapDel"})).json()["id"]
+    non_id = "00000000-0000-0000-0000-000000000000"
+    assert (await client.delete(f"/works/{wa}/chapters/{non_id}", headers=h)).status_code == 404
+
+
 # ── _cors_headers ──
 
 

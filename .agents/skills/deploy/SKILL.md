@@ -103,104 +103,70 @@ GOODGUA_BOOTSTRAP_ADMIN_PASSWORD=
 
 ---
 
-## 部署流程
+## 场景选择与部署流程
 
-### 第 1 步：检查本地代码状态
+发布流程的第一步是**判断本次变更属于哪个部署场景**，然后按对应场景的文档执行。
+
+### 公共步骤（所有场景通用）
+
+**第 1 步：检查本地代码状态**
 
 ```bash
 cd /c/Projects/jfxz && git log --oneline -5 && echo '===' && git status -sb
 ```
 
-确认有新提交已推送到 `origin/main`（`git status -sb` 不显示 ahead 即表示已推送）。
+确认有新提交已推送到 `origin/main`（`git status -sb` 不显示 ahead 即表示已推送）。如果显示 ahead，先 `git push origin main`。
 
-### 第 2 步：服务器拉取代码
+**第 2 步：服务器拉取代码**
 
 ```bash
 ssh ... "cd /opt/jfxz && git pull origin main 2>&1"
 ```
-
-观察 pull 输出中的文件变更列表，判断变更范围：
-- 只有 `frontend/**` → 仅构建 frontend
-- 只有 `backend/**` → 仅构建 backend + worker
-- 两者都有 → 构建全部
 
 注意：如果 `.env.production` 有本地修改且需要保留，先 stash：
 ```bash
 git stash && git pull origin main && git stash pop
 ```
 
-### 第 3 步：检查 SQL 迁移
+**第 3 步：判断场景**
 
-如果 pull 输出包含 `backend/migrations/versions/` 下的新文件，需要先执行迁移：
+观察 `git pull` 输出中的文件变更列表：
+
+| pull 输出特征 | 场景 | 风险 | 文档 |
+|---------------|------|------|------|
+| `backend/migrations/versions/` **无**新 `.sql` 文件 | **场景 1：无 SQL 纯改动代码** | 低 | `scenario-01-code-only.md` |
+| `backend/migrations/versions/` 有新 `.sql`，且仅含 INSERT 语句 | **场景 2：有 SQL 但为数据插入** | 中低 | `scenario-02-data-insert.md` |
+| `backend/migrations/versions/` 有新 `.sql`，且含 DDL（ALTER/CREATE TABLE 等） | **场景 3：有 SQL 为表字段迁移** | 高 | `scenario-03-schema-migration.md` |
+
+判断方法：
 ```bash
-ssh ... "docker exec -i 1Panel-mysql-Nbze mysql -u<user> -p<password> <database> < /opt/jfxz/backend/migrations/versions/XXX.sql"
+# 列出本次 pull 新增的迁移文件
+ssh ... "ls -lt /opt/jfxz/backend/migrations/versions/ | head -5"
+
+# 查看最新迁移文件的内容，判断是 INSERT 型还是 DDL 型
+ssh ... "cat /opt/jfxz/backend/migrations/versions/<最新文件名>.sql"
 ```
 
-迁移 SQL 必须是幂等的（`IF NOT EXISTS`、`IF EXISTS`），可在生产环境安全重放。无新迁移文件则跳过此步。
+- 文件内容以 `INSERT INTO` 为主 → **场景 2**
+- 文件内容包含 `ALTER TABLE`、`CREATE TABLE`、`ADD COLUMN` → **场景 3**
+- 无新文件 → **场景 1**
 
-### 第 4 步：构建镜像
+### 按场景执行
 
-**必须加 `--no-cache`**。Docker 的 `COPY` 层缓存不可靠——即使源文件已修改，`COPY app/ ./app/` 层有时仍会命中缓存，导致构建出的镜像包含旧代码。
+根据判断结果打开对应的场景文档执行后续步骤：
 
-**仅前端：**
-```bash
-ssh ... "cd /opt/jfxz && docker compose --env-file .env.production build --no-cache frontend 2>&1 | tail -10"
-```
+| 场景 | 后续步骤 |
+|------|---------|
+| [场景 1：无 SQL 纯改动代码](scenario-01-code-only.md) | 构建 → 重启 → 验证 |
+| [场景 2：有 SQL 但为数据插入](scenario-02-data-insert.md) | 执行 INSERT → （构建）→ 重启 → 验证 |
+| [场景 3：有 SQL 为表字段迁移](scenario-03-schema-migration.md) | 审阅 SQL → 执行迁移 → 构建 → 重启 → 验证 |
 
-**仅后端：**
-```bash
-ssh ... "cd /opt/jfxz && docker compose --env-file .env.production build --no-cache backend 2>&1 | tail -10"
-```
+### 验证与汇报（所有场景通用）
 
-**全量：**
-```bash
-ssh ... "cd /opt/jfxz && docker compose --env-file .env.production build --no-cache backend frontend 2>&1 | tail -10"
-```
-
-构建可能需要 1-3 分钟（前端较慢），设置 timeout 600000ms。
-
-### 第 5 步：重启容器
-
-前端代码变更时不仅需要重建 frontend，**还必须强制重建 nginx**。`NEXT_PUBLIC_*` 变量在构建时注入 JS bundle，nginx 的 `proxy_pass` 也可能因容器 IP 变动指向旧 upstream。
-
-**仅前端：**
-```bash
-ssh ... "cd /opt/jfxz && docker compose --env-file .env.production up -d --build frontend nginx 2>&1 | tail -12"
-```
-
-**仅后端：**
-```bash
-ssh ... "cd /opt/jfxz && docker compose --env-file .env.production up -d --build backend worker 2>&1 | tail -12"
-```
-
-**全量：**
-```bash
-ssh ... "cd /opt/jfxz && docker compose --env-file .env.production up -d --build backend worker frontend nginx 2>&1 | tail -12"
-```
-
-### 第 6 步：验证部署
-
-**等待容器通过健康检查后再验证**（容器启动后不会立即显示 healthy，约需 10-30s）：
-
-```bash
-ssh ... "docker ps --format 'table {{.Names}}\t{{.Status}}' | grep goodgua && echo '---' && curl -s http://127.0.0.1:18081/api/health && echo '' && curl -s -o /dev/null -w 'HTTP %{http_code}, time: %{time_total}s\n' https://goodgua.net/api/health"
-```
-
-验证标准：
-- 所有容器显示 `healthy`（nginx 可能短暂显示 `health: starting`，这是正常的）
+部署完成后按对应场景文档的"验证部署"和"向用户汇报"步骤执行。验证标准：
+- 所有容器显示 `healthy`（nginx 可能短暂显示 `health: starting`，正常）
 - 内网健康检查返回 `{"status":"ok","service":"goodgua"}`
 - 外网健康检查返回 `HTTP 200`
-
-### 第 7 步：向用户汇报
-
-简要汇报本次发布的提交内容和验证结果，格式示例：
-```
-部署完成。本次发布 N 个提交：
-- hash1 简要描述（前端/后端）
-- hash2 简要描述（前端/后端）
-
-所有容器 healthy，内外网 API 正常。
-```
 
 ---
 

@@ -1,4 +1,5 @@
 import json
+from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
@@ -1609,3 +1610,23 @@ class TestVersionService:
         ch = await self._make_chapter(session)
         result = await restore_version(session, ch.id, "nonexistent_version")
         assert result is None
+
+    async def test_get_or_create_human_version_tz_naive_outside_window(self, session: AsyncSession) -> None:
+        from app.services.version_service import create_version_snapshot, get_or_create_human_version
+        ch = await self._make_chapter(session)
+        v1 = await create_version_snapshot(session, ch.id, "标题", "旧内容", None, "human")
+        v1.created_at = v1.created_at.replace(tzinfo=None) - timedelta(seconds=600)
+        await session.flush()
+        v2 = await get_or_create_human_version(session, ch.id, "标题", "新内容", None)
+        assert v2.id != v1.id
+        assert v2.content == "新内容"
+
+    async def test_get_or_create_human_version_tz_aware_outside_window(self, session: AsyncSession) -> None:
+        from app.services.version_service import create_version_snapshot, get_or_create_human_version
+        ch = await self._make_chapter(session)
+        v1 = await create_version_snapshot(session, ch.id, "标题", "旧内容", None, "human")
+        v1.created_at -= timedelta(seconds=600)
+        await session.flush()
+        v2 = await get_or_create_human_version(session, ch.id, "标题", "新内容", None)
+        assert v2.id != v1.id
+        assert v2.content == "新内容"

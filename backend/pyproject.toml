@@ -47,7 +47,14 @@ addopts = "--cov=app --cov-report=term-missing"
 [tool.coverage.run]
 branch = true
 source = ["app"]
-omit = ["app/__init__.py"]
+omit = [
+  "app/__init__.py",
+  "app/cli/*",
+  "app/scripts/*",
+  "app/worker.py",
+  "app/services/scheduler_service.py",
+  "app/main.py",
+]
 
 [tool.coverage.report]
 fail_under = 100

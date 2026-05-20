@@ -992,6 +992,26 @@ class TestGoodguaTools:
         result = json.loads(await tools.get_prompt_detail("nonexistent"))
         assert "error" in result
 
+    async def test_update_chapter_title_only_creates_snapshot(
+        self, tools: GoodguaTools, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        volume = Volume(work_id=tools.work_id, order_index=1, title="V")
+        session.add(volume)
+        await session.flush()
+        ch = Chapter(work_id=tools.work_id, volume_id=volume.id, order_index=1, title="Old", content="txt")
+        session.add(ch)
+        await session.flush()
+
+        snap_called = False
+        async def mock_snapshot(*args, **kwargs):
+            nonlocal snap_called
+            snap_called = True
+        import app.services.version_service as _vs
+        monkeypatch.setattr(_vs, "create_version_snapshot", mock_snapshot)
+
+        await tools.update_chapter(ch.id, title="New")
+        assert snap_called
+
 
 # ---- billing_service tests ----
 
@@ -1435,3 +1455,157 @@ class TestAgentServiceEdgeCoverage:
     async def test_lines_to_content_empty(self) -> None:
         from app.services.agent_service import _lines_to_content
         assert _lines_to_content([]) == ""
+
+
+class TestWorkspaceStructure:
+    """Cover workspace_structure.py: ordered_chapters_statement, move_volume_to_order."""
+
+    async def test_move_volume_same_order_is_noop(self, session: AsyncSession) -> None:
+        from app.services.workspace_structure import move_volume_to_order
+
+        work = await _make_work(session, "u1")
+        v = Volume(work_id=work.id, title="V1", order_index=1)
+        session.add(v)
+        await session.flush()
+
+        await move_volume_to_order(session, work.id, v, 1)
+        await session.refresh(v)
+        assert v.order_index == 1
+
+    async def test_move_volume_down_shifts_others(self, session: AsyncSession) -> None:
+        from app.services.workspace_structure import move_volume_to_order
+
+        work = await _make_work(session, "u1")
+        v1 = Volume(work_id=work.id, title="V1", order_index=1)
+        v2 = Volume(work_id=work.id, title="V2", order_index=2)
+        v3 = Volume(work_id=work.id, title="V3", order_index=3)
+        session.add_all([v1, v2, v3])
+        await session.flush()
+
+        await move_volume_to_order(session, work.id, v3, 1)
+        await session.flush()
+
+        await session.refresh(v1)
+        await session.refresh(v2)
+        await session.refresh(v3)
+        assert v3.order_index == 1
+        assert v1.order_index == 2
+        assert v2.order_index == 3
+
+
+class TestVersionService:
+    """Cover version_service.py fully."""
+
+    async def _make_chapter(self, session: AsyncSession) -> Chapter:
+        work = await _make_work(session, "u1")
+        v = Volume(work_id=work.id, title="V1", order_index=1)
+        session.add(v)
+        await session.flush()
+        ch = Chapter(
+            work_id=work.id, volume_id=v.id,
+            title="测试章节", content="正文内容", order_index=0,
+        )
+        session.add(ch)
+        await session.flush()
+        return ch
+
+    async def test_create_version_snapshot(self, session: AsyncSession) -> None:
+        from app.services.version_service import create_version_snapshot
+        ch = await self._make_chapter(session)
+        v = await create_version_snapshot(session, ch.id, ch.title, ch.content, None, "human")
+        assert v.version_number == 1
+        assert v.source == "human"
+        assert v.word_count == 4  # "正文内容"
+
+    async def test_get_or_create_human_version_creates_new(self, session: AsyncSession) -> None:
+        from app.services.version_service import get_or_create_human_version
+        ch = await self._make_chapter(session)
+        v = await get_or_create_human_version(session, ch.id, ch.title, "新内容", None)
+        assert v.source == "human"
+        assert v.content == "新内容"
+
+    async def test_get_or_create_human_version_merges_within_window(self, session: AsyncSession) -> None:
+        from app.services.version_service import create_version_snapshot, get_or_create_human_version
+        ch = await self._make_chapter(session)
+        v1 = await create_version_snapshot(session, ch.id, "标题", "旧内容", None, "human")
+        v2 = await get_or_create_human_version(session, ch.id, "标题", "新内容", None)
+        assert v2.id == v1.id
+        assert v2.content == "新内容"
+
+    async def test_get_or_create_human_version_skips_merge_when_ai_inserted(self, session: AsyncSession) -> None:
+        from app.services.version_service import create_version_snapshot, get_or_create_human_version
+        ch = await self._make_chapter(session)
+        await create_version_snapshot(session, ch.id, "标题", "内容", None, "human")
+        await create_version_snapshot(session, ch.id, "标题", "AI内容", None, "ai")
+        v3 = await get_or_create_human_version(session, ch.id, "标题", "新人类内容", None)
+        assert v3.content == "新人类内容"
+        assert v3.version_number == 3
+
+    async def test_get_or_create_human_version_tz_naive_merge(self, session: AsyncSession) -> None:
+        from app.services.version_service import create_version_snapshot, get_or_create_human_version
+        ch = await self._make_chapter(session)
+        v1 = await create_version_snapshot(session, ch.id, "标题", "旧内容", None, "human")
+        v1.created_at = v1.created_at.replace(tzinfo=None)
+        await session.flush()
+        v2 = await get_or_create_human_version(session, ch.id, "标题", "新内容", None)
+        assert v2.id == v1.id
+        assert v2.content == "新内容"
+
+    async def test_get_max_version_number(self, session: AsyncSession) -> None:
+        from app.services.version_service import create_version_snapshot, get_max_version_number
+        ch = await self._make_chapter(session)
+        assert await get_max_version_number(session, ch.id) == 0
+        await create_version_snapshot(session, ch.id, "标题", "内容1", None, "human")
+        assert await get_max_version_number(session, ch.id) == 1
+        await create_version_snapshot(session, ch.id, "标题", "内容2", None, "ai")
+        assert await get_max_version_number(session, ch.id) == 2
+
+    async def test_get_chapter_versions_pagination(self, session: AsyncSession) -> None:
+        from app.services.version_service import create_version_snapshot, get_chapter_versions
+        ch = await self._make_chapter(session)
+        for i in range(5):
+            await create_version_snapshot(session, ch.id, f"v{i}", f"内容{i}", None, "human")
+        items, total, has_more = await get_chapter_versions(session, ch.id, limit=3)
+        assert total == 5
+        assert len(items) == 3
+        assert has_more is True
+        assert items[0].version_number == 5
+
+        items2, total2, has_more2 = await get_chapter_versions(session, ch.id, limit=3, cursor=items[-1].version_number)
+        assert total2 == 5
+        assert len(items2) == 2
+        assert has_more2 is False
+
+    async def test_get_version_content(self, session: AsyncSession) -> None:
+        from app.services.version_service import create_version_snapshot, get_version_content
+        ch = await self._make_chapter(session)
+        v = await create_version_snapshot(session, ch.id, "标题", "内容", None, "human")
+        found = await get_version_content(session, v.id)
+        assert found is not None
+        assert found.content == "内容"
+        assert await get_version_content(session, "nonexistent") is None
+
+    async def test_restore_version(self, session: AsyncSession) -> None:
+        from app.services.version_service import create_version_snapshot, restore_version
+        ch = await self._make_chapter(session)
+        await create_version_snapshot(session, ch.id, "标题", "原始内容", None, "human")
+        ch.content = "修改后内容"
+        await session.flush()
+        v2 = await create_version_snapshot(session, ch.id, "标题", "修改后内容", None, "ai")
+        restored = await restore_version(session, ch.id, v2.id)
+        assert restored is not None
+        await session.refresh(ch)
+        assert ch.content == "修改后内容"
+
+    async def test_restore_version_chapter_not_found(self, session: AsyncSession) -> None:
+        from app.services.version_service import create_version_snapshot, restore_version
+        ch = await self._make_chapter(session)
+        v = await create_version_snapshot(session, ch.id, "标题", "内容", None, "human")
+        result = await restore_version(session, "nonexistent_chapter", v.id)
+        assert result is None
+
+    async def test_restore_version_version_not_found(self, session: AsyncSession) -> None:
+        from app.services.version_service import restore_version
+        ch = await self._make_chapter(session)
+        result = await restore_version(session, ch.id, "nonexistent_version")
+        assert result is None

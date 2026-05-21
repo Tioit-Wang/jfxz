@@ -1811,10 +1811,17 @@ async def reorder_chapters(
         missing_vols = volume_ids - existing_volumes_set
         raise HTTPException(status_code=400, detail=f"Volumes not found: {', '.join(missing_vols)}")
 
+    offset = len(payload.chapters)
     volume_order_counter: dict[str, int] = {}
-    for item in payload.chapters:
+    for i, item in enumerate(payload.chapters):
         chapter = existing_map[item.id]
         chapter.volume_id = item.volume_id
+        chapter.order_index = offset + i
+
+    await session.flush()
+
+    for item in payload.chapters:
+        chapter = existing_map[item.id]
         counter = volume_order_counter.setdefault(item.volume_id, 0)
         chapter.order_index = counter
         volume_order_counter[item.volume_id] = counter + 1

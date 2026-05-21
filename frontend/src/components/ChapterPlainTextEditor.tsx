@@ -26,6 +26,7 @@ type ChapterPlainTextEditorProps = {
   onChange: (value: string) => void;
   onActivateSuggestion: (index: number) => void;
   onQuoteToChat?: (range: string, selectedText: string) => void;
+  onCursorChange?: (offset: number, selectionLength: number | null) => void;
   styleSettings?: EditorStyleSettings;
 };
 
@@ -125,12 +126,15 @@ export function ChapterPlainTextEditor({
   onChange,
   onActivateSuggestion,
   onQuoteToChat,
+  onCursorChange,
   styleSettings
 }: ChapterPlainTextEditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const suggestionsRef = useRef(suggestions);
   const activeIndexRef = useRef(activeSuggestionIndex);
   const activateRef = useRef(onActivateSuggestion);
+  const cursorChangeRef = useRef(onCursorChange);
+  const cursorRafRef = useRef<number | null>(null);
   const [hover, setHover] = useState<HoverState | null>(null);
   const [quoteButton, setQuoteButton] = useState<QuoteButtonState>({ x: 0, y: 0, visible: false, range: { start: 0, end: 0 }, text: "" });
   const quoteBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -138,6 +142,7 @@ export function ChapterPlainTextEditor({
   suggestionsRef.current = suggestions;
   activeIndexRef.current = activeSuggestionIndex;
   activateRef.current = onActivateSuggestion;
+  cursorChangeRef.current = onCursorChange;
 
   const suggestionPlugin = useMemo(
     () =>
@@ -219,8 +224,19 @@ export function ChapterPlainTextEditor({
       onChange(plainText(editor));
     },
     onSelectionUpdate: ({ editor }) => {
-      if (!onQuoteToChat) return;
       const { from, to, empty } = editor.state.selection;
+
+      if (cursorChangeRef.current) {
+        const pos = editor.state.selection.$head.pos;
+        const offset = editor.state.doc.textBetween(0, pos, '\n').length;
+        const selectionLen = empty ? null : editor.state.doc.textBetween(from, to, '\n').length;
+        if (cursorRafRef.current) cancelAnimationFrame(cursorRafRef.current);
+        cursorRafRef.current = requestAnimationFrame(() => {
+          cursorChangeRef.current?.(offset, selectionLen);
+        });
+      }
+
+      if (!onQuoteToChat) return;
       if (empty) {
         setQuoteButton((prev) => (prev.visible ? { ...prev, visible: false } : prev));
         return;
@@ -256,6 +272,12 @@ export function ChapterPlainTextEditor({
   useEffect(() => {
     editor?.setEditable(!disabled);
   }, [disabled, editor]);
+
+  useEffect(() => {
+    return () => {
+      if (cursorRafRef.current) cancelAnimationFrame(cursorRafRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!editor) return;

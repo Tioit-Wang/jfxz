@@ -6,7 +6,7 @@ import { ChapterPlainTextEditor } from "@/components/ChapterPlainTextEditor";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import type { Chapter } from "@/domain";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type SaveStatus = "loading" | "dirty" | "saving" | "saved" | "offline" | "error" | "analyzing" | "analyzed";
 
@@ -212,6 +212,9 @@ export function WorkspaceEditorPanel({
   onAcceptRemoteUpdate,
 }: WorkspaceEditorPanelProps) {
   const readingMinutes = count > 0 ? Math.max(1, Math.ceil(count / 500)) : 0;
+  const [cursorCharOffset, setCursorCharOffset] = useState(0);
+  const [selectedCount, setSelectedCount] = useState<number | null>(null);
+  const totalLineCount = useMemo(() => (content ? content.split("\n").length : 0), [content]);
   const [formatPopupOpen, setFormatPopupOpen] = useState(false);
   const [formatOptions, setFormatOptions] = useState<FormatOptions>(loadFormatOptions);
   const formatPopupRef = useRef<HTMLDivElement>(null);
@@ -241,6 +244,11 @@ export function WorkspaceEditorPanel({
     onContentChange(formatted);
     setFormatPopupOpen(false);
   }, [content, formatOptions, onContentChange]);
+
+  const handleCursorChange = useCallback((offset: number, selectionLen: number | null) => {
+    setCursorCharOffset(offset);
+    setSelectedCount(selectionLen);
+  }, []);
 
   return (
     <main data-testid="workspace-editor-panel" className="relative z-0 flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-white">
@@ -406,6 +414,7 @@ export function WorkspaceEditorPanel({
                 onChange={onContentChange}
                 onActivateSuggestion={onActivateSuggestion}
                 onQuoteToChat={onQuoteToChat}
+                onCursorChange={handleCursorChange}
                 styleSettings={styleSettings}
               />
             </>
@@ -428,9 +437,18 @@ export function WorkspaceEditorPanel({
             {statusLabel}
           </span>
           <span>本章字数: {count}</span>
+          <span>行: {totalLineCount}</span>
           <span>预计阅读: {readingMinutes} 分钟</span>
         </div>
-        <div>今日字数: {todayCount}</div>
+        <div className="flex items-center gap-3">
+          {selectedCount !== null ? (
+            <span>已选中: {selectedCount}字</span>
+          ) : (
+            <span>光标前: {cursorCharOffset}字</span>
+          )}
+          <span className="h-3 w-px bg-[#ebebeb]" />
+          <span>今日码字数: {todayCount}</span>
+        </div>
       </div>
     </main>
   );

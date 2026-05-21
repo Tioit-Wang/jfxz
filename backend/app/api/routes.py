@@ -565,7 +565,10 @@ async def user_from_token(session: AsyncSession, token: str | None, token_type: 
         token_iat = token_data[2].get("iat")
         if isinstance(token_iat, (int, float)):
             token_issued = datetime.fromtimestamp(token_iat, tz=UTC)
-            if token_issued < user.password_changed_at:
+            pwd_at = user.password_changed_at
+            if pwd_at.tzinfo is None:
+                pwd_at = pwd_at.replace(tzinfo=UTC)
+            if token_issued < pwd_at:
                 raise HTTPException(status_code=401, detail="password changed")
     return user
 

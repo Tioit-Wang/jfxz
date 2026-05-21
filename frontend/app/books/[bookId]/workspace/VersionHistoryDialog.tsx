@@ -205,7 +205,7 @@ export default function VersionHistoryDialog({
                     {selectedVersion.sourceDetail && ` · ${selectedVersion.sourceDetail}`}
                   </p>
                 </div>
-                <ScrollArea className="flex-1">
+                <ScrollArea className="flex-1 min-h-0">
                   <div className="px-6 py-4 whitespace-pre-wrap text-sm leading-relaxed font-[family-name:var(--font-serif,serif)] text-[#171717]">
                     {selectedVersion.content || "(空)"}
                   </div>

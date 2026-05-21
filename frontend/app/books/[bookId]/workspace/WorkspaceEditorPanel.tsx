@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, Clock, Edit3, Eye, Loader2, RefreshCw, Settings, Trash2, Type, UserCircle, Wand2, type LucideIcon } from "lucide-react";
+import { AlertCircle, Edit3, Eye, History, Loader2, RefreshCw, Settings, Trash2, Type, UserCircle, Wand2, type LucideIcon } from "lucide-react";
 import type { ApiSuggestion } from "@/api";
 import { ChapterPlainTextEditor } from "@/components/ChapterPlainTextEditor";
 import { Switch } from "@/components/ui/switch";
@@ -52,6 +52,7 @@ type WorkspaceEditorPanelProps = {
 
 type FormatOptions = {
   removeBlankLines: boolean;
+  removeTrailingPeriods: boolean;
   splitBySemicolon: boolean;
   splitByPeriod: boolean;
   englishToChinesePunctuation: boolean;
@@ -62,6 +63,30 @@ type FormatOptions = {
   deduplicatePunctuation: boolean;
   cleanQuotedTerminalPunct: boolean;
 };
+
+const FORMAT_OPTIONS_KEY = "goodgua-format-options";
+
+const DEFAULT_FORMAT_OPTIONS: FormatOptions = {
+  removeBlankLines: false,
+  removeTrailingPeriods: false,
+  splitBySemicolon: false,
+  splitByPeriod: false,
+  englishToChinesePunctuation: false,
+  removeExtraSpaces: false,
+  convertCornerBrackets: false,
+  fullwidthToHalfwidth: false,
+  mergeBlankLines: false,
+  deduplicatePunctuation: false,
+  cleanQuotedTerminalPunct: false,
+};
+
+function loadFormatOptions(): FormatOptions {
+  try {
+    const raw = localStorage.getItem(FORMAT_OPTIONS_KEY);
+    if (raw) return { ...DEFAULT_FORMAT_OPTIONS, ...JSON.parse(raw) };
+  } catch {}
+  return { ...DEFAULT_FORMAT_OPTIONS };
+}
 
 function applyFormatting(text: string, options: FormatOptions): string {
   let result = text;
@@ -134,7 +159,15 @@ function applyFormatting(text: string, options: FormatOptions): string {
     result = result.replace(/\n{3,}/g, "\n\n");
   }
 
-  // 10. Remove all blank lines
+  // 10. Remove trailing periods at end of each line
+  if (options.removeTrailingPeriods) {
+    result = result
+      .split("\n")
+      .map((line) => line.replace(/。+$/, ""))
+      .join("\n");
+  }
+
+  // 11. Remove all blank lines
   if (options.removeBlankLines) {
     result = result
       .split("\n")
@@ -180,19 +213,14 @@ export function WorkspaceEditorPanel({
 }: WorkspaceEditorPanelProps) {
   const readingMinutes = count > 0 ? Math.max(1, Math.ceil(count / 500)) : 0;
   const [formatPopupOpen, setFormatPopupOpen] = useState(false);
-  const [formatOptions, setFormatOptions] = useState<FormatOptions>({
-    removeBlankLines: false,
-    splitBySemicolon: false,
-    splitByPeriod: false,
-    englishToChinesePunctuation: false,
-    removeExtraSpaces: false,
-    convertCornerBrackets: false,
-    fullwidthToHalfwidth: false,
-    mergeBlankLines: false,
-    deduplicatePunctuation: false,
-    cleanQuotedTerminalPunct: false,
-  });
+  const [formatOptions, setFormatOptions] = useState<FormatOptions>(loadFormatOptions);
   const formatPopupRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(FORMAT_OPTIONS_KEY, JSON.stringify(formatOptions));
+    } catch {}
+  }, [formatOptions]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -218,36 +246,6 @@ export function WorkspaceEditorPanel({
     <main data-testid="workspace-editor-panel" className="relative z-0 flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-white">
       <div className="z-10 flex h-14 shrink-0 items-center justify-between border-b border-[#ebebeb] bg-white px-6">
         <div className="flex items-center gap-4">
-          <button
-            className="rounded-full p-1.5 text-[#888888] transition-colors hover:bg-[#f5f5f5] hover:text-[#171717]"
-            onClick={onOpenShare}
-            aria-label="分享与预览"
-            title="分享与预览"
-          >
-            <Eye size={16} />
-          </button>
-          <button
-            className="rounded-full p-1.5 text-[#888888] transition-colors hover:bg-[#f7d4d6] hover:text-[#ee0000]"
-            onClick={onDeleteChapter}
-            aria-label="删除当前章节"
-          >
-            <Trash2 size={16} />
-          </button>
-          <button
-            className="rounded-full p-1.5 text-[#888888] transition-colors hover:bg-[#f5f5f5] hover:text-[#171717]"
-            onClick={onOpenEditorSettings}
-            aria-label="编辑器设置"
-          >
-            <Settings size={16} />
-          </button>
-          <button
-            className="rounded-full p-1.5 text-[#888888] transition-colors hover:bg-[#f5f5f5] hover:text-[#171717]"
-            onClick={onOpenVersionHistory}
-            aria-label="历史版本"
-            title="历史版本"
-          >
-            <Clock size={16} />
-          </button>
           <div className="relative">
             <button
               className="rounded-full p-1.5 text-[#888888] transition-colors hover:bg-[#f5f5f5] hover:text-[#171717]"
@@ -263,6 +261,7 @@ export function WorkspaceEditorPanel({
                 className="absolute left-0 top-full z-50 mt-2 w-64 rounded-xl bg-white p-4 shadow-[0px_8px_16px_-4px_rgba(0,0,0,0.06),0px_24px_32px_-8px_rgba(0,0,0,0.06)] ring-1 ring-inset ring-[#00000014]"
               >
                 {([
+                  ["removeTrailingPeriods", "移除行尾句号"],
                   ["removeBlankLines", "移除空白行"],
                   ["splitBySemicolon", "按；换行"],
                   ["splitByPeriod", "按。换行"],
@@ -297,6 +296,36 @@ export function WorkspaceEditorPanel({
               </div>
             )}
           </div>
+          <button
+            className="rounded-full p-1.5 text-[#888888] transition-colors hover:bg-[#f5f5f5] hover:text-[#171717]"
+            onClick={onOpenEditorSettings}
+            aria-label="编辑器设置"
+          >
+            <Settings size={16} />
+          </button>
+          <button
+            className="rounded-full p-1.5 text-[#888888] transition-colors hover:bg-[#f5f5f5] hover:text-[#171717]"
+            onClick={onOpenVersionHistory}
+            aria-label="历史版本"
+            title="历史版本"
+          >
+            <History size={16} />
+          </button>
+          <button
+            className="rounded-full p-1.5 text-[#888888] transition-colors hover:bg-[#f5f5f5] hover:text-[#171717]"
+            onClick={onOpenShare}
+            aria-label="分享与预览"
+            title="分享与预览"
+          >
+            <Eye size={16} />
+          </button>
+          <button
+            className="rounded-full p-1.5 text-[#888888] transition-colors hover:bg-[#f7d4d6] hover:text-[#ee0000]"
+            onClick={onDeleteChapter}
+            aria-label="删除当前章节"
+          >
+            <Trash2 size={16} />
+          </button>
         </div>
         <div className="flex items-center gap-2">
           <button

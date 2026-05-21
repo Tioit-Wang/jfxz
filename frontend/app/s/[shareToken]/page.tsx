@@ -8,9 +8,12 @@ export const metadata: Metadata = {
 
 export default async function PublicSharePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ shareToken: string }>;
+  searchParams: Promise<{ chapterId?: string }>;
 }) {
   const { shareToken } = await params;
-  return <PublicPreviewShell shareToken={shareToken} />;
+  const { chapterId } = await searchParams;
+  return <PublicPreviewShell shareToken={shareToken} chapterId={chapterId} />;
 }

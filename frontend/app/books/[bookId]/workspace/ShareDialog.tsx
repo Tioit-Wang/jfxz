@@ -56,7 +56,7 @@ export default function ShareDialog({
     ? `${window.location.origin}/books/${bookId}/preview${chapterParam}`
     : "";
   const publicUrl = shareToken
-    ? `${typeof window !== "undefined" ? window.location.origin : ""}/s/${shareToken}`
+    ? `${typeof window !== "undefined" ? window.location.origin : ""}/s/${shareToken}${chapterParam}`
     : "";
 
   return (

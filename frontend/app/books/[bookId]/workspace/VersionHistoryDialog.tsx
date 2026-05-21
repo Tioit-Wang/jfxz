@@ -109,16 +109,16 @@ export default function VersionHistoryDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-6xl w-[90vw] max-w-6xl h-[82vh] flex flex-col p-0 gap-0 overflow-hidden rounded-xl bg-white shadow-[0px_1px_1px_rgba(0,0,0,0.02),0px_8px_16px_-4px_rgba(0,0,0,0.04),0px_24px_32px_-8px_rgba(0,0,0,0.06)] ring-1 ring-inset ring-[#00000014] [&_[data-slot=dialog-close]]:rounded-full [&_[data-slot=dialog-close]]:text-[#888888] [&_[data-slot=dialog-close]]:hover:bg-[#f5f5f5] [&_[data-slot=dialog-close]]:hover:text-[#171717]">
-        <DialogHeader className="border-b border-[#ebebeb] px-6 py-5">
+        <DialogHeader className="shrink-0 border-b border-[#ebebeb] px-6 py-5">
           <DialogTitle className="text-xl font-semibold tracking-[-0.6px] text-[#171717]">历史版本</DialogTitle>
           <DialogDescription className="mt-1 text-sm leading-5 text-[#888888]">
             共 {total} 个版本。点击查看内容，可恢复到任意历史版本。
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-1 min-h-0 border-t border-[#ebebeb]">
+        <div className="flex flex-1 min-h-0 overflow-hidden">
           {/* Left: version list */}
-          <div className="w-[25%] border-r border-[#ebebeb] flex flex-col">
+          <div className="w-[25%] shrink-0 border-r border-[#ebebeb] flex flex-col overflow-hidden">
             <ScrollArea className="flex-1">
               {loadingList && versions.length === 0 ? (
                 <div className="p-4 space-y-3">
@@ -188,7 +188,7 @@ export default function VersionHistoryDialog({
           </div>
 
           {/* Right: content preview */}
-          <div className="flex-1 flex flex-col min-w-0">
+          <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
             {loadingContent ? (
               <div className="p-6 space-y-4">
                 <Skeleton className="h-6 w-48 rounded-md" />
@@ -219,7 +219,7 @@ export default function VersionHistoryDialog({
           </div>
         </div>
 
-        <DialogFooter className="mx-0 mb-0 rounded-none bg-white flex items-center justify-end gap-4 border-t border-[#ebebeb] px-6 py-5">
+        <DialogFooter className="shrink-0 mx-0 mb-0 flex-row rounded-none bg-white items-center justify-end gap-4 border-t border-[#ebebeb] px-6 py-5">
           <Button variant="outline" className="rounded-full border-[#ebebeb] bg-white text-[#171717] hover:bg-[#fafafa]" onClick={() => onOpenChange(false)}>
             关闭
           </Button>

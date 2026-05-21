@@ -254,6 +254,40 @@ def test_tool_result_status_detects_errors() -> None:
     assert _tool_result_status('[{"name": "test"}]') == "completed"
 
 
+def test_truncate_chapter_result_short_content_unchanged() -> None:
+    from app.api.routes import _CONTENT_PREVIEW_LIMIT, _truncate_chapter_result
+
+    data = json.dumps({"id": "abc", "title": "测试", "content": "短内容"})
+    assert _truncate_chapter_result(data) == data
+
+
+def test_truncate_chapter_result_long_content_truncated() -> None:
+    from app.api.routes import _CONTENT_PREVIEW_LIMIT, _truncate_chapter_result
+
+    long_content = "x" * (_CONTENT_PREVIEW_LIMIT + 500)
+    data = json.dumps({"id": "abc", "title": "测试", "content": long_content})
+    result = _truncate_chapter_result(data)
+    parsed = json.loads(result)
+    assert len(parsed["content"]) == _CONTENT_PREVIEW_LIMIT
+    assert parsed["content_truncated"] is True
+    assert parsed["content_total_length"] == len(long_content)
+
+
+def test_truncate_chapter_result_non_chapter_json_fallback() -> None:
+    from app.api.routes import _truncate_chapter_result
+
+    data = json.dumps({"id": "abc", "name": "角色" + "x" * 2000})
+    result = _truncate_chapter_result(data)
+    assert len(result) == 1000
+
+
+def test_truncate_chapter_result_invalid_json_fallback() -> None:
+    from app.api.routes import _truncate_chapter_result
+
+    result = _truncate_chapter_result("not json at all" + "x" * 2000)
+    assert len(result) == 1000
+
+
 def test_finalize_tool_blocks_marks_unfinished_as_error() -> None:
     from app.api.routes import finalize_tool_blocks
 

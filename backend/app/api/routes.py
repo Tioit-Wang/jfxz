@@ -2370,6 +2370,26 @@ def append_thinking_block(blocks: list[dict[str, Any]], content: str) -> None:
     blocks.append({"type": "thinking", "content": content})
 
 
+_CONTENT_PREVIEW_LIMIT = 2000
+
+
+def _truncate_chapter_result(raw: str) -> str:
+    """智能截断 get_chapter 结果：保留 JSON 完整性，仅截断 content 字段。"""
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return raw[:1000]
+    if not isinstance(data, dict) or "content" not in data:
+        return raw[:1000]
+    content = data.get("content", "")
+    if len(content) <= _CONTENT_PREVIEW_LIMIT:
+        return raw
+    data["content"] = content[:_CONTENT_PREVIEW_LIMIT]
+    data["content_truncated"] = True
+    data["content_total_length"] = len(content)
+    return json.dumps(data, ensure_ascii=False)
+
+
 def _tool_result_status(result_text: str) -> str:
     """Return 'error' if the tool result JSON contains an error key, else 'completed'."""
     if not result_text:
@@ -2739,7 +2759,12 @@ async def send_chat_message(
                             result_text = ""
                             if event.tool and hasattr(event.tool, "result") and event.tool.result:
                                 raw = str(event.tool.result)
-                                result_text = raw[:1000] if tool_name in _DETAIL_TOOLS else raw
+                                if tool_name == "get_chapter":
+                                    result_text = _truncate_chapter_result(raw)
+                                elif tool_name in _DETAIL_TOOLS:
+                                    result_text = raw[:1000]
+                                else:
+                                    result_text = raw
                             status = _tool_result_status(result_text)
                             tool_results.append(
                                 {"tool": tool_name, "display": display, "result": result_text}

@@ -265,6 +265,7 @@ function renderChapterDetail(resultStr: string) {
   const content = stringValue(data.content);
   const wordCount = numberValue(data.word_count);
   const totalLines = numberValue(data.total_lines);
+  const contentTruncated = !!data.content_truncated;
 
   const metaParts: string[] = [];
   if (wordCount != null) metaParts.push(`${wordCount} 字`);
@@ -303,6 +304,9 @@ function renderChapterDetail(resultStr: string) {
               </div>
             ))}
           </div>
+          {contentTruncated ? (
+            <p className="mt-1 text-[10px] text-neutral-400">正文过长，仅显示前 {content.length} 字符</p>
+          ) : null}
         </div>
       ) : null}
     </div>
